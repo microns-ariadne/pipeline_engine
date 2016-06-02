@@ -11,6 +11,10 @@
 # echo matlab -nodisplay -nojvm  -r "ws_np_prepare $CNN_CROP_LEG_STR $IN_OUTER_MASK_FILENAME $IN_BORDER_MASK_FILENAME $IN_BLOCKPATH_META $IN_BLOCKPATH_PROBS $OUT_BLOCKPATH_WS $OUT_BLOCKPATH_NP; quit;"
 # matlab -nodisplay -nojvm  -r "ws_np_prepare $CNN_CROP_LEG_STR $IN_OUTER_MASK_FILENAME $IN_BORDER_MASK_FILENAME $IN_BLOCKPATH_META $IN_BLOCKPATH_PROBS $OUT_BLOCKPATH_WS $OUT_BLOCKPATH_NP; quit;"
 
-echo matlab -nodisplay -nojvm  -r "ws_np_prepare $1 $2 $3 $4 $5 $6 $7; quit;"
-matlab -nodisplay -nojvm  -r "ws_np_prepare $1 $2 $3 $4 $5 $6 $7; quit;"
+PROC_SUCCESS_STR='-= PROC SUCCESS =-'
 
+echo sh -c "matlab -nodisplay -nojvm -r \
+    \"try, ws_np_prepare $1 $2 $3 $4 $5; disp('$PROC_SUCCESS_STR'); catch err, disp(getReport(err,'extended')), end, quit\""
+
+sh -c "matlab -nodisplay -nojvm -r \
+    \"try, ws_np_prepare $1 $2 $3 $4 $5; disp('$PROC_SUCCESS_STR'); catch err, disp(getReport(err,'extended')), end, quit\"" < /dev/null

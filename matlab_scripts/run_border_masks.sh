@@ -8,5 +8,10 @@
 # echo matlab -nodisplay -nojvm  -r "border_masks $BORDER_WIDTH $CLOSE_WIDTH $INPUT $OUTPUT; quit;"
 # matlab -nodisplay -nojvm  -r "border_masks $BORDER_WIDTH $CLOSE_WIDTH $INPUT $OUTPUT; quit;"
 
-echo matlab -nodisplay -nojvm  -r "border_masks $1 $2 $3 $4; quit;"
-matlab -nodisplay -nojvm  -r "border_masks $1 $2 $3 $4; quit;"
+PROC_SUCCESS_STR='-= PROC SUCCESS =-'
+
+echo sh -c "matlab -nodisplay -nojvm -r \
+    \"try, border_masks $1 $2 $3 $4; catch err, disp(getReport(err,'extended')), end, quit\""
+
+sh -c "matlab -nodisplay -nojvm -r \
+    \"try, border_masks $1 $2 $3 $4; disp('$PROC_SUCCESS_STR'); catch err, disp(getReport(err,'extended')), end, quit\""  < /dev/null

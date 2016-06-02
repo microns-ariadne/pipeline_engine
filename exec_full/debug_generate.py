@@ -9,245 +9,102 @@ import math
 import numpy as np
 import cv2
 import h5py
+import cilk_rw
 
 from scipy.ndimage.morphology import grey_dilation
 
-IS_GENERATE_DATA = 0
+from pipeline_common import *
 
-IS_GENERATE_PROBS = 0
+IS_GENERATE_EM = 0
+
+#IS_GENERATE_PROBS = 0
 
 IS_GENERATE_PROBS_WS = 0
 
 IS_GENERATE_PROBS_NP = 0
-
-IS_GENERATE_WS = 0
-
-IS_GENERATE_NP = 0
-
-IS_GENERATE_NP_MERGE = 1
-
-def get_segments(block_path):
-    filenames = os.listdir(block_path)
-    
-    seg_names = []
-
-    for filename in filenames:
-        if not os.path.isdir(os.path.join(block_path, filename)):
-            continue
-        if filename.find('_segment_') == -1:
-            continue
-        if filename.find('_type_complex') != -1:
-            continue
-
-        seg_names.append(filename)
-
-    seg_names.sort()
-
-    res_segments = []
-    for seg_name in seg_names:
-
-        parts = seg_name.split('_range_')[1].split('_type_')[0].split('_')
-        start_id = int(parts[0])
-        finish_id = int(parts[1]) + 1
-        
-        res_segments.append((seg_name, start_id, finish_id))
-
-    return res_segments
-    
-def is_segments_match(segments_1, segments_2):
-    
-    assert(len(segments_1) == len(segments_2))
-    
-    for i in xrange(len(segments_1)):
-        segment_1 = segments_1[i]
-        segment_2 = segments_2[i]
-        
-        seg_name_1 = segment_1[0].split('_type_')[0]
-        start_id_1 = segment_1[1]
-        finish_id_1 = segment_1[2]
-        
-        seg_name_2 = segment_2[0].split('_type_')[0]
-        start_id_2 = segment_2[1]
-        finish_id_2 = segment_2[2]
-        
-        assert(start_id_1 == start_id_2)
-        assert(finish_id_1 == finish_id_2)
-        assert(seg_name_1 == seg_name_2)
-        
-    return True
-    
-def cnn_fix_for_block_sizes(cnn_patch_leg, 
-                            block_n_depth, 
-                            block_n_rows, 
-                            block_n_cols):
-    
-    block_n_rows += cnn_patch_leg * 2
-    block_n_cols += cnn_patch_leg * 2
-    
-    return (block_n_depth, block_n_rows, block_n_cols)
-
-def debug_generate_data(
-    block_path_debug,
-    out_prefix,
-    block_Z,
-    block_X,
-    block_Y,
-    block_path_data, 
-    segments,
-    block_n_depth,
-    block_n_rows,
-    block_n_cols,
-    cnn_patch_leg):
-
-    print 'debug_generate_data: start'
-    
-    (cnn_block_n_depth,
-     cnn_block_n_rows,
-     cnn_block_n_cols) = cnn_fix_for_block_sizes(cnn_patch_leg, block_n_depth, block_n_rows, block_n_cols)
-    
-    print '  -- block_size [ORIG_SIZE]: [%d,%d,%d]' % (block_n_depth, block_n_rows, block_n_cols)
-    print '  -- block_size [CNN_FIXED]: [%d,%d,%d]' % (cnn_block_n_depth, cnn_block_n_rows, cnn_block_n_cols)
-    
-    block_data = np.zeros((block_n_depth, block_n_rows, block_n_cols), dtype = np.uint8)
-    
-    for segment in segments:
-        seg_name = segment[0]
-        start_id = segment[1]
-        finish_id = segment[2]
-        
-        print '  -- segment[%d-%d]: %s' % (start_id, finish_id, seg_name,)
-        
-        seg_path_data = os.path.join(block_path_data, '%s' % (seg_name,))
-        
-        seg_files = os.listdir(seg_path_data)
-        seg_files.sort()
-        
-        for file_idx, seg_file in enumerate(seg_files):
-            seg_filepath = os.path.join(seg_path_data, seg_file)
-            
-            print '  -- Read[%d]: %s' % (file_idx, seg_filepath)
-            
-            im_data = cv2.imread(seg_filepath, cv2.IMREAD_UNCHANGED)
-            
-            block_data[start_id + file_idx, :, :] = im_data[cnn_patch_leg:-cnn_patch_leg, cnn_patch_leg:-cnn_patch_leg]
-            
-    block_path_debug_data = os.path.join(block_path_debug, 'data')
-    
-    if not os.path.exists(block_path_debug_data):
-        os.makedirs(block_path_debug_data)
-        
-    for cur_depth in xrange(block_n_depth):
-        im_data = block_data[cur_depth, :, :]
-        
-        out_filename = '%s_block_%.4d_%.4d_%.4d_%.4d_data.png' % (
-            out_prefix,
-            block_Z,
-            block_X,
-            block_Y,
-            cur_depth,)
-            
-        out_filepath = os.path.join(block_path_debug_data, out_filename)
-        
-        print '  -- Write[%d]: %s' % (cur_depth, out_filepath)
-        
-        cv2.imwrite(out_filepath, im_data)
-    
-    
-    print 'debug_generate_data: finish'
-
-def debug_generate_probs(
-    block_path_debug,
-    out_dirname,
-    out_prefix,
-    block_Z,
-    block_X,
-    block_Y,
-    block_path_probs, 
-    segments_probs,
-    block_n_depth,
-    block_n_rows,
-    block_n_cols):
-
-    print 'debug_generate_probs: start [out_dirname = %s]' % (out_dirname,)
-
-    print '  -- block_size: [%d,%d,%d]' % (block_n_depth, block_n_rows, block_n_cols)
-
-    block_data = np.zeros((block_n_depth, block_n_rows, block_n_cols), dtype = np.uint8)
-
-    for segment in segments_probs:
-        seg_name = segment[0]
-        start_id = segment[1]
-        finish_id = segment[2]
-
-        print '  -- segment[%d-%d]: %s' % (start_id, finish_id, seg_name,)
-
-        seg_path_probs = os.path.join(block_path_probs, '%s' % (seg_name,))
-
-        seg_files = os.listdir(seg_path_probs)
-        seg_files.sort()
-
-        for file_idx, seg_file in enumerate(seg_files):
-            seg_filepath = os.path.join(seg_path_probs, seg_file)
-
-            print '  -- Read[%d]: %s' % (file_idx, seg_filepath)
-
-            im_probs = cv2.imread(seg_filepath, cv2.IMREAD_UNCHANGED)
-
-            block_data[start_id + file_idx, :, :] = im_probs
-
-    block_path_debug_probs = os.path.join(block_path_debug, out_dirname)
-
-    if not os.path.exists(block_path_debug_probs):
-        os.makedirs(block_path_debug_probs)
-
-    for cur_depth in xrange(block_n_depth):
-        im = block_data[cur_depth, :, :]
-        
-        out_filename = '%s_block_%.4d_%.4d_%.4d_%.4d_%s.png' % (
-            out_prefix,
-            block_Z,
-            block_X,
-            block_Y,
-            cur_depth,
-            out_dirname,)
-        
-        out_filepath = os.path.join(block_path_debug_probs, out_filename)
-        
-        print '  -- Write[%d]: %s' % (cur_depth, out_filepath)
-        
-        cv2.imwrite(out_filepath, im)
-        
-    print 'debug_generate_probs: finish [out_dirname = %s]' % (out_dirname,)
-
-# def normalize_3D_block_uint32(block_data, in_min = None, in_max = None):
-#     block_data = block_data.astype(np.float)
-#     
-#     if in_min == None:
-#         min_value = block_data.min()
-#     else:
-#         min_value = in_min
-#     
-#     block_data -= min_value
-#     
-#     if in_max == None:
-#         max_value = block_data.max()
-#     else:
-#         max_value = in_max
-#     
-#     block_data /= max_value
-#     
-#     block_data *= (np.iinfo(np.uint32).max - 10000)
-#     
-#     block_data = block_data.astype(np.uint32) + 100
-#     
-#     return block_data
  
+IS_GENERATE_WS = 0
+ 
+IS_GENERATE_NP = 1
+
+IS_GENERATE_MERGE = 0
+
+def fix_merge_Z_overlap(
+    block_depth_id,
+    Z_start_idx, 
+    Z_finish_idx,
+    MERGE_PREPROCESS_Z_OVERLAP):
+    
+    start_idx = Z_start_idx
+    finish_idx = Z_finish_idx
+    
+    z_pad_left = MERGE_PREPROCESS_Z_OVERLAP
+    z_pad_right = MERGE_PREPROCESS_Z_OVERLAP
+                
+    if block_depth > BLOCKS_MIN_DEPTH:
+        start_idx += z_pad_left
+    
+    if block_depth < BLOCKS_MAX_DEPTH:
+        finish_idx -= z_pad_right
+    
+    return (start_idx, finish_idx)
+
+def get_real_data_indices(
+    block_depth_id,
+    block_row_id,
+    block_col_id,
+    Z_start_idx,
+    Z_finish_idx,
+    X_start_idx,
+    X_finish_idx,
+    Y_start_idx,
+    Y_finish_idx):
+    
+    data_Z_start_idx = 0
+    data_Z_finish_idx = BLOCK_N_IMAGES
+    
+    Z_len = Z_finish_idx - Z_start_idx
+    assert(Z_len <= data_Z_finish_idx), 'unexpected Z_len = %d' % (Z_len,)
+    if Z_len < data_Z_finish_idx:
+        if block_depth_id == BLOCKS_MIN_DEPTH:
+            data_Z_start_idx += CNN_DEPTH_LEG
+            
+        if block_depth_id == BLOCKS_MAX_DEPTH:
+            data_Z_finish_idx -= CNN_DEPTH_LEG
+    
+    data_X_start_idx = 0
+    data_X_finish_idx = BLOCK_N_ROWS / BLOCK_SUB_SAMPLE
+    
+    X_len = X_finish_idx - X_start_idx
+    assert(X_len <= data_X_finish_idx), 'unexpected X_len = %d' % (X_len,)
+    if X_len < data_X_finish_idx:
+        if block_row_id == BLOCKS_MIN_ROW_ID:
+            data_X_start_idx += CNN_PATCH_LEG
+            
+        if block_row_id == BLOCKS_MAX_ROW_ID:
+            data_X_finish_idx -= CNN_PATCH_LEG
+    
+    data_Y_start_idx = 0
+    data_Y_finish_idx = BLOCK_N_COLS / BLOCK_SUB_SAMPLE
+    
+    Y_len = Y_finish_idx - Y_start_idx
+    assert(Y_len <= data_Y_finish_idx), 'unexpected Y_len = %d' % (Y_len,)
+    if Y_len < data_Y_finish_idx:
+        if block_col_id == BLOCKS_MIN_COL_ID:
+            data_Y_start_idx += CNN_PATCH_LEG
+            
+        if block_col_id == BLOCKS_MAX_COL_ID:
+            data_Y_finish_idx -= CNN_PATCH_LEG
+            
+    return ((data_Z_start_idx, data_Z_finish_idx), 
+            (data_X_start_idx, data_X_finish_idx), 
+            (data_Y_start_idx, data_Y_finish_idx))
+    
 def normalize_3D_block_uint32(block_data):
     block_data = block_data.astype(np.uint64)
-    block_data *= 1000000 # Magic
-    block_data %= 16777213 # the largest prime that is smaller than a cube of 256
+    block_data *= 1000000
+    block_data %= 16777213
     block_data = block_data.astype(np.uint32)
-    
     return block_data
     
 def get_RGB(im):
@@ -284,445 +141,483 @@ def get_RGB(im):
             
     return im_rgb
 
-def debug_generate_ws(
-    block_path_debug,
-    out_prefix,
-    block_Z,
-    block_X,
-    block_Y,
-    block_path_ws, 
-    segments_ws,
-    block_n_depth,
-    block_n_rows,
-    block_n_cols):
+def debug_generate_from_block(
+    block_depth_id, 
+    block_row_id, 
+    block_col_id,
+    block_path,
+    block_debug_path,
+    postfix,
+    is_RGB,
+    is_padded,
+    is_EM):
 
-    print 'debug_generate_ws: start'
-
-    print '  -- block_size: [%d,%d,%d]' % (block_n_depth, block_n_rows, block_n_cols)
-
-    block_data = np.zeros((block_n_depth, block_n_rows, block_n_cols), dtype = np.uint32)
-
-    for segment in segments_ws:
-        seg_name = segment[0]
-        start_id = segment[1]
-        finish_id = segment[2]
-        
-        print '  -- segment[%d-%d]: %s' % (start_id, finish_id, seg_name,)
-        
-        seg_path_ws = os.path.join(block_path_ws, '%s' % (seg_name,))
-        
-        seg_files = os.listdir(seg_path_ws)
-        seg_files.sort()
-        
-        for file_idx, seg_file in enumerate(seg_files):
-            seg_filepath = os.path.join(seg_path_ws, seg_file)
-            
-            print '  -- Read[%d]: %s' % (file_idx, seg_filepath)
-
-            im_ws = cv2.imread(seg_filepath, cv2.IMREAD_UNCHANGED)
-            
-            im_ws[:,:,2] *= (1<<16)
-            im_ws[:,:,1] *= (1<<8)
-            im_ws[:,:,0] = im_ws[:,:,0] + im_ws[:,:,1] + im_ws[:,:,2]
-            
-            block_data[start_id + file_idx, :, :] = im_ws[:,:,0] + im_ws[:,:,1] + im_ws[:,:,2]
-        
-    block_data = normalize_3D_block_uint32(block_data)
-        
-    block_path_debug_ws = os.path.join(block_path_debug, 'ws')
+    print 'debug_generate_from_block: start'
     
-    if not os.path.exists(block_path_debug_ws):
-        os.makedirs(block_path_debug_ws)
+    block_size = get_block_cnn_depth_size(
+        block_depth_id, 
+        block_row_id, 
+        block_col_id)
+
+    block_rows = get_block_cnn_row_size(
+        block_depth_id, 
+        block_row_id, 
+        block_col_id)
+
+    block_cols = get_block_cnn_col_size(
+        block_depth_id, 
+        block_row_id, 
+        block_col_id)
     
-    for cur_depth in xrange(block_n_depth):
-        im_ws = block_data[cur_depth, :, :]
-            
-        im_ws_rgb = get_RGB(im_ws)
-            
-        out_filename = '%s_block_%.4d_%.4d_%.4d_%.4d_ws.png' % (
-            out_prefix,
-            block_Z,
-            block_X,
-            block_Y,
-            cur_depth)
+    print '  -- block_size: [%d,%d,%d]' % (
+        block_size, 
+        block_rows, 
+        block_cols)
+    
+    if is_RGB:
+        block_data = cilk_rw.read_rgb_labels(block_path)
+    else:
+        block_data = cilk_rw.read_probabilities_int(block_path)
+    
+    if is_EM:
+        assert(is_RGB == False)
         
-        out_filepath = os.path.join(block_path_debug_ws, out_filename)
+        block_data_cnn_resized = np.zeros((
+            block_size, 
+            block_rows, 
+            block_cols), dtype = np.uint8)
+        
+        for i in xrange(1, block_data.shape[0] - 1):
+            im = block_data[i,:,:]
+            im = im[ CNN_PATCH_LEG : -CNN_PATCH_LEG, 
+                     CNN_PATCH_LEG : -CNN_PATCH_LEG]
+            im = cv2.resize(
+                im, 
+                None, 
+                fx = 0.5, 
+                fy = 0.5, 
+                interpolation = cv2.INTER_NEAREST)
+            
+            block_data_cnn_resized[i - 1, :, :] = im
+        
+        block_data = block_data_cnn_resized
+    
+    n_files = block_data.shape[0]
+    n_rows = block_data.shape[1]
+    n_cols = block_data.shape[2]
+    
+    if is_padded:
+        assert (n_files == block_size), 'block[%d,%d,%d]: unexpected block_size [%d]' % (
+            block_depth_id,
+            block_row_id,
+            block_col_id,
+            n_files)
+
+        assert (n_rows == block_rows), 'block[%d,%d,%d][%d]: unexpected block_rows [%d]' % (
+            block_depth_id,
+            block_row_id,
+            block_col_id,
+            Z_index,
+            n_rows)
+
+        assert (n_cols == block_cols), 'block[%d,%d,%d][%d]: unexpected block_cols [%d]' % (
+            block_depth_id,
+            block_row_id,
+            block_col_id,
+            Z_index,
+            n_cols)
+    
+    (Z_start_idx, Z_finish_idx) = get_Z_pad_cut_indices(
+        block_depth_id,
+        block_size,
+        z_pad_right_overlap = 0)
+                
+    (Z_start_idx, Z_finish_idx) = (0, n_files)        
+    (X_start_idx, X_finish_idx) = (0, n_rows)
+    (Y_start_idx, Y_finish_idx) = (0, n_cols)
+    
+    if MERGE_PREPROCESS_Z_OVERLAP > 0:
+        (Z_start_idx, Z_finish_idx) = fix_merge_Z_overlap(
+            block_depth_id,
+            Z_start_idx, 
+            Z_finish_idx,
+            MERGE_PREPROCESS_Z_OVERLAP)
+    
+    if is_padded:    
+        (Z_start_idx, Z_finish_idx) = get_Z_pad_cut_indices(
+            block_depth_id,
+            block_size,
+            z_pad_right_overlap = 0)
+
+        (X_start_idx, X_finish_idx) = get_X_pad_cut_indices(
+            block_row_id,
+            block_rows)
+
+        (Y_start_idx, Y_finish_idx) = get_Y_pad_cut_indices(
+            block_col_id,
+            block_cols)
+    
+    print 'Z/X/Y cuts = [%d-%d][%d-%d][%d-%d]' % (
+        Z_start_idx, Z_finish_idx,
+        X_start_idx, X_finish_idx,
+        Y_start_idx, Y_finish_idx)
+    
+    verify_block_out_dir(block_debug_path)
+    
+    cur_dtype = np.uint8
+    if is_RGB:
+        block_data = normalize_3D_block_uint32(block_data)
+        cur_dtype = np.uint32
+    
+    real_block_data = np.zeros((
+        BLOCK_N_IMAGES, 
+        BLOCK_N_ROWS / BLOCK_SUB_SAMPLE, 
+        BLOCK_N_COLS / BLOCK_SUB_SAMPLE), dtype = cur_dtype)
+    
+    ((real_Z_start_idx, real_Z_finish_idx),
+     (real_X_start_idx, real_X_finish_idx),
+     (real_Y_start_idx, real_Y_finish_idx)) = get_real_data_indices(
+        block_depth_id,
+        block_row_id,
+        block_col_id,
+        Z_start_idx,
+        Z_finish_idx,
+        X_start_idx,
+        X_finish_idx,
+        Y_start_idx,
+        Y_finish_idx)
+    
+    print 'Z/X/Y real = [%d-%d][%d-%d][%d-%d]' % (
+        real_Z_start_idx, real_Z_finish_idx,
+        real_X_start_idx, real_X_finish_idx,
+        real_Y_start_idx, real_Y_finish_idx)
+    
+    real_block_data[ 
+        real_Z_start_idx : real_Z_finish_idx , 
+        real_X_start_idx : real_X_finish_idx , 
+        real_Y_start_idx : real_Y_finish_idx] = block_data[
+        Z_start_idx : Z_finish_idx , 
+        X_start_idx : X_finish_idx , 
+        Y_start_idx : Y_finish_idx ]
+    
+    for cur_depth in xrange(real_block_data.shape[0]):
+        im = real_block_data[cur_depth, :, :]
+        
+        if is_RGB:
+            im = get_RGB(im)
+        
+        out_filename = '%s_block_%.4d_%.4d_%.4d_%.4d_%s.png' % (
+            PREFIX,
+            block_depth,
+            block_row,
+            block_col,
+            cur_depth,
+            postfix)
+            
+        out_filepath = os.path.join(block_debug_path, out_filename)
         
         print '  -- Write[%d]: %s' % (cur_depth, out_filepath)
-            
-        cv2.imwrite(out_filepath, im_ws_rgb)
         
+        cv2.imwrite(out_filepath, im)
+    
+    print 'debug_generate_from_block: finish'
+
+def debug_generate_em(
+    block_depth_id, 
+    block_row_id, 
+    block_col_id):
+
+    print 'debug_generate_probs_em: start'
+    
+    block_em_path = get_block_em_path(
+        block_depth_id, 
+        block_row_id, 
+        block_col_id)
+    
+    block_debug_path = get_block_debug_path(
+        block_depth_id, 
+        block_row_id, 
+        block_col_id)
+        
+    block_debug_em_path = os.path.join(block_debug_path, EM_DIR)
+    
+    postfix = 'em'
+    
+    debug_generate_from_block(
+        block_depth_id, 
+        block_row_id, 
+        block_col_id,
+        block_em_path,
+        block_debug_em_path,
+        postfix,
+        is_RGB = False,
+        is_padded = True,
+        is_EM = True)
+    
+    print 'debug_generate_em: finish'
+
+def debug_generate_probs_ws(
+    block_depth_id, 
+    block_row_id, 
+    block_col_id):
+
+    print 'debug_generate_probs_ws: start'
+    
+    block_probs_ws_path = get_block_probs_ws_path(
+        block_depth_id, 
+        block_row_id, 
+        block_col_id)
+    
+    block_debug_path = get_block_debug_path(
+        block_depth_id, 
+        block_row_id, 
+        block_col_id)
+        
+    block_debug_probs_ws_path = os.path.join(block_debug_path, PROBS_WS_DIR)
+    
+    postfix = 'probs_ws'
+    
+    debug_generate_from_block(
+        block_depth_id, 
+        block_row_id, 
+        block_col_id,
+        block_probs_ws_path,
+        block_debug_probs_ws_path,
+        postfix,
+        is_RGB = False,
+        is_padded = True,
+        is_EM = False)
+    
+    print 'debug_generate_probs_ws: finish'
+
+def debug_generate_probs_np(
+    block_depth_id, 
+    block_row_id, 
+    block_col_id):
+
+    print 'debug_generate_probs_np: start'
+    
+    block_probs_np_path = get_block_probs_np_path(
+        block_depth_id, 
+        block_row_id, 
+        block_col_id)
+    
+    block_debug_path = get_block_debug_path(
+        block_depth_id, 
+        block_row_id, 
+        block_col_id)
+        
+    block_debug_probs_np_path = os.path.join(block_debug_path, PROBS_NP_DIR)
+    
+    postfix = 'probs_np'
+    
+    debug_generate_from_block(
+        block_depth_id, 
+        block_row_id, 
+        block_col_id,
+        block_probs_np_path,
+        block_debug_probs_np_path,
+        postfix,
+        is_RGB = False,
+        is_padded = True,
+        is_EM = False)
+    
+    print 'debug_generate_probs_np: finish'
+
+def debug_generate_ws(
+    block_depth_id, 
+    block_row_id, 
+    block_col_id):
+
+    print 'debug_generate_ws: start'
+    
+    block_ws_path = get_block_ws_path(
+        block_depth_id, 
+        block_row_id, 
+        block_col_id)
+    
+    block_debug_path = get_block_debug_path(
+        block_depth_id, 
+        block_row_id, 
+        block_col_id)
+        
+    block_debug_ws_path = os.path.join(block_debug_path, WS_DIR)
+    
+    postfix = 'ws'
+    
+    debug_generate_from_block(
+        block_depth_id, 
+        block_row_id, 
+        block_col_id,
+        block_ws_path,
+        block_debug_ws_path,
+        postfix,
+        is_RGB = True,
+        is_padded = True,
+        is_EM = False)
+    
     print 'debug_generate_ws: finish'
 
 def debug_generate_np(
-    block_path_debug,
-    out_prefix,
-    block_Z,
-    block_X,
-    block_Y,
-    block_path_np, 
-    segments_np,
-    block_n_depth,
-    block_n_rows,
-    block_n_cols):
-    
+    block_depth_id, 
+    block_row_id, 
+    block_col_id):
+
     print 'debug_generate_np: start'
     
-    print '  -- block_size: [%d,%d,%d]' % (block_n_depth, block_n_rows, block_n_cols)
+    block_np_path = get_block_np_path(
+        block_depth_id, 
+        block_row_id, 
+        block_col_id)
     
-    block_data = np.zeros((block_n_depth, block_n_rows, block_n_cols), dtype = np.uint32)
+    block_debug_path = get_block_debug_path(
+        block_depth_id, 
+        block_row_id, 
+        block_col_id)
+        
+    block_debug_np_path = os.path.join(block_debug_path, NP_DIR)
     
-    for segment in segments_np:
-        seg_name = segment[0]
-        start_id = segment[1]
-        finish_id = segment[2]
-        
-        print '  -- segment[%d-%d]: %s' % (start_id, finish_id, seg_name,)
-        
-        h5_np_seg_path = os.path.join(block_path_np, 
-                                      '%s' % (seg_name,), 
-                                      '%s_segmentation.h5' % (seg_name))
-        
-        f = h5py.File(h5_np_seg_path)
-        
-        seg_data = np.array(f['stack'])
-        seg_data = seg_data.transpose((2,1,0))
-        block_data[start_id : finish_id, :, :] = seg_data
-        
-    block_data = normalize_3D_block_uint32(block_data)
+    postfix = 'np'
     
-    block_path_debug_np = os.path.join(block_path_debug, 'np')
+    debug_generate_from_block(
+        block_depth_id, 
+        block_row_id, 
+        block_col_id,
+        block_np_path,
+        block_debug_np_path,
+        postfix,
+        is_RGB = True,
+        is_padded = True,
+        is_EM = False)
     
-    if not os.path.exists(block_path_debug_np):
-        os.makedirs(block_path_debug_np)
-    
-    for cur_depth in xrange(block_n_depth):
-        im_np = block_data[cur_depth, :, :]
-        
-        im_np_rgb = get_RGB(im_np)
-        
-        out_filename = '%s_block_%.4d_%.4d_%.4d_%.4d_np.png' % (
-            out_prefix,
-            block_Z,
-            block_X,
-            block_Y,
-            cur_depth)
-        
-        out_filepath = os.path.join(block_path_debug_np, out_filename)
-        
-        print '  -- Write[%d]: %s' % (cur_depth, out_filepath)
-        
-        cv2.imwrite(out_filepath, im_np_rgb)
-
     print 'debug_generate_np: finish'
 
-def np_merge_get_labels_max_min(blocks_dir_np_merge):
+def debug_generate_merge(
+    block_depth_id, 
+    block_row_id, 
+    block_col_id):
+
+    print 'debug_generate_merge: start'
     
-    labels_map_filepath = os.path.join(blocks_dir_np_merge, 'labels_map.txt')
-    f = open(labels_map_filepath, 'rb')
-    data_lines = f.readlines()
-    f.close()
-    
-    max_label = None
-    min_label = None
-    for data_line in data_lines[1:]:
-        cur_label = int(data_line.split()[-1])
+    block_merge_path = get_block_merge_path(
+        block_depth_id, 
+        block_row_id, 
+        block_col_id)
         
-        if max_label == None or max_label < cur_label:
-            max_label = cur_label
+    block_merge_out_path = os.path.join(
+        block_merge_path, 
+        'out_segmentation_%.4d_%.4d_%.4d' % (
+            block_depth_id, 
+            block_row_id, 
+            block_col_id))
+    
+    block_debug_path = get_block_debug_path(
+        block_depth_id, 
+        block_row_id, 
+        block_col_id)
         
-        if min_label == None or min_label > cur_label:
-            min_label = cur_label
-            
-            
-    return (min_label, max_label)
+    block_debug_merge_path = os.path.join(block_debug_path, MERGE_DIR)
     
-def debug_generate_np_merge(
-        block_path_debug,
-        out_prefix,
-        block_Z,
-        block_X,
-        block_Y,
-        blocks_dir_np_merge,
-        block_n_depth,
-        block_n_rows,
-        block_n_cols):
+    postfix = 'merge'
+    
+    debug_generate_from_block(
+        block_depth_id, 
+        block_row_id, 
+        block_col_id,
+        block_merge_out_path,
+        block_debug_merge_path,
+        postfix,
+        is_RGB = True,
+        is_padded = False,
+        is_EM = False)
+    
+    print 'debug_generate_merge: finish'
 
-    print 'debug_generate_np_merge: start'
+def execute(
+    block_depth_id,
+    block_row_id,
+    block_col_id):
     
-    #(min_label, max_label) = np_merge_get_labels_max_min(blocks_dir_np_merge)
+    if not meta_is_block_valid(
+        block_depth_id, 
+        block_row_id, 
+        block_col_id):
+        print ' -- %s is not valid [SKIP]' % (block_name,)
+        return
     
-    #print '  -- [min_label, max_label] : [%d] [%d]' % (min_label, max_label,)
-    print '  -- block_size: [%d,%d,%d]' % (block_n_depth, block_n_rows, block_n_cols)
+    block_debug_path = get_block_debug_path(    
+        block_depth_id, 
+        block_row_id, 
+        block_col_id)
     
-    block_data = np.zeros((block_n_depth, block_n_rows, block_n_cols), dtype = np.uint32)
-    
-    h5_seg_np_merge = os.path.join(blocks_dir_np_merge, 'out_segmentation_%.4d_%.4d_%.4d.h5' % (
-        block_Z,
-        block_X,
-        block_Y))
-    
-    f = h5py.File(h5_seg_np_merge)
-
-    seg_data = np.array(f['stack'])
-    seg_data = seg_data.transpose((2,1,0))
-    block_data[:,:,:] = seg_data
-    
-    #block_data = normalize_3D_block_uint32(block_data, in_min = min_label, in_max = max_label)
-    block_data = normalize_3D_block_uint32(block_data)
-    
-    block_path_debug_np_merge = os.path.join(block_path_debug, 'np_merge')
-
-    if not os.path.exists(block_path_debug_np_merge):
-        os.makedirs(block_path_debug_np_merge)
-
-    for cur_depth in xrange(block_n_depth):
-        im_np_merge = block_data[cur_depth, :, :]
+    if not os.path.exists(block_debug_path):
+        os.makedirs(block_debug_path)
         
-        im_np_merge_rgb = get_RGB(im_np_merge)
-
-        out_filename = '%s_block_%.4d_%.4d_%.4d_%.4d_np_merge.png' % (
-            out_prefix,
-            block_Z,
-            block_X,
-            block_Y,
-            cur_depth)
-
-        out_filepath = os.path.join(block_path_debug_np_merge, out_filename)
-
-        print '  -- Write[%d]: %s' % (cur_depth, out_filepath)
-
-        cv2.imwrite(out_filepath, im_np_merge_rgb)
-
-    print 'debug_generate_np_merge: finish'
-
-def execute(blocks_dir_data,
-            blocks_dir_probs,
-            blocks_dir_probs_ws,
-            blocks_dir_probs_np,
-            blocks_dir_ws,
-            blocks_dir_np,
-            blocks_dir_np_merge,
-            blocks_dir_debug,
-            out_prefix,
-            block_Z,
-            block_X,
-            block_Y,
-            block_n_depth,
-            block_n_rows,
-            block_n_cols,
-            cnn_patch_leg):
+    if IS_GENERATE_EM:
+        debug_generate_em(
+            block_depth_id,
+            block_row_id,
+            block_col_id)
     
-    block_name = 'block_%.4d_%.4d_%.4d' % (block_Z, block_X, block_Y)
+    # if IS_GENERATE_PROBS:
+    #         debug_generate_probs(
+    #             block_depth_id,
+    #             block_row_id,
+    #             block_col_id)
     
-    print 'Parameters:'
-    print ' -- BLOCK: %s [%d,%d,%d]' % (block_name, block_n_depth, block_n_rows, block_n_cols)
-    
-    block_path_data = os.path.join(blocks_dir_data, block_name)
-    print ' -- DATA: %s' % (block_path_data,)
-    assert(os.path.exists(block_path_data))
-    segments_data = get_segments(block_path_data)
-    
-    block_path_probs = os.path.join(blocks_dir_probs, '%s_probs' % (block_name,))
-    print ' -- PROBS: %s' % (block_path_probs,)
-    assert(os.path.exists(block_path_probs))
-    segments_probs = get_segments(block_path_probs)
-    assert(is_segments_match(segments_probs, segments_data))
-    
-    block_path_probs_ws = os.path.join(blocks_dir_probs_ws, '%s_probs' % (block_name,))
-    print ' -- PROBS_WS: %s' % (block_path_probs_ws,)
-    assert(os.path.exists(block_path_probs_ws))
-    segments_probs_ws = get_segments(block_path_probs_ws)
-    assert(is_segments_match(segments_probs_ws, segments_data))
-    
-    block_path_probs_np = os.path.join(blocks_dir_probs_np, '%s_probs' % (block_name,))
-    print ' -- PROBS_NP: %s' % (block_path_probs_np,)
-    assert(os.path.exists(block_path_probs_np))
-    segments_probs_np = get_segments(block_path_probs_np)
-    assert(is_segments_match(segments_probs_np, segments_data))
-    
-    block_path_ws = os.path.join(blocks_dir_ws, '%s_ws' % (block_name,))
-    print ' -- WS: %s' % (block_path_ws,)
-    assert(os.path.exists(block_path_ws))
-    segments_ws = get_segments(block_path_ws)
-    assert(is_segments_match(segments_ws, segments_data))
-    
-    block_path_np = os.path.join(blocks_dir_np, '%s_np' % (block_name,))
-    print ' -- NP: %s' % (block_path_np,)
-    assert(os.path.exists(block_path_np))
-    segments_np = get_segments(block_path_np)
-    assert(is_segments_match(segments_np, segments_data))
-    
-    print ' -- NP_MERGE: %s' % (blocks_dir_np_merge,)        
-    assert(os.path.exists(blocks_dir_np_merge))
-    
-    block_path_debug = os.path.join(blocks_dir_debug, '%s_debug' % (block_name,))        
-    print ' -- DEBUG: %s' % (block_path_debug,)
-    
-    if not os.path.exists(block_path_debug):
-        os.makedirs(block_path_debug)
-    #else:
-    #    shutil.rmtree(block_path_debug)
-    
-    if IS_GENERATE_DATA:
-        debug_generate_data(
-            block_path_debug,
-            out_prefix,
-            block_Z,
-            block_X,
-            block_Y,
-            block_path_data, 
-            segments_data,
-            block_n_depth,
-            block_n_rows,
-            block_n_cols,
-            cnn_patch_leg)
-    
-    if IS_GENERATE_PROBS:
-        debug_generate_probs(
-            block_path_debug,
-            'probs',
-            out_prefix,
-            block_Z,
-            block_X,
-            block_Y,
-            block_path_probs, 
-            segments_probs,
-            block_n_depth,
-            block_n_rows,
-            block_n_cols)
-
     if IS_GENERATE_PROBS_WS:
-        debug_generate_probs(
-            block_path_debug,
-            'probs_ws',
-            out_prefix,
-            block_Z,
-            block_X,
-            block_Y,
-            block_path_probs_ws, 
-            segments_probs_ws,
-            block_n_depth,
-            block_n_rows,
-            block_n_cols)
+        debug_generate_probs_ws(
+            block_depth_id,
+            block_row_id,
+            block_col_id)
     
     if IS_GENERATE_PROBS_NP:
-        debug_generate_probs(
-            block_path_debug,
-            'probs_np',
-            out_prefix,
-            block_Z,
-            block_X,
-            block_Y,
-            block_path_probs_np, 
-            segments_probs_np,
-            block_n_depth,
-            block_n_rows,
-            block_n_cols)
+        debug_generate_probs_np(
+            block_depth_id,
+            block_row_id,
+            block_col_id)
     
-    if IS_GENERATE_WS:        
+    if IS_GENERATE_WS:   
         debug_generate_ws(
-            block_path_debug,
-            out_prefix,
-            block_Z,
-            block_X,
-            block_Y,
-            block_path_ws, 
-            segments_ws,
-            block_n_depth,
-            block_n_rows,
-            block_n_cols)
-
+            block_depth_id,
+            block_row_id,
+            block_col_id)     
+    
     if IS_GENERATE_NP:
         debug_generate_np(
-            block_path_debug,
-            out_prefix,
-            block_Z,
-            block_X,
-            block_Y,
-            block_path_np, 
-            segments_np,
-            block_n_depth,
-            block_n_rows,
-            block_n_cols)
-
-    if IS_GENERATE_NP_MERGE:
-        debug_generate_np_merge(
-            block_path_debug,
-            out_prefix,
-            block_Z,
-            block_X,
-            block_Y,
-            blocks_dir_np_merge,
-            block_n_depth,
-            block_n_rows,
-            block_n_cols)
-
+            block_depth_id,
+            block_row_id,
+            block_col_id)
+    
+    if IS_GENERATE_MERGE:
+        debug_generate_merge(
+            block_depth_id,
+            block_row_id,
+            block_col_id)
+        
     
 
 if '__main__' == __name__:
     try:
         (prog_name, 
-         blocks_dir_data,
-         blocks_dir_probs,
-         blocks_dir_probs_ws,
-         blocks_dir_probs_np,
-         blocks_dir_ws,
-         blocks_dir_np,
-         blocks_dir_np_merge,
-         blocks_dir_debug,
-         out_prefix,
-         block_Z, 
-         block_X, 
-         block_Y, 
-         block_n_depth,
-         block_n_rows,
-         block_n_cols,
-         cnn_patch_leg) = sys.argv[:17]
+         block_depth,
+         block_row,
+         block_col) = sys.argv[:4]
         
-        block_Z = int(block_Z)
-        block_X = int(block_X)
-        block_Y = int(block_Y)
-        
-        block_n_depth = int(block_n_depth)
-        block_n_rows = int(block_n_rows)
-        block_n_cols = int(block_n_cols)
-        
-        cnn_patch_leg = int(cnn_patch_leg)
+        block_depth = int(block_depth)
+        block_row = int(block_row)
+        block_col = int(block_col)
         
     except ValueError, e:
-        sys.exit('USAGE: %s blocks_dir_data \
-                            blocks_dir_probs, \
-                            blocks_dir_probs_ws, \
-                            blocks_dir_probs_np, \
-                            blocks_dir_ws, \
-                            blocks_dir_np, \
-                            blocks_dir_np_merge, \
-                            blocks_dir_debug, \
-                            out_prefix \
-                            [block_Z] \
-                            [block_X] \
-                            [block_Y] \
-                            [block_n_depth] \
-                            [block_n_rows] \
-                            [block_n_cols] \
-                            [cnn_patch_leg] ' % (sys.argv[0],))
+        sys.exit('USAGE: %s \
+            [block_depth] \
+            [block_row] \
+            [block_col]' % (sys.argv[0],))
 
     execute(
-        blocks_dir_data,
-        blocks_dir_probs,
-        blocks_dir_probs_ws,
-        blocks_dir_probs_np,
-        blocks_dir_ws,
-        blocks_dir_np,
-        blocks_dir_np_merge,
-        blocks_dir_debug,
-        out_prefix,
-        block_Z,
-        block_X,
-        block_Y,
-        block_n_depth,
-        block_n_rows,
-        block_n_cols,
-        cnn_patch_leg)
-
+        block_depth,
+        block_row,
+        block_col)
+    
+    print PROC_SUCCESS_STR
+    

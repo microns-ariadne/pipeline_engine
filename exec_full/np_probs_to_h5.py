@@ -12,9 +12,9 @@ def np_adjust_probs(images):
     scaled_images = []
     for i, image in enumerate(images):
         print ' -- Scale image %d' % (i,)
-        image = image.astype(np.float)
+        image = image.astype(np.float32)
         #image -= image.min()
-        image /= image.max()
+        image /= 255 #image.max()
         scaled_images.append(image)
         
     images = scaled_images
@@ -23,8 +23,7 @@ def np_adjust_probs(images):
     n_cols = images[0].shape[1]
     n_images = len(images)
     
-    #volume = np.zeros((n_images, n_rows, n_cols, 2), dtype = np.float)
-    volume = np.zeros((n_images, n_rows, n_cols), dtype = np.float)
+    volume = np.zeros((n_images, n_rows, n_cols), dtype = np.float32)
     
     print 'Generate NP shape: %r' % (volume.shape,)
     
