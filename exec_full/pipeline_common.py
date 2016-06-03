@@ -425,6 +425,25 @@ def get_block_probs_path(
     
     return block_probs_path
 
+def get_block_probs_processed_path(
+    block_depth, 
+    block_row_id, 
+    block_col_id):
+    
+    block_data_dir = get_block_data_dir(
+        block_depth, 
+        block_row_id, 
+        block_col_id)
+    
+    block_dir_name = get_block_dir_name(
+        block_depth, 
+        block_row_id, 
+        block_col_id)    
+    
+    block_probs_path = os.path.join(block_data_dir, PROBS_PROCESSED_DIR, block_dir_name)
+    
+    return block_probs_path
+
 def get_block_probs_ws_path(
     block_depth, 
     block_row_id, 

@@ -66,6 +66,7 @@ ALIGN_RESULT_DIR = 'result_dir'
 BLOCKS_META_DIR = 'blocks_meta'
 EM_DIR = 'em_padded'
 PROBS_DIR = 'probs'
+PROBS_PROCESSED_DIR = 'probs_processed'
 PROBS_WS_DIR = 'probs_ws'
 PROBS_NP_DIR = 'probs_np'
 WS_DIR = 'ws'
@@ -118,10 +119,20 @@ FC_DNN_3D_DEPTH = 3
 FC_DNN_N_CHANNELS = 2
 
 ###############################################################################
+# CNN_POSTPROCESS params
+###############################################################################
+
+N_CNN_POSTPROCESS_WORKERS_PER_CPU = 16
+
+CNN_POSTPROCESS_EXEC_PATH = 'python /home/armafire/Pipeline/pipeline_engine/exec_full/cnn_postprocess.py'
+
+###############################################################################
 # PREPARE WS_NP_PREPARE params
 ###############################################################################
 
 WS_NP_PREPARE_PATH = 'python /home/armafire/Pipeline/pipeline_engine/exec_full/ws_np_prepare.py'
+
+WS_NP_PREPARE_BIN_PATH = '/home/armafire/Pipeline/pipeline_engine/matlab_scripts/run_ws_np_prepare.sh'
 
 N_WS_NP_PREPARE_WORKERS_PER_CPU = 8 * 2
 
@@ -198,7 +209,7 @@ N_MERGE_BLOCK_EXEC_CILK_WORKERS_PER_RUN = 4
 
 MERGE_BLOCK_NP_BINARY = NP_BIN_PATH
 
-MERGE_BLOCK_NP_THRESHOLD_PARAM = '--threshold=0.05'
+MERGE_BLOCK_NP_THRESHOLD_PARAM = '--threshold=0.01'
 
 ###############################################################################
 # MERGE_COMBINE params

@@ -25,9 +25,9 @@ IS_GENERATE_PROBS_NP = 0
  
 IS_GENERATE_WS = 0
  
-IS_GENERATE_NP = 1
+IS_GENERATE_NP = 0
 
-IS_GENERATE_MERGE = 0
+IS_GENERATE_MERGE = 1
 
 def fix_merge_Z_overlap(
     block_depth_id,

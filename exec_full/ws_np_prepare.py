@@ -18,13 +18,13 @@ def execute(
         block_row_id,
         block_col_id)
     
-    block_probs_path = get_block_probs_path(
+    block_probs_processed_path = get_block_probs_processed_path(
         block_depth,
         block_row_id,
         block_col_id)
     
     print ' -- block_meta_path   : %s' % (block_meta_path,)
-    print ' -- block_probs_path : %s' % (block_probs_path,)
+    print ' -- block_probs_processed_path : %s' % (block_probs_processed_path,)
     
     block_probs_ws_path = get_block_probs_ws_path(    
         block_depth, 
@@ -40,10 +40,10 @@ def execute(
     verify_block_out_dir(block_probs_np_path)
     
     ws_np_prepare_cmd = ('%s %d %s %s %s %s' % 
-        (WS_NP_PREPARE_PATH,
+        (WS_NP_PREPARE_BIN_PATH,
          CNN_PATCH_LEG,
          block_meta_path,
-         block_probs_path,
+         block_probs_processed_path,
          block_probs_ws_path,
          block_probs_np_path))
         

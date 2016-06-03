@@ -24,6 +24,8 @@ PHASE_FUNCS = {
 
     'CNN' : CNN_execute,
     
+    'CNN_POSTPROCESS' : CNN_POSTPROCESS_execute,
+    
     'WS_NP_PREPARE' : WS_NP_PREPARE_execute,
     
     'WS' : WS_execute,

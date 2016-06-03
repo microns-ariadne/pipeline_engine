@@ -1419,7 +1419,69 @@ def CNN_execute(ctx):
     elapsed_time_secs = time.time() - start_time_secs
     
     print 'CNN_execute: finish [total_time = %d secs]' % (elapsed_time_secs,)        
+
+def CNN_POSTPROCESS_verify(log_path):
+    res = is_run_log_success(log_path)
+    return res
+
+def CNN_POSTPROCESS_execute(ctx):
+
+    print 'CNN_POSTPROCESS_execute: start'
     
+    phase_name = 'cnn_postprocess'
+    
+    start_time_secs = time.time()
+    
+    ctx.jobs.init(
+        max_jobs = N_CNN_POSTPROCESS_WORKERS_PER_CPU * N_CPUS)
+    
+    ctx.jobs.set_proc_verify_func(CNN_POSTPROCESS_verify)
+    
+    for block in ctx.blocks_to_process:
+        
+        block_depth = block[0]
+        block_row_id = block[1]
+        block_col_id = block[2]
+        
+        block_name = get_block_name(
+            block_depth, 
+            block_row_id, 
+            block_col_id)
+        
+        if not meta_is_block_valid(
+            block_depth, 
+            block_row_id, 
+            block_col_id):
+            print ' -- %s is not valid [SKIP]' % (block_name,)
+            continue
+        
+        print ' -- %s' % (block_name,)
+                    
+        cnn_postprocess_cmd = ('%s %d %d %d' % 
+            (CNN_POSTPROCESS_EXEC_PATH,
+             block_depth,
+             block_row_id,
+             block_col_id))
+        
+        proc_log_filepath = os.path.join(
+            META_DIR, LOG_DIR, LOG_PROCS_DIR, phase_name, '%s_cnn_postprocess.log' % (block_name,))        
+                    
+        ctx.jobs.execute(
+            cmd = cnn_postprocess_cmd,
+            log_path = proc_log_filepath,
+            cmd_env = None)
+    
+    ctx.jobs.sync_all()
+    
+    run_log_filepath = os.path.join(
+        META_DIR, LOG_DIR, LOG_RUNS_DIR, phase_name, 'cnn_postprocess_summary.log')        
+    
+    ctx.jobs.report_status(run_log_filepath)
+    
+    elapsed_time_secs = time.time() - start_time_secs
+    
+    print 'CNN_POSTPROCESS_execute: finish [total_time = %d secs]' % (elapsed_time_secs,)        
+
 def PROBS_COMBINE_execute(blocks):
     
     print 'PROBS_COMBINE_execute: start'
