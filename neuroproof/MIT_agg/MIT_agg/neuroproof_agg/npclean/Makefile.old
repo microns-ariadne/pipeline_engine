@@ -1,0 +1,64 @@
+# prime example makefile
+
+#OPENCV_DIR=/home/victorj/libraries/opencv_install
+OPENCV_DIR=/home/armafire/tools/opencv-2.4.11-install
+
+#VIGRA_DIR=/home/victorj/libraries/vigra_install
+VIGRA_DIR=/home/armafire/tools/vigra-install
+
+#CXX:=/home/amatveev/Pipeline/cilkplus-install/bin/g++
+CXX:=/home/armafire/tools/cilkplus-install/bin/g++
+
+CXXFLAGS:=-std=c++11 -fcilkplus -O2
+LFLAGS:=-L$(OPENCV_DIR)/lib -L$(VIGRA_DIR)/lib64 -L/usr/local/lib -L/usr/lib/x86_64-linux-gnu -lcilkrts -ljsoncpp -lhdf5 -lhdf5_hl -lvigraimpex -lopencv_core -lopencv_ml -lboost_program_options -lboost_filesystem -lboost_thread -lboost_system
+
+# not sure why jsoncpp didn't find the absolute path
+# we hopefully don't need this: -I/usr/include/python2.7/
+# on haswell: 
+#	pkg-config --cflags opencv
+# 		-I/usr/local/include/opencv -I/usr/local/include 
+INC:=-I$(OPENCV_DIR)/include/opencv2 -I$(OPENCV_DIR)/include -I$(VIGRA_DIR)/include -Iboost/tr1/tr1 -I/usr/include/jsoncpp -I/usr/include/vtk-5.8 -ISemiSupervised/ 
+
+# PREPROC_FLAGS:=-D DEBUG_PRINT
+PREPROC_FLAGS:=
+SOURCES_PREDICT_BASE:=$(wildcard Stack/*.cpp Classifier/*.cpp FeatureManager/*.cpp BioPriors/*.cpp Algorithms/*.cpp EdgeEditor/*.cpp Rag/*.cpp SemiSupervised/*.cpp)
+SOURCES_PREDICT_CPP:=$(wildcard src/neuroproof_graph_predict.cpp)
+SOURCES_PREDICT:=$(wildcard src/neuroproof_graph_predict.cpp Stack/*.cpp Classifier/*.cpp FeatureManager/*.cpp BioPriors/*.cpp Algorithms/*.cpp EdgeEditor/*.cpp Rag/*.cpp SemiSupervised/*.cpp)
+SOURCES_LEARN:=$(wildcard src/neuroproof_graph_learn.cpp Stack/*.cpp Classifier/*.cpp FeatureManager/*.cpp BioPriors/*.cpp Algorithms/*.cpp EdgeEditor/*.cpp Rag/*.cpp SemiSupervised/*.cpp)
+
+OBJECTS=$(SOURCES_PREDICT:.cpp=.o)
+
+all: $(SOURCES) $(EXECUTABLE)
+
+$(EXECUTABLE): $(OBJECTS) 
+	$(CC) $(LDFLAGS) $(OBJECTS) -o $@
+
+.cpp.o:
+	    $(CC) $(CCFLAGS) $< -o $@
+	
+all: main 
+
+debug: PREPROC_FLAGS:=-D DEBUG_PRINT
+debug: main
+
+%.o: ./BioPriors/%.cpp
+	${CXX} ${CXXFLAGS} ${PREPROC_FLAGS} ${INC} -c -o $@ $^
+
+neuroproof_graph_predict_base.o: ${SOURCES_PREDICT_BASE}
+	${CXX} ${CXXFLAGS} ${PREPROC_FLAGS} ${INC} -c ${SOURCES_PREDICT_BASE} -o build/$@ 
+
+neuroproof_graph_predict_cpp.o: ${SOURCES_PREDICT_CPP}
+	${CXX} ${CXXFLAGS} ${PREPROC_FLAGS} ${INC} -c ${SOURCES_PREDICT_CPP} -o build/$@ 
+
+main: neuroproof_graph_predict_base.o neuroproof_graph_predict_cpp.o
+	${CXX} ${CXXFLAGS} ${PREPROC_FLAGS} ${INC} -o build/neuroproof_graph_predict $^ ${LFLAGS}
+
+#main: ${SOURCES_PREDICT}
+#	${CXX} ${CXXFLAGS} ${PREPROC_FLAGS} ${INC} -o build/neuroproof_graph_predict ${SOURCES_PREDICT} ${LFLAGS}
+
+learn: ${SOURCES_LEARN}
+	${CXX} ${CXXFLAGS} ${PREPROC_FLAGS} ${INC} -o build/neuroproof_graph_learn ${SOURCES_LEARN} ${LFLAGS}
+
+
+clean:
+	rm -f build/*

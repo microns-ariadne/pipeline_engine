@@ -1,0 +1,8 @@
+/mnt/disk3/armafire/datasets/K11_S1_debug/K11_S1_1024x1024x100_merge
+
+merge_0003_0005_0003_dir_1.txt
+
+Labels 1782 1617
+    - NP segmentation looks good.
+    - 1782 doesn't appear anywhere in merge*.txt file
+

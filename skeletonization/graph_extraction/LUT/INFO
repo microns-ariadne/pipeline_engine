@@ -1,0 +1,4 @@
+lutgen.cpp contains the program for constructing the table for classifying simple points.
+To build it run `make lutgen`
+
+Running ./lutgen will generate the lookup table 
