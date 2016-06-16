@@ -112,7 +112,7 @@ N_ANALYZE_BLOCKS_WORKERS_PER_CPU = 9 * 2
 N_FC_DNN_WORKERS_PER_CPU = 4
 N_PER_FC_DNN_WORKERS = 9
 
-FC_DNN_PATH = '/home/armafire/Pipeline/fc_dnn/fully_conv/fully_conv/build_pipeline/run_dnn_K11_S1_3nm_w2_bg_32f_105x105_3D_4M_K11_3nm_AC3'
+FC_DNN_PATH = '/home/armafire/Pipeline/fc_dnn/fully_conv/fully_conv/build_pipeline/run_dnn_K11_S1_3nm_w2_bg_malinated_32f_105x105_3D_4M_K11_3nm_AC3'
 
 FC_DNN_3D_DEPTH = 3
 
@@ -209,7 +209,7 @@ N_MERGE_BLOCK_EXEC_CILK_WORKERS_PER_RUN = 4
 
 MERGE_BLOCK_NP_BINARY = NP_BIN_PATH
 
-MERGE_BLOCK_NP_THRESHOLD_PARAM = '--threshold=0.01'
+MERGE_BLOCK_NP_THRESHOLD_PARAM = '--threshold=0.5'
 
 ###############################################################################
 # MERGE_COMBINE params
