@@ -1,0 +1,100 @@
+/////////////////////////////////////////////////////////////////////////////////////////
+//
+//
+//
+/////////////////////////////////////////////////////////////////////////////////////////
+
+#ifndef DNN_H
+#define DNN_H 1
+
+/////////////////////////////////////////////////////////////////////////////////////////
+// INCLUDES
+/////////////////////////////////////////////////////////////////////////////////////////
+#include "common.h"
+
+/////////////////////////////////////////////////////////////////////////////////////////
+// DEFINES 
+/////////////////////////////////////////////////////////////////////////////////////////
+
+//#define INPUT_FILENAME "./test/train-input_0.bin"
+//#define INPUT_FILENAME "./test_split_1/all.bin"
+
+//#define OUTPUT_FILENAME "./test/train-output_0.bin"
+
+//#define IS_INPUT_BINARY (1)
+
+//#define INPUT_N_MATRICES (1)
+//#define INPUT_D1 (128)
+//#define INPUT_D2 (128)
+
+//#define INPUT_N_MATRICES (1)
+//#define INPUT_D1 (1024)
+//#define INPUT_D2 (1024)
+//#define INPUT_D3 (1)
+
+//#define IS_PAD_3D (0) /*FIX: 1*/
+
+#define INPUT_TYPE_BINARY (1)
+#define INPUT_TYPE_DIR (2)
+
+#define MAX_INPUT_FILES (2048)
+#define MAX_FILEPATH (2000)
+
+#define MAX_CHANNELS (1024)
+#define MAX_LAYERS (20)
+
+#define N_CHANNELS_PER_WORKER (1)
+
+#define OP_INPUT (1)
+#define OP_CONV (2)
+#define OP_POOL (3)
+#define OP_SOFTMAX (4)
+#define OP_INTERWEAVE (5)
+
+
+/////////////////////////////////////////////////////////////////////////////////////////
+// TYPES
+/////////////////////////////////////////////////////////////////////////////////////////
+typedef struct _layer {
+    int l_id;
+	int op_type;
+    int n_channels;
+    int n_stride;
+    int n_maxout;
+    matrices_data_t kernels;
+    char *init_filename;
+} layer_t;
+
+typedef struct _dnn {
+    matrices_data_t *p_in_matrices;
+    matrices_data_t *p_out_matrices;
+    matrices_data_t *p_tmp_matrices;
+          
+    int input_type;
+    int input_patch_leg;
+    int input_3D_depth;
+    int input_n_matrices;
+    int input_d1;
+    int input_d2;
+    int input_d3;
+    int n_output_channels;
+    char *input_filename;
+    char *output_filename;
+    
+    int is_pad_3D;
+    
+    int n_layers;
+    layer_t *p_layers;
+        
+} dnn_t;
+    
+/////////////////////////////////////////////////////////////////////////////////////////
+// EXTERNAL FUNCTIONS
+/////////////////////////////////////////////////////////////////////////////////////////
+void dnn_execute(dnn_t *p_dnn);
+
+/////////////////////////////////////////////////////////////////////////////////////////
+// EXTERNAL MACROS
+/////////////////////////////////////////////////////////////////////////////////////////
+
+#endif // DNN_H
