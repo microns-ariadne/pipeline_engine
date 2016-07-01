@@ -1,0 +1,6 @@
+*.pyc
+*.so
+*.o
+ariadne_microns_pipeline.egg-info
+ariadne_microns_pipeline/algorithms/*.cpp
+build
