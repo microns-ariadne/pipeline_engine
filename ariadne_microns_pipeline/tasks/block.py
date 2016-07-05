@@ -9,8 +9,10 @@ from ariadne_microns_pipeline.targets.hdf5_target import HDF5VolumeTarget
 class BlockTaskMixin:
     '''The block task constructs creates a block of data from volumes'''
 
-    output_volume_path = luigi.Parameter()
-    output_volume_dataset_path = luigi.Parameter()
+    output_volume_paths = luigi.ListParameter(
+        description="The sharded paths to the output volume")
+    output_volume_dataset_path = luigi.Parameter(
+        description="The name of the output volume dataset")
     input_volumes = luigi.ListParameter(
         description="A list of the input volumes to be combined to "
         "produce the output volume. The format is a JSON list of JSON "

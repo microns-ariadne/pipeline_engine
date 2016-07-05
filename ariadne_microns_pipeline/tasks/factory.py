@@ -61,15 +61,17 @@ class AMTaskFactory(object):
                                          height=height,
                                          depth=depth)
     
-    def gen_classify_task(self, path, datasets, img_volume, classifier):
+    def gen_classify_task(
+        self, paths, datasets, patterns, img_volume, classifier):
         '''Classify a volume
 
-        :param path: the path to the HDF5 file that will hold the
-             probability volumes
+        :param paths: the root paths to use for sharding
         :param datasets: a dictionary with keys of the class indexes or names
              produced by the classifier and values of the names of the
              datasets to be stored (not all datasets from the classifier need
              be stored)
+        :param patterns: a dictionary with keys of class indexes and values
+             of the patterns to use for naming files.
         :param img_volume: the image to be classified
         :param classifier: a trained classifier
         '''
@@ -104,7 +106,8 @@ class AMTaskFactory(object):
         raise NotImplementedError()
     
     def gen_mask_border_task(self,
-                             path,
+                             paths,
+                             pattern,
                              outer_mask_name,
                              border_mask_name,
                              all_outer_mask_name,

@@ -101,4 +101,4 @@ class PixelClassifierTarget(luigi.File):
         :returns: a dictionary of probability outputs with the keys being
         the class names.
         '''
-        return self.classifier.classify(image)
+        return self.classifier.classify(image)./

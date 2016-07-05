@@ -73,7 +73,7 @@ class PngVolumeTarget(luigi.LocalTarget):
                             self.dataset_path)
     
     def __get_touchfile_name(self):
-        return os.path.join(self.__get_dirname(), ".done")
+        return self.__get_filename(self.z) + ".done"
     
     def imwrite(self, volume):
         '''Write the volume
@@ -83,6 +83,7 @@ class PngVolumeTarget(luigi.LocalTarget):
         be either uint8 or uint16. The coordinates are z, y, x and optionally
         color.
         '''
+        self.makedirs()
         d = dict(dimensions=volume.shape,
                  dtype=volume.dtype.descr[0][1],
                  x=self.x,
@@ -100,9 +101,9 @@ class PngVolumeTarget(luigi.LocalTarget):
     def imread(self):
         with self.open(mode="r") as fd:
             d = json.load(fd)
-        volume = np.zeros(d["dimensions"], d["dtype"])
-        for i, filename in d["filenames"]:
-            volume[i] = cv2.imread(filename)
+        volume = np.zeros((self.depth, self.height, self.width), d["dtype"])
+        for i, filename in enumerate(d["filenames"]):
+            volume[i] = cv2.imread(filename, 2)
         return volume
     
     def create_volume(self, dtype, **kwargs):

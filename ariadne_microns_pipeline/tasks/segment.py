@@ -1,9 +1,11 @@
 import luigi
+import numpy as np
 from scipy.ndimage import gaussian_filter, label
 
 from ..algorithms import watershed
 from ..targets.factory import TargetFactory
-
+from ..parameters import VolumeParameter, DatasetLocationParameter
+from utilities import RequiresMixin
 
 class SegmentTaskMixin:
     '''Segment a 3d volume
@@ -11,71 +13,24 @@ class SegmentTaskMixin:
     Given a probability map, find markers and perform a segmentation on
     that volume.
     '''
-    prob_paths = luigi.ListParameter(
-        description="The sharded paths to the probability volume")
-    prob_dataset_name = luigi.Parameter(
-        description="The name of the probability dataset")
-    prob_dataset_pattern = luigi.Parameter(
-        description="The file pattern to use when naming probability datasets")
-    mask_paths = luigi.ListParameter(
-        description="The sharded paths to the masks")
-    mask_dataset_name = luigi.Parameter(
-        description="The name of the mask dataset")
-    mask_dataset_pattern = luigi.Parameter(
-        description="The file pattern to use when naming mask datasets")
-    seg_paths = luigi.ListParameter(
-        description="The sharded paths to the output segmentation")
-    seg_dataset_name = luigi.Parameter(
-       description="The name of the segmentation dataset")
-    seg_dataset_pattern = luigi.Parameter(
-        description="The file pattern to use when naming segmentation files")
-    x = luigi.IntParameter(
-        description="The X offset of the volume")
-    y = luigi.IntParameter(
-        description="The Y offset of the volume")
-    z = luigi.IntParameter(
-        description="The Z offset of the volume")
-    width = luigi.IntParameter(
-        description="The width of the volume")
-    height = luigi.IntParameter(
-        description="The height of the volume")
-    depth = luigi.IntParameter(
-        description = "The depth of the volume")
+    volume = VolumeParameter(
+        description="The volume to segment")
+    prob_location = DatasetLocationParameter(
+        description="The location of the probability volume")
+    mask_location = DatasetLocationParameter(
+        description="The location of the mask volume")
+    seg_location = DatasetLocationParameter(
+        description="The location for the output segmentation")
 
     def input(self):
         yield TargetFactory().get_volume_target(
-            self.prob_paths,
-            self.prob_dataset_name,
-            self.prob_dataset_pattern,
-            self.x,
-            self.y,
-            self.z,
-            self.width,
-            self.height,
-            self.depth)
+            location=self.prob_location, volume=self.volume)
         yield TargetFactory().get_volume_target(
-            self.mask_paths,
-            self.mask_dataset_name,
-            self.mask_dataset_pattern,
-            self.x,
-            self.y,
-            self.z,
-            self.width,
-            self.height,
-            self.depth)
-    
+            location=self.mask_location,
+            volume=self.volume)
     def output(self):
-        yield TargetFactory().get_volume_target(
-            self.seg_paths,
-            self.seg_dataset_name,
-            self.seg_dataset_pattern,
-            self.x,
-            self.y,
-            self.z,
-            self.width,
-            self.height,
-            self.depth)
-        
+        return TargetFactory().get_volume_target(
+            location=self.seg_location, volume=self.volume)
 
 class SegmentRunMixin:
     
@@ -95,18 +50,22 @@ class SegmentRunMixin:
         default=1)
     
     def ariadne_run(self):
-        prob_volume, mask_volume = self.input()
+        prob_volume, mask_volume = list(self.input())
         seg_volume = self.output()
         prob = prob_volume.imread()
         mask = mask_volume.imread() != 0
         sigma = (self.sigma_z, self.sigma_xy, self.sigma_xy)
         smoothed = gaussian_filter(prob.astype(np.float32), sigma)
-        bin_markers = smoothed > self.threshold
+        bin_markers = (smoothed < self.threshold) & mask
         labels, count = label(bin_markers)
-        seg = watershed(prob, labels)
-        seg_volume.imwrite(seg)
+        prob[~mask] = 255
+        seg = watershed(smoothed, labels)
+        seg_volume.imwrite(seg.astype(np.uint16))
 
-class SegmentTask(SegmentTaskMixin, SegmentRunMixin, luigi.Task):
+class SegmentTask(SegmentTaskMixin, SegmentRunMixin, RequiresMixin, 
+                  luigi.Task):
+    
+    task_namespace = "ariadne_microns_pipeline"
     
     def run(self):
         self.ariadne_run()
