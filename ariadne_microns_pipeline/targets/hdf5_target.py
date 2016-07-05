@@ -49,7 +49,7 @@ class HDF5VolumeTarget(luigi.File):
         self.width = width
         self.height = height
         self.depth = depth
-        super(HDF5FileTarget, self).__init__(self.__get_fullpath())
+        super(HDF5VolumeTarget, self).__init__(self.__get_fullpath())
         self.h5path = self.__get_hdf5_path()
     
     def __get_hdf5_path(self):
@@ -67,15 +67,15 @@ class HDF5VolumeTarget(luigi.File):
         
         So we maintain a separate file per dataset for this purpose.
         '''
-        return self.get_hdf5_path() + "." + self.dataset_path + ".done"
+        return self.__get_hdf5_path() + "." + self.dataset_path + ".done"
     
     def imread(self):
         '''Read the volume
         
         Returns the entire volume. Axes are Z, Y, X.
         '''
-        with h5py.File(self.path, "r") as fd:
-            return fd[self.dataset_path]
+        with h5py.File(self.h5path, "r") as fd:
+            return fd[self.dataset_path][:]
     
     def imread_part(self, x0, x1, y0, y1, z0, z1):
         '''Read a portion of the volume
@@ -107,7 +107,9 @@ class HDF5VolumeTarget(luigi.File):
             See http://docs.h5py.org/en/latest/high/dataset.html for some
             hints about compressing a dataset or changing its block structure.
         '''
-        os.makedirs(os.path.dirname(self.path))
+        pathdir = os.path.dirname(self.path)
+        if not os.path.isdir(pathdir):
+            os.makedirs(pathdir)
         with h5py.File(self.h5path, "a") as fd:
             if self.dataset_path in fd:
                 del fd[self.dataset_path]
@@ -131,7 +133,9 @@ class HDF5VolumeTarget(luigi.File):
         such as the block structure or compression. 
         (see http://docs.h5py.org/en/latest/high/dataset.html)
         '''
-        os.makedirs(os.path.dirname(self.path))
+        pathdir = os.path.dirname(self.path)
+        if not os.path.isdir(pathdir):
+            os.makedirs(pathdir)
         with h5py.File(self.h5path, "a") as fd:
             if self.dataset_path in fd:
                 del fd[self.dataset_path]
