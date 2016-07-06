@@ -12,12 +12,10 @@
 #include <boost/filesystem.hpp>
 
 using namespace NeuroProof;
-using std::tr1::unordered_map;
 using namespace boost::algorithm;
 using namespace boost::filesystem;
 using std::string;
 using std::vector;
-using std::ifstream; using std::ofstream;
 
 // to be called from command line
 StackSession::StackSession(string session_name)
@@ -61,7 +59,7 @@ StackSession::StackSession(string session_name)
     Json::Reader json_reader;
     Json::Value json_reader_vals;
     string session_file = session_name + "/session.json";
-    ifstream fin(session_file.c_str());
+    std::ifstream fin(session_file.c_str());
     if (!fin) {
         throw ErrMsg("Could not open session json file");
     }
@@ -156,7 +154,7 @@ void StackSession::export_session(string session_name)
 
             Json::Value json_writer;
             string session_file = session_name + "/session.json";
-            ofstream fout(session_file.c_str());
+            std::ofstream fout(session_file.c_str());
             json_writer["edges-examined"] = edges_examined; 
             fout << json_writer;
             fout.close();
@@ -484,7 +482,7 @@ void StackSession::select_label(Label_t current_label)
     selected_id_changed = false;
 }
 
-bool StackSession::get_active_labels(unordered_map<Label_t, int>& active_labels_)
+bool StackSession::get_active_labels(std::tr1::unordered_map<Label_t, int>& active_labels_)
 {
     active_labels_ = active_labels;
     return active_labels_changed;

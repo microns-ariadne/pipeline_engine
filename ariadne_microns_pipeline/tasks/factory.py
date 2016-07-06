@@ -4,7 +4,6 @@ import json
 import luigi
 from download_from_butterfly import DownloadFromButterflyTask
 from block import BlockTask
-from extract_dataset import ExtractDatasetTask
 from classify import PixelClassifierTask
 
 class AMTaskFactory(object):

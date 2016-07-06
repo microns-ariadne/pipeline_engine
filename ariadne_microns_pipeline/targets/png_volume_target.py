@@ -108,11 +108,8 @@ class PngVolumeTarget(luigi.LocalTarget):
     
     def create_volume(self, dtype, **kwargs):
         '''Create the volume in preparation for reading in parts.'''
-        shape = [self.depth, self.height, self.width]
-        if subvolume.ndim == 4:
-            shape.append(subvolume.shape[3])
-        self.__volume = np.zeros(shape, subvolume.dtype)
-        
+        pass
+    
     def imread_part(self, x, y, z, width, height, depth):
         '''Read a part of the volume
         
@@ -149,6 +146,12 @@ class PngVolumeTarget(luigi.LocalTarget):
         :param y: the y offset of the subvolume in the global space
         :param z: the z offset of the subvolume in the global space
         '''
+        if not hasattr(self, "__volume"):
+            shape = [self.depth, self.height, self.width]
+            if subvolume.ndim == 4:
+                shape.append(subvolume.shape[3])
+            self.__volume = np.zeros(shape, subvolume.dtype)
+            
         z0 = z - self.z
         z1 = z0 + subvolume.shape[0]
         y0 = y - self.y

@@ -33,7 +33,7 @@ void  OpencvRFclassifier::load_classifier(const char* rf_filename){
     nameonly += "_ignore.txt";
     FILE* fp = fopen(nameonly.c_str(),"rt");
     if (!fp){
-	printf("no features to ignore\n");
+	printf("no features to ignore: could not find %s\n", nameonly.c_str());
 	return;
     }
     else{

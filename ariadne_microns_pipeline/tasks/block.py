@@ -4,41 +4,29 @@
 
 import json
 import luigi
-from ariadne_microns_pipeline.targets.hdf5_target import HDF5VolumeTarget
+from ..targets.factory import TargetFactory
+from ..parameters import DatasetLocationParameter, VolumeParameter
+from ..parameters import MultiVolumeParameter
 
 class BlockTaskMixin:
     '''The block task constructs creates a block of data from volumes'''
 
-    output_volume_paths = luigi.ListParameter(
-        description="The sharded paths to the output volume")
-    output_volume_dataset_path = luigi.Parameter(
-        description="The name of the output volume dataset")
-    input_volumes = luigi.ListParameter(
-        description="A list of the input volumes to be combined to "
-        "produce the output volume. The format is a JSON list of JSON "
-        " two-tuples of path and dataset name, e.g. "
-        '[["/tmp/foo.h5", "img"], ["/tmp/bar.h5", "img"]]')
-    x = luigi.IntParameter(
-        description="The X offset of the volume to be generated")
-    y = luigi.IntParameter(
-        description="The Y offset of the volume to be generated")
-    z = luigi.IntParameter(
-        description="The Z offset of the volume to be generated")
-    width = luigi.IntParameter(
-        description="The width of the volume to be generated")
-    height = luigi.IntParameter(
-        description="The height of the volume to be generated")
-    depth = luigi.IntParameter(
-        description="The depth of the volume to be generated")
-    
+    output_location = DatasetLocationParameter(
+        description="Location of volume to be created")
+    output_volume = VolumeParameter(
+        description="Volume to be extracted from input datasets")
+    input_volumes = MultiVolumeParameter(
+        description="The volumes that will be composited to form the output "
+        "volume.")
     def input(self):
         '''Return the volumes to be assembled'''
-        for path, dataset in json.loads(self.input_volumes):
-            yield HDF5VolumeTarget(path, dataset)
+        tf = TargetFactory()
+        for d in self.input_volumes:
+            yield tf.get_volume_target(d["location"], d["volume"])
     
     def output(self):
         '''Return the volume target that will be written'''
-        return HDF5VolumeTarget(output_volume_path, output_volume_dataset_path)
+        return tf.get_volume_target(self.output_location, self.output_volume)
 
 
 class BlockTaskRunMixin:
@@ -77,10 +65,7 @@ class BlockTaskRunMixin:
             subvolume = input_volume.imread_part(x0, x1, y0, y1, z0, z1)
             if first:
                 first = False
-                output_volume.create_volume(
-                    self.x, self.y. self.z, 
-                    self.width, self.height, self.depth,
-                    subvolume.dtype)
+                output_volume.create_volume(subvolume.dtype)
                 
             output_volume.imwrite_part(subvolume, x0, y0, z0)
 

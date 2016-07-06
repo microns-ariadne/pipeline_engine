@@ -98,3 +98,50 @@ class DatasetLocationParameter(luigi.Parameter):
                  dataset_name=x.dataset_name, 
                  pattern=x.pattern)
         return json.dumps(d)
+
+class MultiVolumeParameter(luigi.Parameter):
+    '''A parameter representing a number of volumes taken together
+    
+    This is useful when merging or considering adjacent or overlapping volumes.
+    The MultiVolumeParameter represents a number of volumes that act as
+    inputs for some merging operation. The serialization format is a list
+    of dictionaries with keys, "volume" and "location" giving the Volume
+    and DatasetLocation of some input volume.
+    '''
+    
+    def parse(self, x):
+        l = json.loads(x)
+        result = []
+        for d in l:
+            dv = d["volume"]
+            dl = d["location"]
+            result.append(dict(
+                volume=Volume(x=dv["x"],
+                              y=dv["y"],
+                              z=dv["z"],
+                              width=dv["width"],
+                              height=dv["height"],
+                              depth=dv["depth"]),
+                location=DatasetLocation(roots=dl["roots"], 
+                                         dataset_name=dl["dataset_name"], 
+                                         pattern=dl["pattern"])))
+        return result
+    
+    def serialize(self, x):
+        l = []
+        for d in x:
+            volume = d["volume"]
+            location = d["location"]
+            l.append(dict(volume=dict(x=volume.x,
+                                      y=volume.y,
+                                      z=volume.z,
+                                      width=volume.width,
+                                      height=volume.height,
+                                      depth=volume.depth),
+                          location=dict(roots=location.roots,
+                                        dataset_name=location.dataset_name,
+                                        pattern=location.pattern)))
+        return json.dumps(l)
+    
+all = [Volume, VolumeParameter, DatasetLocation, DatasetLocationParameter,
+       MultiVolumeParameter]

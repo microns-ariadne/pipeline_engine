@@ -9,3 +9,13 @@ for cluster execution that connect "run()" to "ariadne_run()" and a
 mapper/factory that lets you select the task class for a given task and
 execution mechanism.
 '''
+
+from block import BlockTask
+from download_from_butterfly import DownloadFromButterflyTask
+from factory import AMTaskFactory
+from mask import MaskBorderTask
+from neuroproof import NeuroproofTask
+from segment import SegmentTask
+
+all = [BlockTask, DownloadFromButterflyTask, AMTaskFactory,
+       MaskBorderTask, NeuroproofTask, SegmentTask]

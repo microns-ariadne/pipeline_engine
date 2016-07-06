@@ -17,8 +17,6 @@
 #include <cilk/cilk.h>
 
 using std::vector;
-using std::tr1::unordered_set;
-using std::tr1::unordered_map;
 using std::string;
 
 namespace NeuroProof {
@@ -57,7 +55,7 @@ void Stack::build_rag_batch()
     unsigned int maxy = get_ysize() - 1; 
     unsigned int maxz = get_zsize() - 1; 
     vector<double> predictions(prob_list.size(), 0.0);
-    unordered_set<Label_t> labels;
+    std::tr1::unordered_set<Label_t> labels;
  
     volume_forXYZ(*labelvol, x, y, z) {
     
@@ -163,7 +161,7 @@ void Stack::build_rag()
     rag = RagPtr(new Rag_t);
 
     vector<double> predictions(prob_list.size(), 0.0);
-    unordered_set<Label_t> labels;
+    std::tr1::unordered_set<Label_t> labels;
    
     unsigned int maxx = get_xsize() - 1; 
     unsigned int maxy = get_ysize() - 1; 
@@ -287,7 +285,7 @@ int Stack::remove_inclusions()
     // merge nodes in biconnected_components (ignore components with '0' node)
     for (int i = 0; i < biconnected_components.size(); ++i) {
         bool found_zero = false;
-        unordered_set<Label_t> merge_nodes;
+        std::tr1::unordered_set<Label_t> merge_nodes;
         for (int j = 0; j < biconnected_components[i].size()-1; ++j) {
             Node_t node1 = biconnected_components[i][j].region1;     
             Node_t node2 = biconnected_components[i][j].region2;
@@ -305,7 +303,7 @@ int Stack::remove_inclusions()
             RagNode_t* articulation_node = rag->find_rag_node(articulation_label);
 
             bool found_preserve = false; 
-            for (unordered_set<Label_t>::iterator iter = merge_nodes.begin();
+            for (std::tr1::unordered_set<Label_t>::iterator iter = merge_nodes.begin();
                     iter != merge_nodes.end(); ++iter) {
                 Node_t node2 = *iter;
 
@@ -331,7 +329,7 @@ int Stack::remove_inclusions()
             }
 
             // reassign labels in component to be removed
-            for (unordered_set<Label_t>::iterator iter = merge_nodes.begin();
+            for (std::tr1::unordered_set<Label_t>::iterator iter = merge_nodes.begin();
                     iter != merge_nodes.end(); ++iter) {
                 Node_t node2 = *iter;
                 RagNode_t* rag_node = rag->find_rag_node(node2);
@@ -357,14 +355,14 @@ void Stack::dilate_labelvol(int disc_size)
 }
 
 int Stack::remove_small_regions(int threshold,
-        unordered_set<Label_t>& exclusions)
+        std::tr1::unordered_set<Label_t>& exclusions)
 {
     VolumeProbPtr empty_pred;
     return absorb_small_regions(empty_pred, threshold, exclusions);
 }
 
 int Stack::absorb_small_regions(VolumeProbPtr boundary_pred,
-            int threshold, unordered_set<Label_t>& exclusions)
+            int threshold, std::tr1::unordered_set<Label_t>& exclusions)
 {
     std::tr1::unordered_map<Label_t, unsigned long long> regions_sz;
     labelvol->rebase_labels();
@@ -375,9 +373,9 @@ int Stack::absorb_small_regions(VolumeProbPtr boundary_pred,
     }
 
     int num_removed = 0;    
-    unordered_set<Label_t> small_regions;
+    std::tr1::unordered_set<Label_t> small_regions;
 
-    for(unordered_map<Label_t, unsigned long long>::iterator it = regions_sz.begin();
+    for(std::tr1::unordered_map<Label_t, unsigned long long>::iterator it = regions_sz.begin();
                 it != regions_sz.end(); it++) {
         // do not remove small bodies that are in the exclusions set
 	if ((exclusions.find(it->first) == exclusions.end()) &&
@@ -406,12 +404,12 @@ int Stack::absorb_small_regions(VolumeProbPtr boundary_pred,
     return num_removed;
 }
 
-void Stack::get_gt2segs_map(RagPtr gt_rag, unordered_map<Label_t, vector<Label_t> >& gt2segs)
+void Stack::get_gt2segs_map(RagPtr gt_rag, std::tr1::unordered_map<Label_t, vector<Label_t> >& gt2segs)
 {
     gt2segs.clear();
     compute_contingency_table();
 
-    for(unordered_map<Label_t, vector<LabelCount> >::iterator mit = contingency.begin();
+    for(std::tr1::unordered_map<Label_t, vector<LabelCount> >::iterator mit = contingency.begin();
             mit != contingency.end(); ++mit){
         Label_t i = mit->first;
         vector<LabelCount>& gt_vec = mit->second; 	
@@ -435,13 +433,13 @@ void Stack::get_gt2segs_map(RagPtr gt_rag, unordered_map<Label_t, vector<Label_t
 
 // TODO: keep gt rag with gt_labelvol 
 int Stack::match_regions_overlap(Label_t label,
-        unordered_set<Label_t>& candidate_regions, RagPtr gt_rag,
-        unordered_set<Label_t>& labels_matched, unordered_set<Label_t>& gtlabels_matched)
+        std::tr1::unordered_set<Label_t>& candidate_regions, RagPtr gt_rag,
+        std::tr1::unordered_set<Label_t>& labels_matched, std::tr1::unordered_set<Label_t>& gtlabels_matched)
 {
     unsigned long long seg_size = rag->find_rag_node(label)->get_size();
     int matched = 0; 
     
-    unordered_map<Label_t, vector<LabelCount> >::iterator mit = contingency.find(label);
+    std::tr1::unordered_map<Label_t, vector<LabelCount> >::iterator mit = contingency.find(label);
     
     if (mit != contingency.end()) {
         vector<LabelCount>& gt_vec = mit->second;
@@ -474,7 +472,7 @@ void Stack::compute_groundtruth_assignment()
     printf("computed contingency table\n");
     assignment.clear();  	
     
-    for(unordered_map<Label_t, vector<LabelCount> >::iterator mit = contingency.begin();
+    for(std::tr1::unordered_map<Label_t, vector<LabelCount> >::iterator mit = contingency.begin();
             mit != contingency.end(); ++mit){
         Label_t i = mit->first;
         vector<LabelCount>& gt_vec = mit->second; 	
@@ -639,7 +637,7 @@ void Stack::compute_contingency_table()
         if (!wlabel || !glabel) {
             continue;
         }
-        unordered_map<Label_t, vector<LabelCount> >::iterator mit = 
+        std::tr1::unordered_map<Label_t, vector<LabelCount> >::iterator mit = 
                 contingency.find(wlabel);
         if (mit != contingency.end()){
             vector<LabelCount>& gt_vec = mit->second;
@@ -747,7 +745,7 @@ void Stack::set_body_exclusions(string exclusions_json)
 {
     Json::Reader json_reader;
     Json::Value json_vals;
-    unordered_set<Label_t> exclusion_set;
+    std::tr1::unordered_set<Label_t> exclusion_set;
     
     ifstream fin(exclusions_json.c_str());
     if (!fin) {
@@ -789,10 +787,10 @@ void Stack::compute_vi(double& merge, double& split,
 
     int nn = contingency.size();
 
-    unordered_map<Label_t, double> wp;    
-    unordered_map<Label_t, double> gp;    
+    std::tr1::unordered_map<Label_t, double> wp;    
+    std::tr1::unordered_map<Label_t, double> gp;    
 
-    for(unordered_map<Label_t, vector<LabelCount> >::iterator mit = contingency.begin();
+    for(std::tr1::unordered_map<Label_t, vector<LabelCount> >::iterator mit = contingency.begin();
             mit != contingency.end(); ++mit){
         Label_t i = mit->first;
         vector<LabelCount>& gt_vec = mit->second; 	
@@ -817,10 +815,10 @@ void Stack::compute_vi(double& merge, double& split,
     double HgivenW=0;
     double HgivenG=0;
 
-    unordered_map<Label_t, double> seg_overmerge;
-    unordered_map<Label_t, double> gt_overmerge;
+    std::tr1::unordered_map<Label_t, double> seg_overmerge;
+    std::tr1::unordered_map<Label_t, double> gt_overmerge;
 
-    for(unordered_map<Label_t, vector<LabelCount> >::iterator mit = contingency.begin();
+    for(std::tr1::unordered_map<Label_t, vector<LabelCount> >::iterator mit = contingency.begin();
             mit != contingency.end(); ++mit){
         Label_t i = mit->first;
         vector<LabelCount>& gt_vec = mit->second; 	
