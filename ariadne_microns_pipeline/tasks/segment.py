@@ -19,7 +19,7 @@ class SegmentTaskMixin:
         description="The location of the probability volume")
     mask_location = DatasetLocationParameter(
         description="The location of the mask volume")
-    seg_location = DatasetLocationParameter(
+    output_location = DatasetLocationParameter(
         description="The location for the output segmentation")
 
     def input(self):
@@ -30,7 +30,7 @@ class SegmentTaskMixin:
             volume=self.volume)
     def output(self):
         return TargetFactory().get_volume_target(
-            location=self.seg_location, volume=self.volume)
+            location=self.output_location, volume=self.volume)
 
 class SegmentRunMixin:
     

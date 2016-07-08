@@ -61,6 +61,7 @@ class PngVolumeTarget(luigi.LocalTarget):
         self.width = state["width"]
         self.height = state["height"]
         self.depth = state["depth"]
+        super(PngVolumeTarget, self).__init__(self.__get_touchfile_name())
     
     def __get_filename(self, z):
         '''Get the file name for the plane at z'''

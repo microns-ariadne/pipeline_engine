@@ -94,7 +94,7 @@ class DatasetLocationParameter(luigi.Parameter):
         return DatasetLocation(d["roots"], d["dataset_name"], d["pattern"])
     
     def serialize(self, x):
-        d = dict(roots=x.roots, 
+        d = dict(roots=tuple(x.roots), 
                  dataset_name=x.dataset_name, 
                  pattern=x.pattern)
         return json.dumps(d)

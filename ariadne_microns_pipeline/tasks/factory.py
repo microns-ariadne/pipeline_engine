@@ -2,9 +2,16 @@
 
 import json
 import luigi
-from download_from_butterfly import DownloadFromButterflyTask
-from block import BlockTask
-from classify import PixelClassifierTask
+import os
+import rh_config
+
+from .download_from_butterfly import DownloadFromButterflyTask
+from .block import BlockTask
+from .classify import ClassifyTask
+from .mask import MaskBorderTask
+from .neuroproof import NeuroproofTask
+from .segment import SegmentTask
+from .utilities import to_hashable
 
 class AMTaskFactory(object):
     '''Factory for creating Ariadne/Microns tasks
@@ -18,50 +25,39 @@ class AMTaskFactory(object):
     '''
    
     def gen_get_volume_task(self,
-                            paths,
-                            dataset_path,
-                            pattern,
                             experiment,
                             sample,
                             dataset,
                             channel,
                             url,
-                            x, y, z, width, height, depth):
+                            volume,
+                            location):
         '''Get a 3d volume
         
-        :param paths: the paths for sharding to different spindles
-        :param dataset_path: the name of the target volume dataset
-        :param pattern: the pattern for filenames
         :param experiment: the experiment done to produce the sample
         :param sample: the sample ID of the tissue that was imaged
         :param dataset: the volume that was imaged
         :param channel: the channel supplying the pixel values
         :param url: the URL of the butterfly server
-        :param x: the x-offset of the volume within the dataset
-        :param y: the y-offset of the volume within the dataset
-        :param z: the z-offset of the volume within the dataset
-        :param width: the width of the volume
-        :param height: the height of the volume
-        :param depth: the depth of the volume
+        :param volume: the volume to fetch
+        :type volume: :py:class:`ariadne_microns_pipeline.parameters.Volume`
+        :param location: the location on disk to write the volume data
+        :type location: 
+            :py:class:`ariadne_microns_pipeline.parameters.DatasetLocation`
+        :returns: A task that outputs a volume target.
         '''
         
-        return DownloadFromButterflyTask(dest_paths=path,
-                                         dest_dataset_path=dataset_path,
-                                         dest_pattern=pattern,
-                                         experiment=experiment,
+        return DownloadFromButterflyTask(experiment=experiment,
                                          sample=sample,
                                          dataset=dataset,
                                          channel=channel,
                                          url=url,
-                                         x=x,
-                                         y=y,
-                                         z=z,
-                                         width=width,
-                                         height=height,
-                                         depth=depth)
-    
+                                         volume=volume,
+                                         destination=location)
+
     def gen_classify_task(
-        self, paths, datasets, patterns, img_volume, classifier):
+        self, paths, datasets, pattern, img_volume, img_location,
+        classifier_path):
         '''Classify a volume
 
         :param paths: the root paths to use for sharding
@@ -69,73 +65,97 @@ class AMTaskFactory(object):
              produced by the classifier and values of the names of the
              datasets to be stored (not all datasets from the classifier need
              be stored)
-        :param patterns: a dictionary with keys of class indexes and values
-             of the patterns to use for naming files.
+        :param pattern: the pattern to use for naming files.
         :param img_volume: the image to be classified
-        :param classifier: a trained classifier
+        :param classifier_path: path to a pickled classifer
         '''
-        raise NotImplementedError()
-    
-    def gen_watershed_task(self, path, dataset, landscape_volume, seeds):
-        '''Run a watershed
-
-        Run a seeded watershed, producing a segmentation from a landscape
-        of hills and valleys and a list of 3-d seed values
+        datasets = to_hashable(datasets)
         
-        :param path: the path to the HDF5 file holding the segmentation produced
-        :param dataset: the name of the dataset holding the segmentation
-        :param landscape_volume: the landscape to be watershedded
-        :param seeds: the seeds marking the places to start the watershed
-        '''
-        raise NotImplementedError()
+        return ClassifyTask(classifier_path=classifier_path,
+                            volume=img_volume,
+                            image_location=img_location,
+                            prob_roots=paths,
+                            class_names=datasets,
+                            pattern=pattern)
+    
+    def gen_segmentation_task(
+        self, volume, prob_location, mask_location, seg_location,
+        sigma_xy=None, sigma_z=None, threshold=None):
+        '''Generate a segmentation task
 
-    def gen_neuroproof_task(self, path, dataset, seg_volume, landscape_volume, 
-                            classifier):
+        Generate a segmentation task.  The task takes a probability map of
+        the membranes and a mask of areas to exclude from segmentation. It
+        smooths the membrane probabilities with an anisotropic Gaussian
+        (different sigmas in XY and Z), thresholds to get
+        the seeds for the watershed, then performs a 3d watershed.
+
+        :param volume: the volume to be segmented in global coordinates
+        :param prob_location: where to find the membrane probability volume
+        :param mask_location: where to find the mask location
+        :param seg_location: where to put the segmentation
+        :param sigma_xy: the sigma of the smoothing gaussian in the X and Y
+        directions
+        :param sigma_z: the sigma of the smoothing gaussian in the Z direction
+        :param threshold: the threshold cutoff for finding seeds
+        '''
+        kwargs = {}
+        if sigma_xy is not None:
+            kwargs["sigma_xy"] = sigma_xy
+        if sigma_z is not None:
+            kwargs["sigma_z"] = sigma_z
+        if threshold is not None:
+            kwargs["threshold"] = threshold
+        return SegmentTask(volume=volume, 
+                           prob_location=prob_location,
+                           mask_location=mask_location,
+                           output_location=seg_location,
+                           **kwargs)
+
+    def gen_neuroproof_task(
+        self, volume, prob_location, input_seg_location, output_seg_location,
+        classifier_filename):
         '''Run Neuroproof on an oversegmented volume
         
-        :param path: the path to the HDF5 file containing the merge dataset
-        :param dataset: the dataset name of the output of Neuroproof, 
-            a volume of potentially merged segments from the input segmentation
-        :param seg_volume: the oversegmented input volume
-        :param landscape_volume: the watershed landscape that was an
-            input for the oversegmentation
-        :param classifier: the classifier trained to assess merge/no merge
-        decisions.
+        :param volume: the volume being Neuroproofed
+        :param prob_location: the location of the membrane probabilities
+        :param input_seg_location: the location of the oversegmentation
+        :param output_seg_location: where to write the corrected segmentation
+        :param classifier_filename: the classifier trained to assess merge/no
+        merge decisions.
         '''
-        raise NotImplementedError()
+        try:
+            config = rh_config.config["neuroproof"]
+            neuroproof = config["neuroproof_graph_predict"]
+        except KeyError:
+            raise ValueError(
+                "The .rh_config.yaml file is missing configuration information "
+                "for Neuroproof. See README.md for details on how to build and "
+                "configure Neuroproof.")
+        ld_library_path = os.pathsep.join(config.get("ld_library_path", []))
+        return NeuroproofTask(volume=volume,
+                              prob_location=prob_location,
+                              input_seg_location=input_seg_location,
+                              output_seg_location=output_seg_location,
+                              neuroproof=neuroproof,
+                              neuroproof_ld_library_path=ld_library_path,
+                              classifier_filename=classifier_filename)
     
-    def gen_mask_border_task(self,
-                             paths,
-                             pattern,
-                             outer_mask_name,
-                             border_mask_name,
-                             all_outer_mask_name,
-                             all_border_mask_name,
-                             img_volume, border_width, close_width):
+    def gen_mask_border_task(
+        self, volume, prob_location, mask_location, border_width, close_width):
         '''Generate the outer and border masks for a volume
         
-        :param path: The path to the HDF5 file containing the masks
-        :param outer_mask_name: the name of the outer mask dataset
-        :param border_mask_dataset: the name of the border mask dataset
-        :param all_outer_mask_name: the name of the outer mask projection
-        :param all_border_mask_name: the name of the border mask projection
-        :param img_volume: The volume of the image which will have its mask
-            calculated.
+        :param volume: the volume being masked
+        :param prob_location: the location of the membrane probabilities
+        :param mask_location: where to write the masks
         :param border_width: The width of the border to consider masking
         :param close_width: the size of the square block to be used in the
              morphological closing operation.
         '''
-        raise NotImplementedError()
-    
-    def gen_apply_mask_task(self, path, dataset, masks, in_volume):
-        '''Apply the masks to the input volume
-        
-        :param path: the path to the masked volume's HDF5 file
-        :param dataset: the name of the dataset within the HDF5 file
-        :param masks: the masks to be applied
-        :param in_volume: the volume to be masked
-        '''
-        raise NotImplementedError()
+        return MaskBorderTask(volume=volume,
+                              prob_location=prob_location,
+                              mask_location=mask_location,
+                              border_width=border_width,
+                              close_width=close_width)
     
     def gen_run_pipeline_task(self,
                               seg_volume_path,
@@ -153,16 +173,6 @@ class AMTaskFactory(object):
         '''
         raise NotImplementedError()
     
-    def gen_pixel_classifier_task(self, classifier_path):
-        '''Unpickle a pixel classifier
-        
-        The output of this task is a PixelClassifierTarget whose classifier
-        can be used to get class probabilities for pixels in an image.
-        
-        :param classifier_path: the path to the pickle of the classifier
-        '''
-        return PixelClassifierTask(classifier_path)
-    
     #########################
     #
     # Helper tasks
@@ -171,39 +181,32 @@ class AMTaskFactory(object):
     #
     #########################
 
-    def gen_block_task(self,
-                       path, 
-                       dataset_path, 
-                       x, y, z,
-                       width, height, depth, 
-                       in_volumes):
+    def gen_block_task(
+        self, output_volume, output_location, inputs):
         '''Create a new volume block from other volumes
         
         The input volumes are scanned and their overlaps are written to
         the output volume. If input volumes overlap and the overlap is in
         the output volume, the pixel values from the last input volume in
         the list are written to the output volume.
-        
-        :param path: the path of the output volume's HDF5 file
-        :param dataset_path: the name of the dataset within the HDF5 file
-        :param x: the x offset of the output volume
-        :param y: the y offset of the output volume
-        :param z: the z offset of the output volume
-        :param width: the width of the output volume
-        :param height: the height of the output volume
-        :param in_volumes: a sequence of input volumes
+
+        :param output_volume: the volume coords of the output dataset
+        :param output_location: where to store the output dataset
+        :param inputs: a sequence of dictionaries having keys of
+        "volume" and "location". Each "volume" is a
+        :py:class:`ariadne_microns_pipeline.parameters.Volume` describing
+        the volume of the input dataset. Each "location" is a
+        :py:class:`ariadne_microns_pipeline.parameters.DatasetLocation`
+        describing the location of the dataset on disk.
         '''
-        in_volume_list = [(_.path, _.dataset_path) for _ in in_volumes]
+        #
+        # Make the "inputs" variable hashable
+        #
+        inputs = to_hashable(inputs)
         return BlockTask(
-            path,
-            dataset_path,
-            input_volumes=json.dumps(in_volume_list),
-            x=x,
-            y=y,
-            z=z,
-            width=width,
-            height=height,
-            depth=depth)
+            output_location=output_location,
+            output_volume=output_volume,
+            input_volumes=inputs)
     
     def gen_extract_dataset_task(self, in_hdf5_file, dataset_name):
         '''Extract an HDF5VolumeTarget or other dataset from an HDF5 file

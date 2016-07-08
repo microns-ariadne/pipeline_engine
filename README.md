@@ -33,3 +33,19 @@ OPENCV_PREFIX
 CILKPLUS_PREFIX
 VIGRA_PREFIX
 JSONCPP_PREFIX
+BOOST_PREFIX
+
+## Deployment
+
+The tool locations are specified using rh_config. The .rh_config.yaml file
+should have the following sections:
+
+neuroproof:
+    neuroproof_graph_predict: <location of neuroproof_graph_predict binary>
+    ld_library_path:
+        - <path to OpenCV libraries>
+        - <path to Boost libraries>
+        - <path to Vigra libraries>
+        - <path to JSONCPP libraries>
+        - <path to CilkPlus libraries>
+

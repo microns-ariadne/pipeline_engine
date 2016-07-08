@@ -1,6 +1,7 @@
 import enum
 from hdf5_target import HDF5VolumeTarget
 from png_volume_target import PngVolumeTarget
+from multivolume_target import MultivolumeTarget
 
 class TFEnums(enum.Enum):
     use_png_volume=1
@@ -34,3 +35,15 @@ class TargetFactory(object):
                 location.roots, location.dataset_name, location.pattern,
                 volume.x, volume.y, volume.z, 
                 volume.width, volume.height, volume.depth)
+
+    def get_multivolume_target(self, roots, channels, pattern, volume):
+        '''Get a multivolume target suitable for storing multiple channels
+        
+        :param roots: the sharded root directories for storing the data
+        :param channels: the names of the channels in the volume
+        :param pattern: the filename pattern
+        :param volume: the volume being addressed
+        '''
+        return MultivolumeTarget(roots, channels, pattern,
+                                 volume.x, volume.y, volume.z,
+                                 volume.width, volume.height, volume.depth)

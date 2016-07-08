@@ -11,6 +11,7 @@ execution mechanism.
 '''
 
 from block import BlockTask
+from classify import ClassifyTask
 from download_from_butterfly import DownloadFromButterflyTask
 from factory import AMTaskFactory
 from mask import MaskBorderTask
