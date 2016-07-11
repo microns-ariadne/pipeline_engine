@@ -4,8 +4,8 @@
 #LD := /home/amatveev/Pipeline/cilkplus-install/bin/g++
 
 # 72-core
-CC := /home/armafire/tools/cilkplus-install/bin/g++
-LD := /home/armafire/tools/cilkplus-install/bin/g++
+CC := $(CILKPLUS_PREFIX)/bin/g++
+LD := $(CILKPLUS_PREFIX)/bin/g++
 
 # gcc-trunk
 #CC := /mnt/disk1/armafire/tools/gcc-trunk-install/bin/g++
@@ -22,11 +22,14 @@ LD := /home/armafire/tools/cilkplus-install/bin/g++
 # 72-core CM2
 #OPENCV_INCLUDE=/home/armafire/tools/opencv-2.4.11-install/include
 #OPENCV_LIB=/home/armafire/tools/opencv-2.4.11-install/lib
-OPENCV_INCLUDE=/home/armafire/tools/opencv-3-install-test/include/
-OPENCV_LIB=/home/armafire/tools/opencv-3-install-test/lib/
+OPENCV_INCLUDE=$(OPENCV_PREFIX)/include
+OPENCV_LIB=$(OPENCV_PREFIX)/lib
+
+GCC_LIB=/usr/lib/gcc/x86_64-linux-gnu/4.9
 
 #CFLAGS += -fcilkplus -m64 -ffast-math -mfma 
-CFLAGS += -std=c++11 -fcilkplus -m64 -march=native -ffast-math -mfma -funroll-loops -flto
+CFLAGS += -std=c++11
+CFLAGS += -fcilkplus -m64 -march=native -ffast-math -mfma -funroll-loops -flto
 
 #CFLAGS += -D_REENTRANT
 CFLAGS += -Wall -Winline
@@ -43,7 +46,7 @@ else
 endif
 
 
-LDFLAGS += -L$(OPENCV_LIB) -lcilkrts -lopencv_imgcodecs -lopencv_core -lopencv_imgproc 
+LDFLAGS += -L$(GCC_LIB) -L$(OPENCV_LIB) -L$(CILKPLUS_PREFIX)/lib64 -lcilkrts -lopencv_imgcodecs -lopencv_core -lopencv_imgproc -lopencv_highgui
 #LDFLAGS += -L$(OPENCV_LIB) -lcilkrts -lopencv_highgui -lopencv_core -lopencv_imgproc 
 
 BINS = run_dnn

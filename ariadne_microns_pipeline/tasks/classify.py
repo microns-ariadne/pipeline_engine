@@ -81,7 +81,7 @@ class ClassifyTaskMixin:
     def output_volume(self):
         '''The volume of the output'''
         return Volume(self.out_x, self.out_y, self.out_z,
-                      self.volume.width, self.volume.height, self.volume.depth)
+                      self.out_width, self.out_height, self.out_depth)
     
     def output(self):
         volume = Volume(self.out_x, self.out_y, self.out_z,
