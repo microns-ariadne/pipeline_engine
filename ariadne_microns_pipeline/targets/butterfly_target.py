@@ -1,6 +1,6 @@
 '''Butterfly Luigi target'''
 
-from cv2 import imdecode
+from cv2 import imdecode, IMREAD_ANYDEPTH
 import json
 import luigi
 import numpy as np
@@ -71,7 +71,7 @@ class ButterflyTarget(luigi.Target):
             raise HTTPError(
                 url, response.code, response.reason, response.headers, None)
         body = np.frombuffer(response.body, np.uint8)
-        return imdecode(body, 0)
+        return imdecode(body, IMREAD_ANYDEPTH)
 
 
 class ButterflyChannelTarget(luigi.Target):

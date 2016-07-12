@@ -56,7 +56,7 @@ class HDF5VolumeTarget(luigi.File):
         '''The path to the HDF5 file'''
         return os.path.join(
             shard(self.paths, self.x, self.y, self.z),
-            self.pattern.format(self.x, self.y, self.z) + ".h5")
+            self.pattern.format(x=self.x, y=self.y, z=self.z) + ".h5")
     
     def __get_fullpath(self):
         '''The path to the marker file for the dataset

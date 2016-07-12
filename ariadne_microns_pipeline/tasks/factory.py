@@ -8,9 +8,12 @@ import rh_config
 from .download_from_butterfly import DownloadFromButterflyTask
 from .block import BlockTask
 from .classify import ClassifyTask
+from .json_to_csv_task import JSONToCSVTask
 from .mask import MaskBorderTask
 from .neuroproof import NeuroproofTask
 from .segment import SegmentTask
+from .segmentation_statistics import \
+     SegmentationStatisticsTask, SegmentationReportTask
 from .utilities import to_hashable
 
 class AMTaskFactory(object):
@@ -216,3 +219,52 @@ class AMTaskFactory(object):
         :param dataset_name: the name of the dataset within the HDF5 file
         '''
         return ExtractDatasetTask(in_hdf5_file.path, dataset_name)
+    
+    def gen_segmentation_statistics_task(self,
+                                         volume,
+                                         gt_seg_location,
+                                         pred_seg_location,
+                                         output_location):
+        '''Collect statistics on the accuracy of a prediction
+        
+        This task does a statistical analysis of the accuracy of a prediction,
+        comparing it against the ground truth. The data are saved as a
+        JSON dictionary.
+        
+        :param volume: The volume that was segmented
+        :param gt_seg_location: the location of the ground truth volume
+        :param pred_seg_location: the location of the classifier prediction
+        :param output_location: where to put the JSON file that contains the
+        statistics.
+        '''
+        return SegmentationStatisticsTask(
+            volume=volume,
+            ground_truth_location = gt_seg_location,
+            test_location=pred_seg_location,
+            output_path=output_location)
+    
+    def gen_segmentation_report_task(self,
+                                     csv_location,
+                                     pdf_location):
+        '''Generate a statistics report on the segmentation
+        
+        :param csv_location: the path to the CSV file containing the statistics
+        :param pdf_location: where to write the matplotlib report
+        '''
+        return SegmentationReportTask(
+            csv_location=csv_location,
+            pdf_location=pdf_location)
+    
+    def gen_json_to_csv_task(self,
+                             json_paths,
+                             output_path):
+        '''Collect a number of JSON dictionaries into one .csv file
+        
+        Each JSON dictionary is a row in the CSV files and the columns are
+        the keys in the dictionary, sorted alphabetically.
+        
+        :param json_paths: a sequence of pathnames to the JSON input files
+        :param output_path: the location for the .csv file
+        '''
+        return JSONToCSVTask(json_paths=json_paths,
+                             output_path=output_path)

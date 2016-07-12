@@ -25,6 +25,12 @@ MEMBRANE_DATASET = "membrane"
 '''The name of the neuroproofed segmentation datasets'''
 NP_DATASET = "neuroproof"
 
+'''The name of the ground-truth dataset for statistics computation'''
+GT_DATASET = "gt"
+
+'''The name of the predicted segmentation for statistics computation'''
+PRED_DATASET = "pred"
+
 '''The pattern for border datasets
 
 parent - name of parent dataset, e.g. "membrane"
@@ -46,6 +52,8 @@ class PipelineTaskMixin:
         description="The name of the volume that was imaged")
     channel = luigi.Parameter(
         description="The name of the channel from which we take data")
+    gt_channel = luigi.Parameter(
+        description="The name of the channel containing the ground truth")
     url = luigi.Parameter(
         description="The URL of the Butterfly REST endpoint")
     pixel_classifier_path = luigi.Parameter(
@@ -104,6 +112,9 @@ class PipelineTaskMixin:
     threshold = luigi.FloatParameter(
         description="The threshold used during segmentation for finding seeds",
         default=1)
+    statistics_csv_path = luigi.Parameter(
+        description="The path to the CSV statistics output file.",
+        default="/dev/null")
 
 
     def get_dirs(self, x, y, z):
@@ -534,6 +545,98 @@ class PipelineTaskMixin:
                         np_task.set_requirement(seg_task)
                         np_tasks[zi, yi, xi] = np_task
     
+    def generate_gt_cutouts(self):
+        '''Generate volumes of ground truth segmentation'''
+        
+        self.gt_block_tasks = np.zeros((self.n_z, self.n_y, self.n_x), object)
+        for zi in range(self.n_z):
+            z0 = self.zs[zi] + self.np_z_pad
+            z1 = self.zs[zi+1] - self.np_z_pad
+            for yi in range(self.n_y):
+                y0 = self.ys[yi] + self.np_y_pad
+                y1 = self.ys[yi+1] - self.np_y_pad
+                for xi in range(self.n_x):
+                    x0 = self.xs[xi] + self.np_x_pad
+                    x1 = self.xs[xi+1] - self.np_x_pad
+                    volume=Volume(x0, y0, z0, x1-x0, y1-y0, z1-z0)
+                    dataset_location = self.get_dataset_location(
+                        volume, GT_DATASET)
+                    btask = self.factory.gen_get_volume_task(
+                        self.experiment,
+                        self.sample,
+                        self.dataset,
+                        self.gt_channel,
+                        self.url,
+                        volume,
+                        dataset_location)
+                    self.gt_block_tasks[zi, yi, xi] = btask
+    
+    def generate_pred_cutouts(self):
+        '''Generate volumes matching the ground truth segmentations'''
+        self.pred_block_tasks = np.zeros((self.n_z, self.n_y, self.n_x),
+                                         object)
+        for zi in range(self.n_z):
+            z0 = self.zs[zi] + self.np_z_pad
+            z1 = self.zs[zi+1] - self.np_z_pad
+            for yi in range(self.n_y):
+                y0 = self.ys[yi] + self.np_y_pad
+                y1 = self.ys[yi+1] - self.np_y_pad
+                for xi in range(self.n_x):
+                    x0 = self.xs[xi] + self.np_x_pad
+                    x1 = self.xs[xi+1] - self.np_x_pad
+                    volume=Volume(x0, y0, z0, x1-x0, y1-y0, z1-z0)
+                    dataset_location = self.get_dataset_location(
+                        volume, PRED_DATASET)
+                    nptask = self.np_tasks[zi, yi, xi]
+                    btask = self.factory.gen_block_task(
+                        volume, dataset_location,
+                        [dict(volume=nptask.volume,
+                              location=nptask.output_seg_location)])
+                    btask.set_requirement(nptask)
+                    self.pred_block_tasks[zi, yi, xi] = btask
+                    
+    def generate_statistics_tasks(self):
+        if self.statistics_csv_path != "/dev/null":
+            self.statistics_tasks = np.zeros((self.n_z, self.n_y, self.n_x),
+                                             object)
+            self.generate_gt_cutouts()
+            self.generate_pred_cutouts()
+            json_paths = []
+            for zi in range(self.n_z):
+                for yi in range(self.n_y):
+                    for xi in range(self.n_x):
+                        ptask = self.pred_block_tasks[zi, yi, xi]
+                        gttask = self.gt_block_tasks[zi, yi, xi]
+                        output_location = os.path.join(
+                            self.get_dirs(
+                                self.xs[xi], self.ys[yi], self.zs[zi])[0],
+                            "segmentation_statistics.json")
+                        stask = self.factory.gen_segmentation_statistics_task(
+                            volume=ptask.output_volume, 
+                            gt_seg_location=gttask.destination,
+                            pred_seg_location=ptask.output_location,
+                            output_location=output_location)
+                        stask.set_requirement(ptask)
+                        stask.set_requirement(gttask)
+                        self.statistics_tasks[zi, yi, xi] = stask
+                        output_target = stask.output()
+                        output_target.is_tmp=True
+                        json_paths.append(output_target.path)
+            self.statistics_csv_task = self.factory.gen_json_to_csv_task(
+                json_paths=json_paths,
+                output_path = self.statistics_csv_path)
+            for stask in self.statistics_tasks.flatten():
+                self.statistics_csv_task.set_requirement(stask)
+            pdf_path = os.path.splitext(self.statistics_csv_path)[0] + ".pdf"
+            self.statistics_report_task = \
+                self.factory.gen_segmentation_report_task(
+                    self.statistics_csv_task.output().path,
+                    pdf_path)
+            self.statistics_report_task.set_requirement(
+                self.statistics_csv_task)
+        else:
+            self.statistics_csv_task = None
+    
     def compute_requirements(self):
         '''Compute the requirements for this task'''
         if not hasattr(self, "requirements"):
@@ -574,6 +677,12 @@ class PipelineTaskMixin:
                 self.np_x_border_tasks.flatten().tolist() +\
                 self.np_y_border_tasks.flatten().tolist() +\
                 self.np_z_border_tasks.flatten().tolist()
+            #
+            # (maybe) generate the statistics tasks
+            #
+            self.generate_statistics_tasks()
+            if self.statistics_csv_task is not None:
+                self.requirements.append(self.statistics_report_task)
     
     def requires(self):
         self.compute_requirements()
