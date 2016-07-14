@@ -1,4 +1,6 @@
 import luigi
+import rh_logger
+from .utilities import PipelineRunReportMixin
 from ..tasks.factory import AMTaskFactory
 from ..tasks.classify import ClassifyShimTask
 from ..targets.classifier_target import PixelClassifierTarget
@@ -640,6 +642,11 @@ class PipelineTaskMixin:
     def compute_requirements(self):
         '''Compute the requirements for this task'''
         if not hasattr(self, "requirements"):
+            try:
+                rh_logger.logger.report_event("Assembling pipeline")
+            except:
+                rh_logger.logger.start_process("Ariadne pipeline",
+                                               "Assembling pipeline")
             self.factory = AMTaskFactory()
             self.pixel_classifier = PixelClassifierTarget(
                 self.pixel_classifier_path)
@@ -693,16 +700,9 @@ class PipelineTaskMixin:
     #                          [SEG_DATASET])
 
 
-class PipelineRunMixin:
-    
-    def ariadne_run(self):
-        pass
-
-class PipelineTask(PipelineTaskMixin, PipelineRunMixin, luigi.Task):
+class PipelineTask(PipelineTaskMixin, PipelineRunReportMixin, luigi.Task):
     task_namespace = "ariadne_microns_pipeline"
     
-    def run(self):
-        self.ariadne_run()
         
         
         

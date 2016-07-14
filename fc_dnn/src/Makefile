@@ -1,27 +1,7 @@
-
-# Haswell
-#CC := /home/amatveev/Pipeline/cilkplus-install/bin/g++
-#LD := /home/amatveev/Pipeline/cilkplus-install/bin/g++
-
-# 72-core
-CC := $(CILKPLUS_PREFIX)/bin/g++
-LD := $(CILKPLUS_PREFIX)/bin/g++
-
-# gcc-trunk
-#CC := /mnt/disk1/armafire/tools/gcc-trunk-install/bin/g++
-#LD := /mnt/disk1/armafire/tools/gcc-trunk-install/bin/g++
-
-# Haswell
-#OPENCV_INCLUDE := /home/amatveev/Pipeline/tools/OpenCV/opencv-2.4-install/include/
-#OPENCV_LIB := /home/amatveev/Pipeline/tools/OpenCV/opencv-2.4-install/lib/
-
-# 72-core CM1
-#OPENCV_INCLUDE=/home/armafire/tools/opencv-install/include/
-#OPENCV_LIB=/home/armafire/tools/opencv-install/lib/
-
-# 72-core CM2
-#OPENCV_INCLUDE=/home/armafire/tools/opencv-2.4.11-install/include
-#OPENCV_LIB=/home/armafire/tools/opencv-2.4.11-install/lib
+#
+# This makefile should be run via "make fc_dnn/src/run_dnn" from the root
+# directory
+#
 OPENCV_INCLUDE=$(OPENCV_PREFIX)/include
 OPENCV_LIB=$(OPENCV_PREFIX)/lib
 
@@ -46,8 +26,9 @@ else
 endif
 
 
-LDFLAGS += -L$(GCC_LIB) -L$(OPENCV_LIB) -L$(CILKPLUS_PREFIX)/lib64 -lcilkrts -lopencv_imgcodecs -lopencv_core -lopencv_imgproc -lopencv_highgui
-#LDFLAGS += -L$(OPENCV_LIB) -lcilkrts -lopencv_highgui -lopencv_core -lopencv_imgproc 
+LDFLAGS += -L$(GCC_LIB) -L$(OPENCV_LIB) -L$(CILKPLUS_PREFIX)/lib64 -lcilkrts 
+#LDFLAGS +=-lopencv_imgcodecs
+LDFLAGS +=-lopencv_core -lopencv_imgproc -lopencv_highgui
 
 BINS = run_dnn
 

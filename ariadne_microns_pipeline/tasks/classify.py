@@ -124,6 +124,8 @@ class ClassifyShimTask(RequiresMixin, luigi.Task):
     but appear to be necessary for defining the shim task as a unit.
     '''
     
+    task_namespace = "ariadne_microns_pipeline"
+    
     mv_roots = luigi.ListParameter(
         description="The paths of the sharded root directories "
         "for the multivolume produced by the classifier.")

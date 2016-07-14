@@ -81,5 +81,7 @@ class BlockTask(BlockTaskMixin,
                 luigi.Task):
     '''Copy blocks from the inputs to produce the output'''
     
+    task_namespace="ariadne_microns_pipeline"
+    
     def run(self):
         self.ariadne_run()

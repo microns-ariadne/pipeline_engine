@@ -1,5 +1,7 @@
 import luigi
 import cPickle
+import os
+
 from abc import ABCMeta
 from luigi.six import add_metaclass
 
@@ -51,6 +53,11 @@ class AbstractPixelClassifier:
 class PixelClassifierTarget(luigi.File):
     '''A pixel classifier target. You can use this target to classify pixels'''
     
+    # A cache of classifier pickle pathname to two-tuple of
+    #    classifier and file modification time
+    #
+    cache = {}
+    
     def __init__(self, path):
         super(PixelClassifierTarget, self).__init__(path)
         self.__classifier = None
@@ -65,8 +72,15 @@ class PixelClassifierTarget(luigi.File):
     @property
     def classifier(self):
         if self.__classifier is None:
+            mtime = os.stat(self.path).st_mtime
+            if self.path in self.cache:
+                classifier, old_mtime = self.cache[self.path]
+                if mtime == old_mtime:
+                    return classifier
+                
             unpickler = cPickle.Unpickler(self.open())
             self.__classifier = unpickler.load()
+            self.cache[self.path] = (self.__classifier, mtime)
         return self.__classifier
     
     #

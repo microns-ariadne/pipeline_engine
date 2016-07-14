@@ -1,39 +1,21 @@
 ## Installation
 
-pipeline_engine has the following dependencies
+The Python Luigi framework installs via standardized mechanisms, e.g.
+'pip install .' from the root directory. Some of the tasks run binaries
+as subprocesses. These are built with the makefile in the root directory.
+This makefile builds a number of dependencies with the CILKplus compiler
+and it builds the compiler itself.
 
-OpenCV 2.4
-Vigra
-Cilkplus
-Jsoncpp (https://github.com/open-source-parsers/jsoncpp)
-HDF5 1.8+
+You should create a tools directory to hold these dependencies. The following
+libraries should be installed on your system along with their include files:
 
-Dependencies should have `CXXFLAGS=-std=c++11` defined, e.g. when running CMake
-
-Building Vigra is an art in and of itself. The happy path is to build Boost
-using the Cilk compiler and perhaps you will succeed. Building Boost:
-
-* Download and unpack Boost to a directory, e.g. ~/tools/boost/boost-<version>
-* CD into the Boost directory
-* Type `./bootstrap.sh`. This produces the "b2" program and project-config.jam
-* Find the line in project-config.jam starting with "using gcc" and edit
-it to point to your compiler. Mine said
-`using gcc : 4.9.0 : /home/leek/tools/cilk/cilkplus-install/bin/g++` when I was
-done. I also edited the line starting with "using python" to point at my
-virtualenv's Python. Boost Python is nice to have but not necessary.
-* Type `./b2 --prefix=<path-to-boost-install>`
-* Wait... a long time. Remember, most of Boost requires absolutely no
-compilation. But Boost is big, even the part that requires compilation is
-very big.
-
-When building, you should supply the locations to the install directories for
-these:
-
-OPENCV_PREFIX
-CILKPLUS_PREFIX
-VIGRA_PREFIX
-JSONCPP_PREFIX
-BOOST_PREFIX
+libbz2
+libfftw
+libhdf5
+libjpeg
+libpng
+libtiff
+libz
 
 ## Deployment
 
@@ -48,4 +30,34 @@ neuroproof:
         - <path to Vigra libraries>
         - <path to JSONCPP libraries>
         - <path to CilkPlus libraries>
+
+Optionally, if you use the fc_dnn classifier, you should have a section
+for it in .rh_config.yaml:
+
+c_dnn:
+   path: <path-to-comipiled-binary>/fc_dnn
+   ld_library_path:
+    - <path to OpenCV libraries>
+   xy_pad: <padding needed for image>
+   z_depth: <depth of NN in the Z direction>
+   num_classes: <# of classes output by fc_dnn as .png files>
+   membrane_class: <Zero-based index of membrane .png file>
+
+If you want timings from Luigi, you will have to start luigid using the
+same account that you use to run Luigi. Your `luigi.cfg` file should
+be set up to save task history (see 
+http://luigi.readthedocs.io/en/stable/configuration.html#scheduler and 
+http://datapipelinearchitect.com/luigi-scheduler-history/).
+
+You should add the following section to your .rh_config.yaml file:
+
+luigid:
+    db_connection=<sqlalchemy db connection>
+
+## Running
+
+To get help on the pipeline task, run it from Luigi:
+
+    luigi --module ariadne_microns_pipeline.pipelines ariadne_microns_pipeline.PipelineTask --help
+
 

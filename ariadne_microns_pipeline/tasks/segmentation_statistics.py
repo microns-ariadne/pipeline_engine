@@ -7,6 +7,7 @@ import json
 import luigi
 import matplotlib
 from matplotlib.backends.backend_pdf import FigureCanvasPdf
+import numpy as np
 import pandas
 
 from ..algorithms.evaluation import segmentation_metrics
@@ -101,12 +102,24 @@ class SegmentationReportTask(RequiresMixin, luigi.Task):
         dataframe = pandas.read_csv(
             self.csv_location)
         figure = matplotlib.figure.Figure()
+        figure.set_size_inches(6, 6)
         columns = sorted(filter(
             lambda _:_ not in ('x', 'y', 'z', 'width', 'height', 'depth'),
             dataframe.columns))
         ax = figure.add_subplot(1, 1, 1)
         ax.boxplot([dataframe[c] for c in columns],
                    labels = columns)
+        ax.set_yticks(np.linspace(.5, 1.0, 11))
+        ax.set_xlim(.5, len(columns)+1)
+        for i, mean in enumerate([dataframe[c].mean() for c in columns]):
+            ann = ax.annotate("%.2f" % mean, 
+                        xy=(i+1, mean),
+                        xytext=(i+1.4, mean),
+                        bbox=dict(boxstyle="round", fc="white", ec="gray"),
+                        arrowprops=dict(arrowstyle="->", color="gray"))
+            matplotlib.pyplot.setp(ann, fontsize=6)
+        matplotlib.pyplot.setp(ax.get_xmajorticklabels(), fontsize=8)
+        matplotlib.pyplot.setp(ax.get_ymajorticklabels(), fontsize=6)
         ax.set_title("Segmentation accuracy")
         canvas = FigureCanvasPdf(figure)
         figure.savefig(self.pdf_location)
