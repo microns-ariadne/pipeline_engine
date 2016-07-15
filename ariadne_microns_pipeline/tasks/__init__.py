@@ -10,13 +10,15 @@ mapper/factory that lets you select the task class for a given task and
 execution mechanism.
 '''
 
-from block import BlockTask
-from classify import ClassifyTask
-from download_from_butterfly import DownloadFromButterflyTask
-from factory import AMTaskFactory
-from mask import MaskBorderTask
-from neuroproof import NeuroproofTask
-from segment import SegmentTask
+from .block import BlockTask
+from .classify import ClassifyTask
+from .connected_components import ConnectedComponentsTask
+from .download_from_butterfly import DownloadFromButterflyTask
+from .factory import AMTaskFactory
+from .mask import MaskBorderTask
+from .neuroproof import NeuroproofTask
+from .segment import SegmentTask
 
-all = [BlockTask, DownloadFromButterflyTask, AMTaskFactory,
+all = [BlockTask, ClassifyTask, ConnectedComponentsTask,
+       DownloadFromButterflyTask, AMTaskFactory,
        MaskBorderTask, NeuroproofTask, SegmentTask]

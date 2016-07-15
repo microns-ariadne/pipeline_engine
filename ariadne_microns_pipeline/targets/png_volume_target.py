@@ -38,6 +38,7 @@ class PngVolumeTarget(luigi.LocalTarget):
         self.width = width
         self.height = height
         self.depth = depth
+        self.__has_volume = False
         super(PngVolumeTarget, self).__init__(self.__get_touchfile_name())
         
     def __getstate__(self):
@@ -124,8 +125,9 @@ class PngVolumeTarget(luigi.LocalTarget):
         #
         # TODO: optimize this
         #
-        if not hasattr(self, "__volume"):
+        if not self.__has_volume:
             self.__volume = self.imread()
+            self.__has_volume = True
         z0 = z - self.z
         z1 = z0 + depth
         y0 = y - self.y
@@ -147,11 +149,12 @@ class PngVolumeTarget(luigi.LocalTarget):
         :param y: the y offset of the subvolume in the global space
         :param z: the z offset of the subvolume in the global space
         '''
-        if not hasattr(self, "__volume"):
+        if not self.__has_volume:
             shape = [self.depth, self.height, self.width]
             if subvolume.ndim == 4:
                 shape.append(subvolume.shape[3])
             self.__volume = np.zeros(shape, subvolume.dtype)
+            self.__has_volume = True
             
         z0 = z - self.z
         z1 = z0 + subvolume.shape[0]

@@ -446,7 +446,7 @@ class PipelineTaskMixin:
                         out_dataset_name = BORDER_DATASET_PATTERN.format(
                             parent=in_dataset_name, direction="y")
                         tasks_out[zi, ytop, xi] = \
-                            self.generate_x_border_task(
+                            self.generate_y_border_task(
                                 task_top, task_bottom,
                                 out_dataset_name)
 
