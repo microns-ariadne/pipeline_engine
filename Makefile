@@ -54,6 +54,7 @@
 # this build is not going to be compatible and you have to build a separate
 # instance for your Python.
 #
+AUTOCONF_PREFIX=$(TOOLS_PREFIX)/autoconf
 CILKPLUS_PREFIX=$(TOOLS_PREFIX)/cilkplus
 OPENCV_PREFIX=$(TOOLS_PREFIX)/opencv-2.4
 BOOST_PREFIX=$(TOOLS_PREFIX)/boost
@@ -68,9 +69,17 @@ CILKPLUS_C_COMPILER=$(CILKPLUS_PREFIX)/cilkplus-install/bin/gcc
 OPENCV_INCLUDE=$(OPENCV_PREFIX)/include
 OPENCV_LIB=$(OPENCV_PREFIX)/lib
 
+#
+# This is the user-config.jam file text needed by Boost
+#
+define USER_CONFIG_JAM
+using gcc : 4.9.0 : $(CILKPLUS_CXX_COMPILER) ;
+endef
+export USER_CONFIG_JAM
+
 .PHONY: all np-merge fc_dnn all_sources cilkplus-sources clean
 
-all: neuroproof fc_dnn
+all: $(TOOLS_PREFIX)/sources neuroproof fc_dnn
 
 clean:
 	cd fc_dnn/src &&\
@@ -91,7 +100,7 @@ neuroproof: $(TOOLS_PREFIX)/sparsehash/sparsehash-install \
 	make all learn
 
 $(TOOLS_PREFIX)/sparsehash/sparsehash-install:
-	mkdir $(TOOLS_PREFIX)/sparsehash &&\
+	mkdir -p $(TOOLS_PREFIX)/sparsehash &&\
 	cd neuroproof/sparsehash &&\
 	./configure --prefix=$(SPARSEHASH_INSTALL) &&\
 	make &&\
@@ -108,21 +117,8 @@ $(TOOLS_PREFIX)/sources:
 $(TOOLS_PREFIX)/sources/opencv-2.4.9.zip:
 	wget http://downloads.sourceforge.net/project/opencvlibrary/opencv-unix/2.4.9/opencv-2.4.9.zip -O $@
 
-$(TOOLS_PREFIX)/cilkplus/cilkplus-gcc:
-	mkdir -p $(TOOLS_PREFIX)/cilkplus &&\
-	cd $(CILKPLUS_PREFIX) &&\
-	git clone https://github.com/gcc-mirror/gcc.git cilkplus-gcc &&\
-	cd cilkplus-gcc &&\
-	git checkout origin/cilkplus
-
-$(TOOLS_PREFIX)/cilkplus/cilkplus-install/bin/g++: $(TOOLS_PREFIX)/cilkplus/cilkplus-gcc
-	cd $(CILKPLUS_PREFIX)/cilkplus-gcc &&\
-	./contrib/download_prerequisites &&\
-	mkdir -p $(CILKPLUS_PREFIX)/build &&\
-	cd $(CILKPLUS_PREFIX)/build &&\
-	$(CILKPLUS_PREFIX)/cilkplus-gcc/configure --prefix=$(CILKPLUS_PREFIX)/cilkplus-install --enable-languages="c,c++" &&\
-	make &&\
-	make install
+$(TOOLS_PREFIX)/sources/autoconf-2.64.tar.gz:
+	wget http://ftp.gnu.org/gnu/autoconf/autoconf-2.64.tar.gz -O $@
 
 $(TOOLS_PREFIX)/sources/boost-1.61.0.tar.gz:
 	wget http://downloads.sourceforge.net/project/boost/boost/1.61.0/boost_1_61_0.tar.gz -O $@
@@ -132,6 +128,31 @@ $(TOOLS_PREFIX)/sources/vigra-1.10.0-src.tar.gz:
 
 $(TOOLS_PREFIX)/sources/jsoncpp-1.7.3.tar.gz:
 	wget https://github.com/open-source-parsers/jsoncpp/archive/1.7.3.tar.gz -O $@
+
+$(TOOLS_PREFIX)/autoconf/autoconf-install/bin/autoconf: $(TOOLS_PREFIX)/sources/autoconf-2.64.tar.gz
+	mkdir -p $(AUTOCONF_PREFIX) &&\
+	cd $(AUTOCONF_PREFIX) &&\
+	tar -xvf $(TOOLS_PREFIX)/sources/autoconf-2.64.tar.gz &&\
+	cd autoconf-2.64 &&\
+	./configure --prefix=$(AUTOCONF_PREFIX)/autoconf-install &&\
+	make &&\
+	make install
+
+$(TOOLS_PREFIX)/cilkplus/cilkplus-gcc:
+	mkdir -p $(TOOLS_PREFIX)/cilkplus &&\
+	cd $(CILKPLUS_PREFIX) &&\
+	git clone https://github.com/gcc-mirror/gcc.git cilkplus-gcc &&\
+	cd cilkplus-gcc &&\
+	git checkout origin/cilkplus
+
+$(TOOLS_PREFIX)/cilkplus/cilkplus-install/bin/g++: $(TOOLS_PREFIX)/cilkplus/cilkplus-gcc $(TOOLS_PREFIX)/autoconf/autoconf-install/bin/autoconf
+	cd $(CILKPLUS_PREFIX)/cilkplus-gcc &&\
+	./contrib/download_prerequisites &&\
+	mkdir -p $(CILKPLUS_PREFIX)/build &&\
+	cd $(CILKPLUS_PREFIX)/build &&\
+	$(CILKPLUS_PREFIX)/cilkplus-gcc/configure --prefix=$(CILKPLUS_PREFIX)/cilkplus-install --enable-languages="c,c++" &&\
+	PATH=$(AUTOCONF_INSTALL):$$PATH make &&\
+	make install
 
 $(TOOLS_PREFIX)/jsoncpp/jsoncpp-install: $(TOOLS_PREFIX)/sources/jsoncpp-1.7.3.tar.gz $(TOOLS_PREFIX)/cilkplus/cilkplus-install/bin/g++
 	mkdir -p $(TOOLS_PREFIX)/jsoncpp
@@ -185,7 +206,7 @@ $(TOOLS_PREFIX)/boost/boost-install: $(TOOLS_PREFIX)/sources/boost-1.61.0.tar.gz
 	cd $(BOOST_PREFIX) && \
 	tar -xvf $(TOOLS_PREFIX)/sources/boost-1.61.0.tar.gz && \
 	cd boost_1_61_0 && \
-	echo 'using gcc : 4.9.0 : ' $(CILKPLUS_CXX_COMPILER) > tools/build/src/user-config.jam &&\
+	echo $$USER_CONFIG_JAM > tools/build/src/user-config.jam &&\
 	./bootstrap.sh &&\
 	./b2 --prefix=$(BOOST_PREFIX)/boost-install &&\
 	./b2 install --prefix=$(BOOST_PREFIX)/boost-install
