@@ -12,8 +12,9 @@ class TestPngVolumeTarget(unittest.TestCase):
         self.root = tempfile.mkdtemp()
         self.dataset_name = "foo"
         self.pattern = "{x:04d}_{y:04d}_{z:04d}"
-        self.touchfile = os.path.join(self.root, self.dataset_name,
-                                      "0001_0002_0003.png.done")
+        t = PngVolumeTarget([self.root], self.dataset_name, self.pattern,
+                            1, 2, 3, 30, 20, 10)
+        self.touchfile = t.path
     
     def tearDown(self):
         for root, dirnames, filenames in os.walk(self.root, topdown=False):

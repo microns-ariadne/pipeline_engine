@@ -12,13 +12,15 @@ execution mechanism.
 
 from .block import BlockTask
 from .classify import ClassifyTask
-from .connected_components import ConnectedComponentsTask
+from .connected_components import \
+     AllConnectedComponentsTask, ConnectedComponentsTask
 from .download_from_butterfly import DownloadFromButterflyTask
 from .factory import AMTaskFactory
 from .mask import MaskBorderTask
 from .neuroproof import NeuroproofTask
 from .segment import SegmentTask
 
-all = [BlockTask, ClassifyTask, ConnectedComponentsTask,
+all = [AllConnectedComponentsTask, BlockTask, ClassifyTask, 
+       ConnectedComponentsTask,
        DownloadFromButterflyTask, AMTaskFactory,
        MaskBorderTask, NeuroproofTask, SegmentTask]

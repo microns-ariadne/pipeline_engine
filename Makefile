@@ -174,6 +174,7 @@ $(TOOLS_PREFIX)/cilkplus/cilkplus-gcc:
 
 $(TOOLS_PREFIX)/cilkplus/cilkplus-install/bin/g++: $(TOOLS_PREFIX)/cilkplus/cilkplus-gcc $(TOOLS_PREFIX)/autoconf/autoconf-install/bin/autoconf
 	cd $(CILKPLUS_PREFIX)/cilkplus-gcc &&\
+	git clean -xfd
 	./contrib/download_prerequisites &&\
 	mkdir -p $(CILKPLUS_PREFIX)/build &&\
 	cd $(CILKPLUS_PREFIX)/build &&\

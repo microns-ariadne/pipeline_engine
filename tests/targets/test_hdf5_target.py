@@ -3,24 +3,26 @@ import unittest
 import h5py
 import numpy as np
 import os
+import shutil
 import tempfile
 from ariadne_microns_pipeline.targets.hdf5_target import HDF5VolumeTarget
 
 class TestHDF5VolumeTarget(unittest.TestCase):
 
     def setUp(self):
-        self.fd, self.path = tempfile.mkstemp(".h5")
+        self.tempdir = tempfile.mkdtemp()
+        self.fd, self.path = tempfile.mkstemp(".h5", dir=self.tempdir)
         self.root, self.filename = os.path.split(self.path)
         self.pattern = os.path.splitext(self.filename)[0]
     
-    def write_done_file(self):
-        done_file = self.path + ".foo.done"
+    def write_done_file(self, target):
+        done_file = target.path
         with open(done_file, "w") as fd:
             fd.write("done")
         
     def tearDown(self):
         os.close(self.fd)
-        os.remove(self.path)
+        shutil.rmtree(self.tempdir)
         
     def test_01_01_does_not_exist(self):
         t = HDF5VolumeTarget([self.root], "foo", "bar",
@@ -36,9 +38,9 @@ class TestHDF5VolumeTarget(unittest.TestCase):
     def test_01_02_exists(self):
         with h5py.File(self.path, "w") as fd:
             fd.create_dataset("foo", (10, 20, 30), np.uint8)
-        self.write_done_file()
         t = HDF5VolumeTarget([self.root], "foo", self.pattern,
                              0, 0, 0, 30, 20, 10)
+        self.write_done_file(t)
         self.assertTrue(t.exists())
     
     def test_02_01_read(self):
@@ -48,7 +50,7 @@ class TestHDF5VolumeTarget(unittest.TestCase):
             fd.create_dataset("foo", data=data)
             t = HDF5VolumeTarget([self.root], "foo", self.pattern,
                                  0, 0, 0, 30, 20, 10)
-        self.write_done_file()
+        self.write_done_file(t)
         np.testing.assert_array_equal(t.imread(), data)
     
     def test_02_03_write(self):
@@ -57,7 +59,7 @@ class TestHDF5VolumeTarget(unittest.TestCase):
         t = HDF5VolumeTarget([self.root], "foo", self.pattern,
                              1, 2, 3, 30, 20, 10)
         t.imwrite(data)
-        self.assertTrue(os.path.isfile(self.path+".foo.done"))
+        self.assertTrue(os.path.isfile(t.path))
         with h5py.File(self.path, "r") as fd:
             ds = fd["foo"]
             np.testing.assert_array_equal(ds[:], data)

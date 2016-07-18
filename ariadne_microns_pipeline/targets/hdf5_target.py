@@ -7,9 +7,10 @@
 import luigi
 import h5py
 import os
-from utilities import shard
+from .utilities import shard
+from .volume_target import VolumeTarget
 
-class HDF5VolumeTarget(luigi.File):
+class HDF5VolumeTarget(VolumeTarget):
     '''An HDF5 dataset target representing a 3-D volume
     
     The 3-d volume is traditionally arranged as Z, Y, X so that Z-strides
@@ -21,53 +22,13 @@ class HDF5VolumeTarget(luigi.File):
     done.
     '''
     
-    def __init__(self, paths, dataset_path, pattern, x, y, z,
-                 width, height, depth):
-        '''Initialize the target
-        
-        :param path: path to the HDF5 file
-        :param dataset_path: path to the dataset within the HDF5 file
-        :param pattern: A pattern for str.format(). The variables available
-        are "x", "y" and "z". Example: "{x:04}_{y:04}_{z:04}.png" yields
-        "0001_0002_0003.png" for a plane with X offset 1, Y offset 2 and
-        Z offset 3.
-        The touchfile (indicating that all PNG files are available) is
-        "pattern.format(x=x, y=y, z=z)+".done".
-        :param x: the X offset of the volume in the global space
-        :param y: the Y offset of the volume in the global space
-        :param z: the Z offset of the volume in the global space
-        :param width: the width of the volume
-        :param height: the height of the volume
-        :param depth: the depth of the volume
-        '''
-        self.paths = paths
-        self.dataset_path = dataset_path
-        self.pattern = pattern
-        self.x = x
-        self.y = y
-        self.z = z
-        self.width = width
-        self.height = height
-        self.depth = depth
-        super(HDF5VolumeTarget, self).__init__(self.__get_fullpath())
-        self.h5path = self.__get_hdf5_path()
-    
-    def __get_hdf5_path(self):
+
+    @property
+    def h5path(self):
         '''The path to the HDF5 file'''
         return os.path.join(
             shard(self.paths, self.x, self.y, self.z),
             self.pattern.format(x=self.x, y=self.y, z=self.z) + ".h5")
-    
-    def __get_fullpath(self):
-        '''The path to the marker file for the dataset
-        
-        You can't reliably detect when an HDF dataset is written because
-        the write is not atomic. This will change in HDF5 1.10
-        (https://www.hdfgroup.org/HDF5/docNewFeatures/)
-        
-        So we maintain a separate file per dataset for this purpose.
-        '''
-        return self.__get_hdf5_path() + "." + self.dataset_path + ".done"
     
     def imread(self):
         '''Read the volume

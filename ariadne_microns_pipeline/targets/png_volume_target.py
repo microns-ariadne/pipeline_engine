@@ -4,66 +4,17 @@ import json
 import numpy as np
 import os
 
-from utilities import shard
+from .utilities import shard
+from .volume_target import VolumeTarget
 
-class PngVolumeTarget(luigi.LocalTarget):
+class PngVolumeTarget(VolumeTarget):
     '''The PngVolumeTarget stores a volume as planes of .png files'''
-    
-    def __init__(self, paths, dataset_path, pattern, 
-                 x, y, z, width, height, depth):
-        '''Initialize the target with the pathnames and file name pattern
-        
-        :param paths: A list of paths. For a plane, Z, we write the png file
-        to the Zth path modulo len(paths),.
-        :param dataset_path: in this case, the subdirectory for the .PNG files
-        :param pattern: A pattern for str.format(). The variables available
-        are "x", "y" and "z". Example: "{x:04}_{y:04}_{z:04}.png" yields
-        "0001_0002_0003.png" for a plane with X offset 1, Y offset 2 and
-        Z offset 3.
-        The touchfile (indicating that all PNG files are available) is
-        "pattern.format(x=x, y=y, z=z)+".done".
-        :param x: the X offset of the volume in the global space
-        :param y: the Y offset of the volume in the global space
-        :param z: the Z offset of the volume in the global space
-        :param width: the width of the volume
-        :param height: the height of the volume
-        :param depth: the depth of the volume
-        '''
-        self.paths = paths
-        self.dataset_path = dataset_path
-        self.pattern = pattern
-        self.x = x
-        self.y = y
-        self.z = z
-        self.width = width
-        self.height = height
-        self.depth = depth
+
+    def __new__(cls, *args, **kwargs):
+        self = VolumeTarget.__new__(cls, *args, **kwargs)
         self.__has_volume = False
-        super(PngVolumeTarget, self).__init__(self.__get_touchfile_name())
+        return self
         
-    def __getstate__(self):
-        return dict(paths=self.paths,
-                    dataset_path=self.dataset_path,
-                    pattern=self.pattern,
-                    x=self.x,
-                    y=self.y,
-                    z=self.z,
-                    width=self.width,
-                    height=self.height,
-                    depth=self.depth)
-    
-    def __setstate__(self, state):
-        self.paths = state["paths"]
-        self.dataset_path = state["dataset_path"]
-        self.pattern = state["pattern"]
-        self.x = state["x"]
-        self.y = state["y"]
-        self.z = state["z"]
-        self.width = state["width"]
-        self.height = state["height"]
-        self.depth = state["depth"]
-        super(PngVolumeTarget, self).__init__(self.__get_touchfile_name())
-    
     def __get_filename(self, z):
         '''Get the file name for the plane at z'''
         return os.path.join(
@@ -74,9 +25,6 @@ class PngVolumeTarget(luigi.LocalTarget):
         return os.path.join(shard(self.paths, self.x, self.y, self.z),
                             self.dataset_path)
     
-    def __get_touchfile_name(self):
-        return self.__get_filename(self.z) + ".done"
-    
     def imwrite(self, volume):
         '''Write the volume
         
@@ -85,7 +33,8 @@ class PngVolumeTarget(luigi.LocalTarget):
         be either uint8 or uint16. The coordinates are z, y, x and optionally
         color.
         '''
-        self.makedirs()
+        for path in self.paths:
+            os.makedirs(os.path.join(path, self.dataset_path))
         d = dict(dimensions=volume.shape,
                  dtype=volume.dtype.descr[0][1],
                  x=self.x,
