@@ -38,7 +38,7 @@ class DNNClassifier(AbstractPixelClassifier):
     def get_class_names(self):
         return ["membrane"]
     
-    def classify(self, image):
+    def classify(self, image, x, y, z):
         dir_in = tempfile.mkdtemp()
         dir_out = tempfile.mkdtemp()
         try:

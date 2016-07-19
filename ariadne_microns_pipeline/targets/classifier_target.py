@@ -39,11 +39,14 @@ class AbstractPixelClassifier:
         '''Return the names of the classes produced by the classifier'''
         raise NotImplementedError()
     
-    def classify(self, image):
+    def classify(self, image, x, y, z):
         '''Classify the image
         
         :param image: an image that is appropriate for the classifier, padded
             by the amounts given by get_x_pad... etc
+        :param x: the offset of the image volume in the X direction
+        :param y: the offset of the image volume in the Y direction
+        :param z: the offset of the image volume in the Z direction
         :returns: a dictionary of probability outputs with the keys being
         the class names.
         '''

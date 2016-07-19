@@ -20,7 +20,7 @@ class ReferenceClassifier(AbstractPixelClassifier):
     def get_class_names(self):
         return ["membrane"]
     
-    def classify(self, image):
+    def classify(self, image, x, y, z):
         stack = np.zeros(image.shape, np.uint8)
         for z in range(image.shape[0]):
             bins = np.bincount(image[z].flatten())

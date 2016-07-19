@@ -100,7 +100,8 @@ class ClassifyRunMixin:
         classifier_target, image_target = list(self.input())
         classifier = classifier_target.classifier
         image = image_target.imread()
-        probs = classifier.classify(image)
+        probs = classifier.classify(
+            image, self.volume.x, self.volume.y, self.volume.z)
         
         output_target = self.output()
         for class_name, dataset_name in self.class_names.items():
