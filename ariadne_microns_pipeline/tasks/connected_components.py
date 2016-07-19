@@ -143,7 +143,7 @@ class AllConnectedComponentsRunMixin:
     def ariadne_run(self):
         connections = []
         mappings = {}
-        offset = 1
+        offset = 0
         #
         # The key here is to give each component its own global #
         # "mappings" is a dictionary with key=block's volume
@@ -153,7 +153,7 @@ class AllConnectedComponentsRunMixin:
         #
         for i, input_target in enumerate(self.input()):
             d = json.load(input_target.open("r"))
-            c = d["connections"]
+            c = np.array(d["connections"])
             l1 = d["1"]["labels"]
             l2 = d["2"]["labels"]
             del d["1"]["labels"]

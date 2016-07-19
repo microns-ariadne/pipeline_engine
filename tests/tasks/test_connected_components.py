@@ -164,7 +164,39 @@ class TestAllConnectedComponents(unittest.TestCase):
         task = AllConnectedComponentsTask([f1, f2], self.output_location)
         task.run()
         result = json.load(task.output().open("r"))
-        pass
-        
+        self.assertEqual(result["count"], 4)
+        for volume, labeling in result["volumes"]:
+            if volume["x"] == 0 and volume["y"] == 0 and volume["z"] == 0:
+                self.assertSequenceEqual(labeling[0], [1, 1])
+            elif volume["x"] == 10 and volume["y"] == 0 and volume["z"] == 0:
+                self.assertSequenceEqual(labeling[0], [1, 2])
+            else:
+                self.assertSequenceEqual(labeling[0], (1, 3))
+                self.assertSequenceEqual(labeling[1], (2, 4))
+    
+    def test_01_something(self):
+        #
+        # 0, 0, 0 component 1 <-> 0, 10, 0 component 1
+        # 0, 0, 0 component 2 <-> 10, 0, 0 component 1
+        #
+        f1 = self.make_input([1, 2], Volume(0, 0, 0, 10, 10, 10),
+                             [1, 2, 3], Volume(10, 0, 0, 10, 10, 10),
+                             [[2, 1]])
+        f2 = self.make_input([1, 2], Volume(0, 0, 0, 10, 10, 10),
+                             [1, 2], Volume(0, 10, 0, 10, 10, 10), 
+                             [[1, 1]])
+        expected = { (0, 0, 0):[[1, 1], [2, 2]],
+                     (10, 0, 0): [[1, 2], [2, 3], [3, 4]],
+                     (0, 10, 0): [[1, 1], [2, 5]] }
+        task = AllConnectedComponentsTask([f1, f2], self.output_location)
+        task.run()
+        result = json.load(task.output().open("r"))
+        self.assertEqual(result["count"], 5)
+        self.assertEqual(len(result["volumes"]), 3)
+        for volume, labeling in result["volumes"]:
+            key = (volume["x"], volume["y"], volume["z"])
+            self.assertIn(key, expected)
+            self.assertSequenceEqual(expected[key], labeling)
+            
 if __name__=="__main__":
     unittest.main()

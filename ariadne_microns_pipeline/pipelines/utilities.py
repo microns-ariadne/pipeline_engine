@@ -1,6 +1,7 @@
 import csv
 import dateutil
 import rh_config
+import rh_logger
 import luigi
 import matplotlib
 import matplotlib.backends.backend_pdf
@@ -28,7 +29,12 @@ class PipelineRunReportMixin:
         if self.pipeline_report_location == "/dev/null":
             return all(map(lambda _:_.complete(), self.requires()))
         else:
-            return self.output().exists()
+            result = self.output().exists()
+            if result:
+                rh_logger.logger.report_event(
+                    "Pipeline report file %s exists" % 
+                    self.pipeline_report_location)
+            return result
         
     def output(self):
         return luigi.LocalTarget(self.pipeline_report_location)
