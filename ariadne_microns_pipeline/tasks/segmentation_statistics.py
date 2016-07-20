@@ -84,6 +84,8 @@ class SegmentationStatisticsTask(SegmentationStatisticsTaskMixin,
 class SegmentationReportTask(RequiresMixin, RunMixin, luigi.Task):
     '''Compose the segmentation report'''
     
+    task_namespace = "ariadne_microns_pipeline"
+    
     csv_location=luigi.Parameter(
         description="The path to the .csv file with the statistics")
     pdf_location=luigi.Parameter(

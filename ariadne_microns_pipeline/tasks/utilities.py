@@ -31,7 +31,7 @@ class RunMixin:
     def run(self):
         task_namespace = getattr(self, "task_namespace", None)
         if task_namespace is None:
-            task_name = self.__name__
+            task_name = self.__class__.__name__
         else:
             task_name = "%s.%s" % (task_namespace, self.__class__.__name__)
         rh_logger.logger.report_event("Running %s" % self.task_id)
