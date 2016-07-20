@@ -12,26 +12,42 @@ class AbstractPixelClassifier:
     def get_x_pad(self):
         '''Pad images by this much in the X direction
         
-        The returned image will have this much removed from it from the
-        left and right. The input image should be padded by this much on
-        either side.
+        The amount of context outside of the region to be predicted that this
+        classifier needs in the X direction.
+
+        The classify() method will receive an input image/volume with this much
+        padding added to the +/- X sides (taken from existing data, when
+        available), and should return the prediction for the image/volume
+        without padding.
+
         '''
         raise NotImplementedError()
     
     def get_y_pad(self):
         '''Pad images by this much in the Y direction
         
-        The returned image will have this much removed from it from the
-        top and bottom. The input image should be padded by this much on
-        either side.
+        The amount of context outside of the region to be predicted that this
+        classifier needs in the Y direction.
+
+        The classify() method will receive an input image/volume with this much
+        padding added to the +/- Y sides (taken from existing data, when
+        available), and should return the prediction for the image/volume
+        without padding.
+
         '''
         raise NotImplementedError()
     
     def get_z_pad(self):
         '''Pad images by this much in the Z direction
         
-        The returned image will have this many planes removed from it
-        from above and below.
+        The amount of context outside of the region to be predicted that this
+        classifier needs in the Z direction.
+
+        The classify() method will receive an input image/volume with this much
+        padding added to +/- Z sides (taken from existing data, when
+        available), and should return the prediction for the image/volume
+        without padding.
+
         '''
         raise NotImplementedError()
     
@@ -44,11 +60,12 @@ class AbstractPixelClassifier:
         
         :param image: an image that is appropriate for the classifier, padded
             by the amounts given by get_x_pad... etc
-        :param x: the offset of the image volume in the X direction
-        :param y: the offset of the image volume in the Y direction
-        :param z: the offset of the image volume in the Z direction
+        :param x: the offset of the padded image volume in the X direction
+        :param y: the offset of the padded image volume in the Y direction
+        :param z: the offset of the padded image volume in the Z direction
         :returns: a dictionary of probability outputs with the keys being
-        the class names.
+            the class names, and each value being the prediction for that
+            class, without padding.
         '''
         raise NotImplementedError()
 
