@@ -5,7 +5,7 @@ from scipy.ndimage import gaussian_filter, label
 from ..algorithms import watershed
 from ..targets.factory import TargetFactory
 from ..parameters import VolumeParameter, DatasetLocationParameter
-from utilities import RequiresMixin
+from utilities import RequiresMixin, RunMixin
 
 class SegmentTaskMixin:
     '''Segment a 3d volume
@@ -63,9 +63,6 @@ class SegmentRunMixin:
         seg_volume.imwrite(seg.astype(np.uint16))
 
 class SegmentTask(SegmentTaskMixin, SegmentRunMixin, RequiresMixin, 
-                  luigi.Task):
+                  RunMixin, luigi.Task):
     
     task_namespace = "ariadne_microns_pipeline"
-    
-    def run(self):
-        self.ariadne_run()

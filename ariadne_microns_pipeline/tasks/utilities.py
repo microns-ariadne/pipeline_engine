@@ -1,6 +1,8 @@
 '''Utility methods and classes for tasks'''
 
 import luigi
+import rh_logger
+import time
 
 class RequiresMixin:
     '''This mixin lets you add task requirements dynamically
@@ -19,6 +21,32 @@ class RequiresMixin:
         if not hasattr(self, "requirements"):
             return []
         return self.requirements
+
+class RunMixin:
+    '''This mixin provides a standardized run() method for a task
+    
+    We assume that the task contains an `ariadne_run()` method and surround
+    it with a timing metric and reporting of the task's ID and parameters.
+    '''
+    def run(self):
+        task_namespace = getattr(self, "task_namespace", None)
+        if task_namespace is None:
+            task_name = self.__name__
+        else:
+            task_name = "%s.%s" % (task_namespace, self.__class__.__name__)
+        rh_logger.logger.report_event("Running %s" % self.task_id)
+        for name, parameter in self.get_params():
+            rh_logger.logger.report_event(
+                "%s: %s=%s" % (task_name, name, repr(getattr(self, name))))
+        t0 = time.time()
+        try:
+            self.ariadne_run()
+        except:
+            rh_logger.logger.report_exception()
+            raise
+        delta = time.time() - t0
+        rh_logger.logger.report_metric(
+            task_name + ".runtime", delta)
 
 def to_hashable(x):
     '''Make dictionaries and lists hashable

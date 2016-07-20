@@ -13,7 +13,7 @@ import pandas
 from ..algorithms.evaluation import segmentation_metrics
 from ..parameters import VolumeParameter, DatasetLocationParameter
 from ..targets.factory import TargetFactory
-from .utilities import RequiresMixin
+from .utilities import RequiresMixin, RunMixin
 
 
 class SegmentationStatisticsTaskMixin:
@@ -65,7 +65,7 @@ class SegmentationStatisticsRunMixin:
 
 class SegmentationStatisticsTask(SegmentationStatisticsTaskMixin,
                                  SegmentationStatisticsRunMixin,
-                                 RequiresMixin,
+                                 RequiresMixin, RunMixin,
                                  luigi.Task):
     '''Compute the Rand index and V-info scores for a segmentation
     
@@ -80,11 +80,8 @@ class SegmentationStatisticsTask(SegmentationStatisticsTaskMixin,
     
     task_namespace = "ariadne_microns_pipeline"
     
-    def run(self):
-        self.ariadne_run()
 
-
-class SegmentationReportTask(RequiresMixin, luigi.Task):
+class SegmentationReportTask(RequiresMixin, RunMixin, luigi.Task):
     '''Compose the segmentation report'''
     
     csv_location=luigi.Parameter(
@@ -98,7 +95,7 @@ class SegmentationReportTask(RequiresMixin, luigi.Task):
     def output(self):
         return luigi.LocalTarget(self.pdf_location)
     
-    def run(self):
+    def ariadne_run(self):
         dataframe = pandas.read_csv(
             self.csv_location)
         figure = matplotlib.figure.Figure()

@@ -1,7 +1,7 @@
 import csv
 import json
 import luigi
-from .utilities import RequiresMixin
+from .utilities import RequiresMixin, RunMixin
 
 class JSONToCSVTaskMixin:
     
@@ -29,7 +29,7 @@ class JSONToCSVRunMixin:
                 writer.writerow(row)
 
 class JSONToCSVTask(JSONToCSVTaskMixin, JSONToCSVRunMixin,
-                    RequiresMixin, luigi.Task):
+                    RequiresMixin, RunMixin, luigi.Task):
     '''This task compiles a series of separate JSON files into one CSV
     
     Each of the inputs to the task is the filename of a JSON file containing
@@ -39,6 +39,3 @@ class JSONToCSVTask(JSONToCSVTaskMixin, JSONToCSVRunMixin,
     '''
     
     task_namespace="ariadne_microns_pipeline"
-
-    def run(self):
-        self.ariadne_run()

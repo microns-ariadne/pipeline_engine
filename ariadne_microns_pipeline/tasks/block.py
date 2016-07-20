@@ -4,7 +4,7 @@
 
 import json
 import luigi
-from .utilities import RequiresMixin
+from .utilities import RequiresMixin, RunMixin
 from ..targets.factory import TargetFactory
 from ..parameters import DatasetLocationParameter, VolumeParameter
 from ..parameters import MultiVolumeParameter
@@ -78,10 +78,8 @@ class BlockTaskRunMixin:
 class BlockTask(BlockTaskMixin,
                 BlockTaskRunMixin,
                 RequiresMixin,
+                RunMixin,
                 luigi.Task):
     '''Copy blocks from the inputs to produce the output'''
     
     task_namespace="ariadne_microns_pipeline"
-    
-    def run(self):
-        self.ariadne_run()

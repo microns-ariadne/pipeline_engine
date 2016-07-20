@@ -4,7 +4,7 @@ from ..targets.classifier_target\
 from ..targets.factory import TargetFactory
 from ..parameters import VolumeParameter, DatasetLocationParameter
 from ..parameters import Volume, DatasetLocation
-from .utilities import RequiresMixin
+from .utilities import RequiresMixin, RunMixin
 
 
 class ClassifyTaskMixin:
@@ -108,14 +108,11 @@ class ClassifyRunMixin:
             output_target.imwrite(dataset_name, probs[class_name])
 
 class ClassifyTask(ClassifyTaskMixin, ClassifyRunMixin, 
-                   RequiresMixin, luigi.Task):
+                   RequiresMixin, RunMixin, luigi.Task):
     '''Classify an image, producing one or more probability maps
     
     '''
     task_namespace = "ariadne_microns_pipeline"
-
-    def run(self):
-        self.ariadne_run()
 
 
 class ClassifyShimTask(RequiresMixin, luigi.Task):

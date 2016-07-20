@@ -13,7 +13,7 @@ import tempfile
 
 from ..parameters import VolumeParameter, DatasetLocationParameter
 from ..targets.factory import TargetFactory
-from utilities import RequiresMixin
+from utilities import RequiresMixin, RunMixin
 
 class NeuroproofTaskMixin:
     
@@ -132,8 +132,5 @@ class NeuroproofRunMixin:
 
 
 class NeuroproofTask(NeuroproofTaskMixin, NeuroproofRunMixin,
-                     RequiresMixin, luigi.Task):
+                     RequiresMixin, RunMixin, luigi.Task):
     task_namespace = "ariadne_microns_pipeline"
-    
-    def run(self):
-        self.ariadne_run()

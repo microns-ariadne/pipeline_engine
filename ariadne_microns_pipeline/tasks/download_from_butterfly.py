@@ -2,6 +2,7 @@
 
 import luigi
 import numpy as np
+from .utilities import RunMixin
 from ..targets.butterfly_target \
      import ButterflyChannelTarget, get_butterfly_plane_from_channel
 from ..targets.factory import TargetFactory
@@ -55,10 +56,8 @@ class DownloadFromButterflyRunMixin:
 
 class DownloadFromButterflyTask(DownloadFromButterflyRunMixin,
                                 DownloadFromButterflyTaskMixin,
+                                RunMixin,
                                 luigi.ExternalTask):
     '''A task for downloading butterfly planes into a volume'''
     
     task_namespace = "ariadne_microns_pipeline"
-    
-    def run(self):
-        self.ariadne_run()

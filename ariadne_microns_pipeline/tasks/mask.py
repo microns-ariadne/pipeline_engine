@@ -4,7 +4,7 @@ from scipy.ndimage import distance_transform_edt
 
 from ..targets.factory import TargetFactory
 from ..parameters import VolumeParameter, DatasetLocationParameter
-from utilities import RequiresMixin
+from utilities import RequiresMixin, RunMixin
 
 
 class MaskBorderTaskMixin:
@@ -46,9 +46,7 @@ class MaskBorderRunMixin:
 
 
 class MaskBorderTask(MaskBorderTaskMixin, MaskBorderRunMixin, 
-                     RequiresMixin, luigi.Task):
+                     RequiresMixin, RunMixin, luigi.Task):
 
     task_namespace = "ariadne_microns_pipeline"
     
-    def run(self):
-        self.ariadne_run()

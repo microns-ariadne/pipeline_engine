@@ -6,7 +6,7 @@ import numpy as np
 from scipy.sparse import coo_matrix
 from scipy.sparse.csgraph import connected_components
 
-from .utilities import RequiresMixin
+from .utilities import RequiresMixin, RunMixin
 from ..parameters import VolumeParameter, DatasetLocationParameter
 from ..targets.factory import TargetFactory
 from .utilities import to_hashable
@@ -102,7 +102,7 @@ class ConnectedComponentsRunMixin:
 
 class ConnectedComponentsTask(ConnectedComponentsTaskMixin,
                               ConnectedComponentsRunMixin,
-                              RequiresMixin,
+                              RequiresMixin, RunMixin,
                               luigi.Task):
     '''This task finds the connections between the segmentations of two volumes
     
@@ -117,9 +117,6 @@ class ConnectedComponentsTask(ConnectedComponentsTaskMixin,
     '''
     
     task_namespace = 'ariadne_microns_pipeline'
-    
-    def run(self):
-        self.ariadne_run()
 
 
 class AllConnectedCompoentsTaskMixin:
@@ -212,7 +209,7 @@ class AllConnectedComponentsRunMixin:
 
 class AllConnectedComponentsTask(AllConnectedCompoentsTaskMixin,
                                  AllConnectedComponentsRunMixin,
-                                 RequiresMixin,
+                                 RequiresMixin, RunMixin,
                                  luigi.Task):
     '''Perform all connected components on the component connections
     
@@ -231,6 +228,3 @@ class AllConnectedComponentsTask(AllConnectedCompoentsTaskMixin,
     '''
     
     task_namespace="ariadne_microns_pipeline"
-    
-    def run(self):
-        self.ariadne_run()

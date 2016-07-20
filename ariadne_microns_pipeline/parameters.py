@@ -37,6 +37,10 @@ class Volume(object):
         """One past the last plane of the volume"""
         return self.z + self.depth
     
+    def __repr__(self):
+        return "Volume: x=%d:%d, y=%d:%d, z=%d:%d" % (
+            self.x, self.x1, self.y, self.y1, self.z, self.z1)
+    
 
 class VolumeParameter(luigi.Parameter):
     '''Describes a volume.
@@ -72,6 +76,10 @@ class DatasetLocation(object):
         self.roots = roots
         self.dataset_name = dataset_name
         self.pattern = pattern
+    
+    def __repr__(self):
+        return "DatasetLocation: [%s].%s (%s)" % (
+            ",".join(self.roots), self.dataset_name, self.pattern)
 
 
 class DatasetLocationParameter(luigi.Parameter):
