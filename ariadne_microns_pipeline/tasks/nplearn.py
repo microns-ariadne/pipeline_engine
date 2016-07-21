@@ -94,7 +94,7 @@ class NeuroproofLearnRunMixin:
             gt_path = os.path.join(tempdir, "gt.h5")
             
             prob_volume = prob_target.imread().astype(np.float32) / 255.
-            prob_volume = np.array([prob_volume, 1-prob_volume])
+            prob_volume = np.array([prob_volume, prob_volume])
             prob_volume = prob_volume.transpose(3, 2, 1, 0)
             rh_logger.logger.report_event("%s: writing pred.h5" % task_name)
             with h5py.File(pred_path, "w") as fd:
@@ -102,9 +102,11 @@ class NeuroproofLearnRunMixin:
                 del prob_volume
             with h5py.File(watershed_path, "w") as fd:
                 seg_volume = seg_target.imread().astype(np.int32)
+                #seg_volume = seg_volume.transpose(2, 1, 0)
                 fd.create_dataset("stack", data=seg_volume)
                 del seg_volume
             gt_volume = gt_target.imread().astype(np.int32)
+            #gt_volume = gt_volume.transpose(2, 1, 0)
             with h5py.File(gt_path, "w") as fd:
                 fd.create_dataset("stack", data=gt_volume)
             del gt_volume
