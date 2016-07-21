@@ -647,49 +647,65 @@ class PipelineTaskMixin:
             except:
                 rh_logger.logger.start_process("Ariadne pipeline",
                                                "Assembling pipeline")
-            self.factory = AMTaskFactory()
-            self.pixel_classifier = PixelClassifierTarget(
-                self.pixel_classifier_path)
-            self.compute_extents()
-            #
-            # Step 1: get data from Butterfly
-            #
-            self.generate_butterfly_tasks()
-            #
-            # Step 2: run the pixel classifier on each
-            #
-            self.generate_classifier_tasks()
-            #
-            # Step 3: make the border masks
-            #
-            self.generate_border_mask_tasks()
-            #
-            # Step 4: run watershed
-            #
-            self.generate_watershed_tasks()
-            #
-            # Step 5: create all the border blocks
-            #
-            self.generate_border_tasks()
-            #
-            # Step 6: run Neuroproof on the blocks and border blocks
-            #
-            self.generate_neuroproof_tasks()
-            #
-            # TO DO: skeletonization and the rest of rollup. For now
-            #        our output is the neuroproofed segmentation
-            #
-            self.requirements =\
-                self.np_tasks.flatten().tolist() +\
-                self.np_x_border_tasks.flatten().tolist() +\
-                self.np_y_border_tasks.flatten().tolist() +\
-                self.np_z_border_tasks.flatten().tolist()
-            #
-            # (maybe) generate the statistics tasks
-            #
-            self.generate_statistics_tasks()
-            if self.statistics_csv_task is not None:
-                self.requirements.append(self.statistics_report_task)
+            try:
+                self.factory = AMTaskFactory()
+                rh_logger.logger.report_event(
+                    "Loading pixel classifier")
+                self.pixel_classifier = PixelClassifierTarget(
+                    self.pixel_classifier_path)
+                rh_logger.logger.report_event(
+                    "Computing blocks")
+                self.compute_extents()
+                #
+                # Step 1: get data from Butterfly
+                #
+                rh_logger.logger.report_event("Making Butterfly download tasks")
+                self.generate_butterfly_tasks()
+                #
+                # Step 2: run the pixel classifier on each
+                #
+                rh_logger.logger.report_event("Making classifier tasks")
+                self.generate_classifier_tasks()
+                #
+                # Step 3: make the border masks
+                #
+                rh_logger.logger.report_event("Making border mask tasks")
+                self.generate_border_mask_tasks()
+                #
+                # Step 4: run watershed
+                #
+                rh_logger.logger.report_event("Making watershed tasks")
+                self.generate_watershed_tasks()
+                #
+                # Step 5: create all the border blocks
+                #
+                rh_logger.logger.report_event("Making border reblocking tasks")
+                self.generate_border_tasks()
+                #
+                # Step 6: run Neuroproof on the blocks and border blocks
+                #
+                rh_logger.logger.report_event("Making Neuroproof tasks")
+                self.generate_neuroproof_tasks()
+                #
+                # TO DO: skeletonization and the rest of rollup. For now
+                #        our output is the neuroproofed segmentation
+                #
+                self.requirements =\
+                    self.np_tasks.flatten().tolist() +\
+                    self.np_x_border_tasks.flatten().tolist() +\
+                    self.np_y_border_tasks.flatten().tolist() +\
+                    self.np_z_border_tasks.flatten().tolist()
+                #
+                # (maybe) generate the statistics tasks
+                #
+                self.generate_statistics_tasks()
+                if self.statistics_csv_task is not None:
+                    self.requirements.append(self.statistics_report_task)
+                rh_logger.logger.report_event(
+                    "Pipeline task graph computation finished")
+            except:
+                rh_logger.logger.report_exception()
+                raise
     
     def requires(self):
         self.compute_requirements()

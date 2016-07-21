@@ -28,12 +28,21 @@ class RunMixin:
     We assume that the task contains an `ariadne_run()` method and surround
     it with a timing metric and reporting of the task's ID and parameters.
     '''
-    def run(self):
+    
+    def task_name(self):
+        '''A standardized name for the task for logging'''
         task_namespace = getattr(self, "task_namespace", None)
         if task_namespace is None:
             task_name = self.__class__.__name__
         else:
             task_name = "%s.%s" % (task_namespace, self.__class__.__name__)
+        return task_name
+        
+    def run(self):
+        if not hasattr(rh_logger.logger, "logger"):
+            rh_logger.logger.start_process("Luigi", "Starting logging")
+            
+        task_name = self.task_name()
         rh_logger.logger.report_event("Running %s" % self.task_id)
         for name, parameter in self.get_params():
             rh_logger.logger.report_event(

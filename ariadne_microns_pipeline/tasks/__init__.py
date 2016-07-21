@@ -18,9 +18,10 @@ from .download_from_butterfly import DownloadFromButterflyTask
 from .factory import AMTaskFactory
 from .mask import MaskBorderTask
 from .neuroproof import NeuroproofTask
+from .nplearn import NeuroproofLearnTask
 from .segment import SegmentTask
 
 all = [AllConnectedComponentsTask, BlockTask, ClassifyTask, 
        ConnectedComponentsTask,
        DownloadFromButterflyTask, AMTaskFactory,
-       MaskBorderTask, NeuroproofTask, SegmentTask]
+       MaskBorderTask, NeuroproofTask, NeuroproofLearnTask, SegmentTask]
