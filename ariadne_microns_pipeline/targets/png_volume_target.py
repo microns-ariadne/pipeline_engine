@@ -34,7 +34,9 @@ class PngVolumeTarget(VolumeTarget):
         color.
         '''
         for path in self.paths:
-            os.makedirs(os.path.join(path, self.dataset_path))
+            tgt_dir = os.path.join(path, self.dataset_path)
+            if not os.path.exists(tgt_dir):
+                os.makedirs(tgt_dir)
         d = dict(dimensions=volume.shape,
                  dtype=volume.dtype.descr[0][1],
                  x=self.x,

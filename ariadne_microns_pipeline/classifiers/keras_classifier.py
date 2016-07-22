@@ -6,6 +6,7 @@ The model is composed of the json keras model and the weights
 import keras
 from keras.optimizers import SGD
 import numpy as np
+from scipy.ndimage import gaussian_filter
 import time
 
 from rh_logger import logger
@@ -15,7 +16,7 @@ from ..targets.classifier_target import AbstractPixelClassifier
 class KerasClassifier(AbstractPixelClassifier):
     
     def __init__(self, model_path, weights_path, 
-                 xypad_size, zpad_size, block_size):
+                 xypad_size, zpad_size, block_size, sigma):
         '''Initialize from a model and weights
         
         :param model_path: path to JSON model file suitable for 
@@ -23,7 +24,8 @@ class KerasClassifier(AbstractPixelClassifier):
         :param weights_path: path to weights .h5 file
         :param xypad_size: padding needed in x and y
         :param zpad_size: padding needed in z
-        :param block_size: size of input block to classifier
+        :param block_size: size of output block to classifier
+        :param sigma: the standard deviation for the high-pass filter
         '''
         self.xypad_size = xypad_size
         self.zpad_size = zpad_size
@@ -31,6 +33,7 @@ class KerasClassifier(AbstractPixelClassifier):
         self.model = keras.models.model_from_json(
             open(model_path, "r").read())
         self.model.load_weights(weights_path)
+        self.sigma = sigma
         self.__finish_model()
 
     def __finish_model(self):
@@ -45,7 +48,8 @@ class KerasClassifier(AbstractPixelClassifier):
                     zpad_size=self.zpad_size,
                     block_size=self.block_size,
                     model=self.model.to_json(),
-                    weights=self.model.get_weights())
+                    weights=self.model.get_weights(),
+                    sigma=self.sigma)
     
     def __setstate__(self, state):
         '''Restore the state from the pickle'''
@@ -54,6 +58,7 @@ class KerasClassifier(AbstractPixelClassifier):
         self.block_size = state["block_size"]
         self.model = keras.models.model_from_json(state["model"])
         self.model.set_weights(state["weights"])
+        self.sigma = state["sigma"]
         self.__finish_model()
     
     def get_class_names(self):
@@ -81,19 +86,31 @@ class KerasClassifier(AbstractPixelClassifier):
         #
         # The last block ends at the edge of the image.
         #
+        output_block_size = self.block_size - \
+            np.array([self.get_z_pad()*2, 
+                      self.get_y_pad()*2, 
+                      self.get_x_pad()*2])
         z0 = self.get_z_pad()
         z1 = image.shape[0] - self.get_z_pad()
-        n_z = 1 + int((image.shape[0] - 1) / self.block_size[0])
-        zs = np.linspace(z0, z1, n_z).astype(int)
+        n_z = 1 + int((image.shape[0] - 1) / output_block_size[0])
+        zs = np.linspace(z0, z1, n_z+1).astype(int)
         y0 = self.get_y_pad()
         y1 = image.shape[1] - self.get_y_pad()
-        n_y = 1 + int((image.shape[1] - 1) / self.block_size[1])
-        ys = np.linspace(y0, y1, n_y).astype(int)
+        n_y = 1 + int((image.shape[1] - 1) / output_block_size[1])
+        ys = np.linspace(y0, y1, n_y+1).astype(int)
         x0 = self.get_x_pad()
         x1 = image.shape[2] - self.get_x_pad()
-        n_x = 1 + int((image.shape[2] - 1) / self.block_size[2])
-        xs = np.linspace(x0, x1, n_x).astype(int)
+        n_x = 1 + int((image.shape[2] - 1) / output_block_size[2])
+        xs = np.linspace(x0, x1, n_x+1).astype(int)
         out_image = np.zeros((z1-z0, y1 - y0, x1 - x0))
+        #
+        # Normalize image
+        #
+        #temp = np.zeros(image.shape, np.float32)
+        #for zi in range(image.shape[0]):
+        #    temp[zi] = self.highpass(image[zi])
+        #image = temp
+        #del temp
         #
         # Classify each block
         #
@@ -124,10 +141,10 @@ class KerasClassifier(AbstractPixelClassifier):
                         x1a = x0a + self.block_size[2]
                     x0b = x0a
                     x1b = x1a - self.get_x_pad() * 2
-                    block = image[z0a:z1a, y0a:y1a, x0a:x1a]
+                    block = KerasClassifier.normalize_image(
+                        image[z0a:z1a, y0a:y1a, x0a:x1a])
                     block.shape = [1] + list(block.shape)
                     t0 = time.time()
-                    block = KerasClassifier.normalize_image(block) - .5
                     pred = self.model.predict(block)
                     logger.report_event(
                         "Processed block %d:%d, %d:%d, %d:%d in %f sec" %
@@ -135,6 +152,16 @@ class KerasClassifier(AbstractPixelClassifier):
                     pred.shape = (z1b - z0b, y1b - y0b, x1b - x0b)
                     out_image[z0b:z1b, y0b:y1b, x0b:x1b] = pred * 255
         return dict(membrane=out_image)
+    
+    def highpass(self, img):
+        '''Put the image through a highpass filter to remove inconsitent bkgd
+        
+        Subtract the image from a Gaussian background estimator. The Gaussian
+        is done in 2d - many of the artifacts are per-section.
+        
+        :param img: the image to be processed
+        '''
+        return img.astype(np.float32)
     
     @staticmethod
     def normalize_image(img, saturation_level=0.05):

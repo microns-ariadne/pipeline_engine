@@ -15,6 +15,9 @@ import sys
 '''The name of the segmentation dataset within the HDF5 file'''
 SEG_DATASET = "segmentation"
 
+'''The name of the watershed seed datasets'''
+SEEDS_DATASET = "seeds"
+
 '''The name of the border mask datasets'''
 MASK_DATASET = "mask"
 
@@ -266,7 +269,33 @@ class PipelineTaskMixin:
                         close_width=self.close_width)
                     self.border_mask_tasks[zi, yi, xi] = btask
                     btask.set_requirement(ctask)
-                    
+
+    def generate_seed_tasks(self):
+        '''Find seeds for the watersheds'''
+        self.seed_tasks = \
+            np.zeros((self.n_z, self.n_y, self.n_x), object)
+        for zi in range(self.n_z):
+            for yi in range(self.n_y):
+                for xi in range(self.n_x):
+                    ctask = self.classifier_tasks[zi, yi, xi]
+                    volume = ctask.volume
+                    prob_target = ctask.output()
+                    prob_location = DatasetLocation(
+                        prob_target.paths,
+                        prob_target.dataset_path,
+                        prob_target.pattern)
+                    seeds_location = \
+                        self.get_dataset_location(volume, SEEDS_DATASET)
+                    stask = self.factory.gen_find_seeds_task(
+                        volume=volume,
+                        prob_location=prob_location, 
+                        seeds_location=seeds_location, 
+                        sigma_xy=self.sigma_xy, 
+                        sigma_z=self.sigma_z, 
+                        threshold=self.threshold)
+                    self.seed_tasks[zi, yi, xi] = stask
+                    stask.set_requirement(ctask)
+
     def generate_watershed_tasks(self):
         '''Run watershed on each pixel '''
         self.watershed_tasks = \
@@ -276,25 +305,29 @@ class PipelineTaskMixin:
                 for xi in range(self.n_x):
                     ctask = self.classifier_tasks[zi, yi, xi]
                     btask = self.border_mask_tasks[zi, yi, xi]
+                    seeds_task = self.seed_tasks[zi, yi, xi]
                     volume = btask.volume
                     prob_target = ctask.output()
                     prob_location = DatasetLocation(
                         prob_target.paths,
                         prob_target.dataset_path,
                         prob_target.pattern)
+                    seeds_target = seeds_task.output()
+                    seeds_location = seeds_target.dataset_location
                     seg_location = \
                         self.get_dataset_location(volume, SEG_DATASET)
                     stask = self.factory.gen_segmentation_task(
                         volume=btask.volume,
                         prob_location=prob_location,
                         mask_location=btask.mask_location,
+                        seeds_location=seeds_location,
                         seg_location=seg_location,
                         sigma_xy=self.sigma_xy,
-                        sigma_z=self.sigma_z,
-                        threshold=self.threshold)
+                        sigma_z=self.sigma_z)
                     self.watershed_tasks[zi, yi, xi] = stask
                     stask.set_requirement(ctask)
                     stask.set_requirement(btask)
+                    stask.set_requirement(seeds_task)
     
     def generate_border_tasks(self):
         '''Create border cutouts between adjacent blocks
@@ -672,17 +705,22 @@ class PipelineTaskMixin:
                 rh_logger.logger.report_event("Making border mask tasks")
                 self.generate_border_mask_tasks()
                 #
-                # Step 4: run watershed
+                # Step 4: find the seeds for the watershed
+                #
+                rh_logger.logger.report_event("Making watershed seed tasks")
+                self.generate_seed_tasks()
+                #
+                # Step 5: run watershed
                 #
                 rh_logger.logger.report_event("Making watershed tasks")
                 self.generate_watershed_tasks()
                 #
-                # Step 5: create all the border blocks
+                # Step 6: create all the border blocks
                 #
                 rh_logger.logger.report_event("Making border reblocking tasks")
                 self.generate_border_tasks()
                 #
-                # Step 6: run Neuroproof on the blocks and border blocks
+                # Step 7: run Neuroproof on the blocks and border blocks
                 #
                 rh_logger.logger.report_event("Making Neuroproof tasks")
                 self.generate_neuroproof_tasks()

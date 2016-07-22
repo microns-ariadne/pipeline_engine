@@ -17,6 +17,8 @@ class SegmentTaskMixin:
         description="The volume to segment")
     prob_location = DatasetLocationParameter(
         description="The location of the probability volume")
+    seed_location = DatasetLocationParameter(
+        description="The location of the seeds for the watershed")
     mask_location = DatasetLocationParameter(
         description="The location of the mask volume")
     output_location = DatasetLocationParameter(
@@ -26,6 +28,8 @@ class SegmentTaskMixin:
         yield TargetFactory().get_volume_target(
             location=self.prob_location, volume=self.volume)
         yield TargetFactory().get_volume_target(
+            location=self.seed_location, volume=self.volume)
+        yield TargetFactory().get_volume_target(
             location=self.mask_location,
             volume=self.volume)
     def output(self):
@@ -34,9 +38,6 @@ class SegmentTaskMixin:
 
 class SegmentRunMixin:
     
-    #
-    # optional parameters
-    #
     sigma_xy = luigi.FloatParameter(
         description=
         "The sigma of the smoothing Gaussian in the x & y directions",
@@ -45,20 +46,17 @@ class SegmentRunMixin:
         description=
         "The sigma of the smoothing Gaussian in the z direction",
         default=.4)
-    threshold = luigi.FloatParameter(
-        description="The threshold cutoff for the seeds",
-        default=1)
-    
+
     def ariadne_run(self):
-        prob_volume, mask_volume = list(self.input())
+        prob_volume, seed_volume, mask_volume = list(self.input())
         seg_volume = self.output()
         prob = prob_volume.imread()
+        labels = seed_volume.imread()
         mask = mask_volume.imread() != 0
-        sigma = (self.sigma_z, self.sigma_xy, self.sigma_xy)
-        smoothed = gaussian_filter(prob.astype(np.float32), sigma)
-        bin_markers = (smoothed < self.threshold) & mask
-        labels, count = label(bin_markers)
+        labels[~ mask] = 0
         prob[~mask] = 255
+        smoothed = gaussian_filter(
+            prob, (self.sigma_z, self.sigma_xy, self.sigma_xy))
         seg = watershed(smoothed, labels)
         seg_volume.imwrite(seg.astype(np.uint16))
 

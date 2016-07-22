@@ -20,8 +20,10 @@ from .mask import MaskBorderTask
 from .neuroproof import NeuroproofTask
 from .nplearn import NeuroproofLearnTask
 from .segment import SegmentTask
+from .visualize import VisualizeTask, PipelineVisualizeTask
 
 all = [AllConnectedComponentsTask, BlockTask, ClassifyTask, 
        ConnectedComponentsTask,
        DownloadFromButterflyTask, AMTaskFactory,
-       MaskBorderTask, NeuroproofTask, NeuroproofLearnTask, SegmentTask]
+       MaskBorderTask, NeuroproofTask, NeuroproofLearnTask, SegmentTask,
+       VisualizeTask, PipelineVisualizeTask]
