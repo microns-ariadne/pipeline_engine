@@ -38,18 +38,23 @@ class DownloadFromButterflyRunMixin:
     def ariadne_run(self):
         '''Copy data from the Butterfly planes to the HDF5 target'''
         
-        volume = np.zeros(
-            (self.volume.depth, self.volume.height, self.volume.width), 
-            np.uint8)
+        haz_volume = False
         inputs = self.input()
         channel_target = ButterflyChannelTarget(
             self.experiment, self.sample, self.dataset, self.channel, self.url)
         plane_targets = inputs[1:]
         for z in range(self.volume.z, self.volume.z1):
+                
             plane = get_butterfly_plane_from_channel(
                 channel_target, self.volume.x, self.volume.y, z,
                 self.volume.width, self.volume.height)
-            volume[z - self.volume.z] = plane.imread()
+            img = plane.imread()
+            if not haz_volume:
+                volume = np.zeros(
+                    (self.volume.depth, self.volume.height, self.volume.width), 
+                    img.dtype)
+                haz_volume = True
+            volume[z - self.volume.z] = img
         
         self.output().imwrite(volume)
 
