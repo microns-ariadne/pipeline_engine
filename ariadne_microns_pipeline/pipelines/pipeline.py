@@ -3,6 +3,7 @@ import rh_logger
 from .utilities import PipelineRunReportMixin
 from ..tasks.factory import AMTaskFactory
 from ..tasks.classify import ClassifyShimTask
+from ..tasks.find_seeds import SeedsMethodEnum, Dimensionality
 from ..targets.classifier_target import PixelClassifierTarget
 from ..targets.hdf5_target import HDF5FileTarget
 from ..targets.butterfly_target import ButterflyChannelTarget
@@ -117,6 +118,12 @@ class PipelineTaskMixin:
     threshold = luigi.FloatParameter(
         description="The threshold used during segmentation for finding seeds",
         default=1)
+    method = luigi.EnumParameter(enum=SeedsMethodEnum,
+        default=SeedsMethodEnum.Smoothing,
+        description="The algorithm for finding seeds")
+    dimensionality = luigi.EnumParameter(enum=Dimensionality,
+        default=Dimensionality.D3,
+        description="Whether to find seeds in planes or in a 3d volume")
     statistics_csv_path = luigi.Parameter(
         description="The path to the CSV statistics output file.",
         default="/dev/null")
@@ -292,7 +299,9 @@ class PipelineTaskMixin:
                         seeds_location=seeds_location, 
                         sigma_xy=self.sigma_xy, 
                         sigma_z=self.sigma_z, 
-                        threshold=self.threshold)
+                        threshold=self.threshold,
+                        method=self.method,
+                        dimensionality=self.dimensionality)
                     self.seed_tasks[zi, yi, xi] = stask
                     stask.set_requirement(ctask)
 
