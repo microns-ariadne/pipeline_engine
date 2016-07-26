@@ -11,15 +11,12 @@ using namespace std;
 
 const int n = 3;
 
-int*** Convert(unsigned int val)
+void Convert(unsigned int val, int ***a)
 {
    unsigned int mask = 1 << (27 - 1);
-   int*** a= (int***) malloc(n* sizeof(int**));
    for(int x = 0; x < n; x++)
    {	
-        a[x]= (int**) malloc(n* sizeof(int*));
 	for(int y=0; y<n; y++) {
-	    a[x][y]=(int*)malloc(n* sizeof(int));
 	    for(int z=0; z<n; z++) {
    	        int i=x*pow(n,2)+y*n+z;
 		if( (val & mask) == 0 )
@@ -31,7 +28,6 @@ int*** Convert(unsigned int val)
 	     }
 	}
     }
-    return a;
 }
 
 bool check(int*** a, std::list<int*>  zeros, std::list<int*> ones) {
@@ -210,14 +206,14 @@ bool remainsConnected(int*** a, bool inside) {
 //   }
 }
 
-int main() {
+/* int main() {
    int*** cube=Convert(33628304);
    printf("%d\n", cube[0][0][1]);
 //   printf("%d",remainsConnected(cube,true));
    return 0;
 }
+*/
 
-/*
 int main()
 {
     int N=pow(2,pow(n,3));
@@ -226,22 +222,28 @@ int main()
     FILE* out = fopen("LUT.txt","w");
     bool* simple = (bool*) malloc (pow(2,pow(n,3))*sizeof(bool));
 
-    #pragma omp parallel for
-    for(unsigned int i = 0; i < N; i++) {
-    if(i>pow(2,next)) {				          
-    next++;
-    printf("%d\n",next);
+    int *** a = (int ***)malloc(sizeof(int**) * n);
+    for (int x=0; x<n; x++) {
+        a[x] = (int **)malloc(sizeof(int *) * n);
+	for (int y=0; y<n; y++)
+	    a[x][y] = (int *)malloc(sizeof(int) * n);
     }
+    for(unsigned int i = 0; i < N; i++) {
+      if(i>pow(2,next)) {				          
+        next++;
+        printf("%d\n",next);
+      }
 
-    int*** a= Convert(i);
-    simple[i]=1;
-    if (remainsConnected(a,"true"))
+      Convert(i, a);
+      simple[i]=1;
+      if (remainsConnected(a,"true"))
 	   simple[i]=0;
 
-    if (simple[i]==1)
-       if (remainsConnected(a,"false"))
+      if (simple[i]==1)
+        if (remainsConnected(a,"false"))
           simple[i]=0;
-	  printf("printing to file!\n");
+    }
+    printf("printing to file!\n");
 
     for(int i=0;i<N;i++) {
        fprintf(out,"%d",simple[i]);
@@ -250,7 +252,7 @@ int main()
     fclose(out);
 
     printf("%d\n",sum);
-*/
+}
 
 
 int main2()
@@ -261,14 +263,20 @@ int main2()
     FILE* out = fopen("LUT.txt","w");
     bool* simple = (bool*) malloc (pow(2,pow(n,3))*sizeof(bool));
 
-#pragma omp parallel for
+    int ***a = (int ***)malloc(sizeof(int**) * n);
+    for (int x=0; x<n; x++) {
+        a[x] = (int **)malloc(sizeof(int *) * n);
+	for (int y=0; y<n; y++)
+	    a[x][y] = (int *)malloc(sizeof(int) * n);
+    }
+    
     for(unsigned int i = 0; i < N; i++) {
-	/*if(i>pow(2,next)) {
+	if(i>pow(2,next)) {
+	   printf("%d of %d\n", pow(2, next), N);
 	   next++;
-	   printf("%d\n",next);
-	}*/
+	}
 
-	int*** a= Convert(i);
+	Convert(i, a);
 	std::list<int*> zeros; 
 	std::list<int*> ones;
 	simple[i]=0;

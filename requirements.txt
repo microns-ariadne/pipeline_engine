@@ -5,4 +5,5 @@ numpy>=1.9.3
 h5py>=2.6.0
 scipy>=0.16.0
 scikit-learn
+sqlalchemy
 luigi>=2.1.1

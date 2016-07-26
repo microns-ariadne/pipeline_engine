@@ -35,6 +35,7 @@ setup(
         "h5py>=2.6.0",
         "scipy>=0.16.0",
         "scikit-learn",
+        "sqlalchemy>=1.0.0",
         "luigi>=2.1.1"],
     ext_modules=[watershed_ext],
     entry_points={},

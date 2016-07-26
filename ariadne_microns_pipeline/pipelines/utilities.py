@@ -41,6 +41,7 @@ class PipelineRunReportMixin:
     
     def run(self):
         '''Compile the task history'''
+        matplotlib.use("Pdf")
         d = {}
         conn_params = rh_config.config["luigid"]["db_connection"]
         engine = sqlalchemy.create_engine(conn_params)

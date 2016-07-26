@@ -30,6 +30,12 @@ should have the following sections:
             - <path to Vigra libraries>
             - <path to JSONCPP libraries>
             - <path to CilkPlus libraries>
+    skeletonization:
+        home-dir: <directory containing the skeletonization binary>
+        ld_library_path:
+            - <path to OpenCV libraries>
+            - <path to HDF5 libraries>
+            - <path to CilkPlus libraries> 
 
 Optionally, if you use the fc_dnn classifier, you should have a section
 for it in .rh_config.yaml:

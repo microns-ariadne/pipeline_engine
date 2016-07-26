@@ -4,3 +4,7 @@
 ariadne_microns_pipeline.egg-info
 ariadne_microns_pipeline/algorithms/*.cpp
 build
+fc_dnn/src/run_dnn
+skeletonization/graph_extraction/main
+skeletonization/graph_extraction/LUT/LUT.txt
+skeletonization/graph_extraction/LUT/lutgen
