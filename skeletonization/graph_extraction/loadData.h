@@ -1,5 +1,6 @@
 #include "H5Cpp.h"
 #include <dirent.h>
+#include <mutex>
 #include <string>
 #include <sstream>
 #include <vector>
@@ -11,6 +12,7 @@
 
 typedef uint32_t  label_t;
 
+std::mutex logging_mutex;
 
 std::vector<std::string> &split(const std::string &s, char delim, std::vector<std::string> &elems) {
     std::stringstream ss(s);
@@ -41,7 +43,18 @@ void create_cgraph_block(Graph<vdata, edata>* c_graph, label_t* data,
   vdata* c_vdata = c_graph->getGridVertexData(block_x_id+shift_x, block_y_id+shift_y,
       block_z_id+shift_z);
   
-  if ((c_vdata->x!=block_x_id+shift_x) || (c_vdata->y!=block_y_id+shift_y) || (c_vdata->z!=block_z_id+shift_z)) std::cerr << "Indexing error!";
+  if ((c_vdata->x!=block_x_id+shift_x) || (c_vdata->y!=block_y_id+shift_y) || (c_vdata->z!=block_z_id+shift_z)) {
+    std::lock_guard<std::mutex> lock(logging_mutex);
+    std::cerr << "Indexing error: c_vdata=(" 
+              << c_vdata->x << "," 
+              << c_vdata->y << "," 
+              << c_vdata->z << ")"
+	      << ", x=" << block_x_id << "+" << shift_x
+	      << ", y=" << block_y_id << "+" << shift_y
+	      << ", z=" << block_z_id << "+" << shift_z
+	      << std::endl;
+  }
+	  
 
   for (int z = block_z_begin; z < block_z_end; z++) {
     for (int x = block_x_begin; x < block_x_end; x++) {

@@ -70,8 +70,4 @@ static Graph<uncoarsened_vdata, edata>* graph;
 static Graph<vdata, edata>* c_graph;
 static bool terminated = false;
 
-static int s_height = 100;  // Number of images in the stack.
-static int s_rows = 1024;  // pixel rows in image in stack.
-static int s_cols = 1024;  // pixel cols in image in stack.
-
 #endif  // GRAPH_EXTRACTION_GRAPH_PROPERTIES_H_

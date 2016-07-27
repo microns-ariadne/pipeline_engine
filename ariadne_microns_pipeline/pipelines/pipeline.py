@@ -37,6 +37,9 @@ GT_DATASET = "gt"
 '''The name of the predicted segmentation for statistics computation'''
 PRED_DATASET = "pred"
 
+'''The name of the skeleton directory'''
+SKEL_DIR_NAME = "skeleton"
+
 '''The pattern for border datasets
 
 parent - name of parent dataset, e.g. "membrane"
@@ -127,6 +130,9 @@ class PipelineTaskMixin:
     statistics_csv_path = luigi.Parameter(
         description="The path to the CSV statistics output file.",
         default="/dev/null")
+    wants_skeletonization = luigi.BoolParameter(
+        description="Skeletonize the Neuroproof segmentation",
+        default=False)
 
 
     def get_dirs(self, x, y, z):
@@ -681,6 +687,31 @@ class PipelineTaskMixin:
         else:
             self.statistics_csv_task = None
     
+    def generate_skeletonize_tasks(self):
+        '''Generate tasks that skeletonize the major Neuroproofed segmentations
+        
+        '''
+        if self.wants_skeletonization:
+            self.skeletonize_tasks = np.zeros((self.n_z, self.n_y, self.n_x),
+                                              object)
+            for zi in range(self.n_z):
+                for yi in range(self.n_y):
+                    for xi in range(self.n_x):
+                        ntask = self.np_tasks[zi, yi, xi]
+                        volume = ntask.volume
+                        seg_location = ntask.output_seg_location
+                        skel_root = self.get_dirs(self.xs[xi],
+                                                  self.ys[yi],
+                                                  self.zs[zi])
+                        skel_location = os.path.join(
+                            skel_root[0], SKEL_DIR_NAME)
+                        stask = self.factory.gen_skeletonize_task(
+                            volume=volume,
+                            segmentation_location=seg_location,
+                            skeleton_location=skel_location)
+                        stask.set_requirement(ntask)
+                        self.skeletonize_tasks[zi, yi, xi] = stask
+    
     def compute_requirements(self):
         '''Compute the requirements for this task'''
         if not hasattr(self, "requirements"):
@@ -734,15 +765,32 @@ class PipelineTaskMixin:
                 rh_logger.logger.report_event("Making Neuroproof tasks")
                 self.generate_neuroproof_tasks()
                 #
-                # TO DO: skeletonization and the rest of rollup. For now
-                #        our output is the neuroproofed segmentation
+                # Step 8: Skeletonize Neuroproof
                 #
-                self.requirements =\
-                    self.np_tasks.flatten().tolist() +\
-                    self.np_x_border_tasks.flatten().tolist() +\
-                    self.np_y_border_tasks.flatten().tolist() +\
+                rh_logger.logger.report_event("Making skeletonize tasks")
+                self.generate_skeletonize_tasks()
+                #
+                # The requirements:
+                #
+                # The skeletonize tasks if skeletonization is done
+                #     otherwise the block neuroproof tasks
+                # The border neuroproof tasks
+                # The statistics task
+                #
+                self.requirements = []
+                if self.wants_skeletonization:
+                    self.requirements += \
+                        self.skeletonize_tasks.flatten().tolist()
+                else:
+                    self.requirements += self.np_tasks.flatten().tolist()
+                
+                self.requirements += \
+                    self.np_x_border_tasks.flatten().tolist()
+                self.requirements += \
+                    self.np_y_border_tasks.flatten().tolist()
+                self.requirements += \
                     self.np_z_border_tasks.flatten().tolist()
-                #
+                #ss
                 # (maybe) generate the statistics tasks
                 #
                 self.generate_statistics_tasks()

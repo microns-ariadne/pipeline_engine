@@ -23,27 +23,17 @@ int block_x_size=8*scale;
 int block_y_size=8*scale;
 int block_z_size=1*scale;
 
-static std::string LABELED_IMAGE_ALL =
-//    "/scratch/segmentation_directory/labels_input1";
-//    "testInput/labels_input1";
-//      "/home/gergely/data/labels_input2"; 
-//      "/afs/csail.mit.edu/u/o/odor/public_html/dummy_input"; 
-//    "/mnt/disk3/armafire/datasets/K11_S1/blocks_full/K11_S1_1024x1024x100_np/";
-//    "/mnt/disk3/armafire/datasets/K11_S1_debug_full/K11_S1_1024x1024x100_merge";
-//      "/mnt/disk4/greg/data/K11_0to4";
-//      "/mnt/disk4/greg/data/isbi/";
-      "/mnt/disk4/greg/data/K11_all_h5";
-static std::string LABELED_IMAGE_BLOCK = 
-//     "/mnt/disk4/greg/data/isbi/out_segmentation_0000_0000_0000.h5";
-//      "/mnt/disk4/greg/data/K11_0to4/out_segmentation_0004_0003_0004.h5";
-      "/mnt/disk4/greg/data/K11_all_png/out_segmentation_0004_0006_0006";      
-      
-static std::string LABELED_IMAGE_FILENAME_EXT = ".png";
-static std::string INPUT_TYPE = "block";
+int c_rows=0;
+int c_cols=0;
+int c_height=0;
+int s_rows=0;
+int s_cols=0;
+int s_height=0;
 
+static std::string INPUT_TYPE = "block";
+static std::string OUTPUT_IMAGE_DIR;
+static std::string LABELED_IMAGE_BLOCK;
+static std::string LABELED_IMAGE_ALL;
+static std::string OUTPUT_IMAGE_FILENAME_PREFIX="output-stack-label";
 typedef uint32_t LABEL_TYPE;
 
-// Path format for output file. Don't forget to make an SWC folder for the skeleton input
-//static std::string OUTPUT_IMAGE_DIR = "/home/gergely/data/graph_extraction_output";
-static std::string OUTPUT_IMAGE_DIR =  "/mnt/disk4/greg/data/graph_extraction_output";
-static std::string OUTPUT_IMAGE_FILENAME_PREFIX = "output-stack-label";

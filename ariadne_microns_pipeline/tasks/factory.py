@@ -16,6 +16,7 @@ from .nplearn import NeuroproofLearnTask, StrategyEnum
 from .segment import SegmentTask
 from .segmentation_statistics import \
      SegmentationStatisticsTask, SegmentationReportTask
+from .skeletonize import SkeletonizeTask
 from .utilities import to_hashable
 
 class AMTaskFactory(object):
@@ -145,6 +146,24 @@ class AMTaskFactory(object):
                            output_location=seg_location,
                            sigma_xy=sigma_xy,
                            sigma_z=sigma_z)
+    
+    def gen_skeletonize_task(
+        self, volume, segmentation_location, skeleton_location):
+        '''Generate a skeletonize task
+        
+        The skeletonize task takes a segmentation and produces .swc files
+        (see http://research.mssm.edu/cnic/swc.html).
+        
+        :param volume: the volume in global coordinates of the segmentation
+        :param segmentation_location: the location of the segmentation volume
+        :param skeleton_location: the name of the directory that will hold
+            the .swc files.
+        '''
+        return SkeletonizeTask(
+            volume=volume,
+            segmentation_location=segmentation_location,
+            skeleton_location=skeleton_location)
+        
 
     def __get_neuroproof_config(self, program):
         '''Return the location of the given program and its LD_LIBRARY_PATH

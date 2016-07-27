@@ -47,14 +47,15 @@
 // Output: Graph with objects as vertices and interactions as edges.
 int main(int argc, char **argv) {
   if (debug) printf("A total of %d arguments provided.\n", argc-1);
-  if (argc == 1) {
+  if (argc != 8) {
     syntax:
-    printf("./main -{s,d,f} [downsampling scale] [path of h5 files] [output_directory]\n");
+    printf("./main -{s,d,f} [downsampling scale] [path of h5 files] [output_directory] [width] [height] [depth]\n");
     printf("For arg 1 (-{s,d,f}) specify -s to compute and save skeletons, -d to read multiple files from a directory, -f read only one file\n");
     printf("For arg 2 (downsampling scale) could be 1, 2 or 4\n");
     printf("For arg 3 (labeled_image_directory or file) specify a directory or file containing the h5 file(s) corresponding to the segmentation.\n");
     printf("For arg 4 (output_directory) specify the directory where output files will be written, note that this directory must contain a subdirectory named SWC.\n");
-   // exit(0);
+    printf("For arg 5, 6 and 7, specify the width, height and depth of the volume being processed\n");
+    exit(-1);
   }
 
   if (argc > 1) {
@@ -87,6 +88,10 @@ int main(int argc, char **argv) {
     }
 
   }
+  
+  s_rows = atoi(argv[5]);
+  s_cols = atoi(argv[6]);
+  s_height = atoi(argv[7]);
 
   //Downsampling
   if (argc > 2) {
@@ -94,7 +99,9 @@ int main(int argc, char **argv) {
     scale = atoi(argstring.c_str());
     mBS = unscaledBS/scale;
     block_x_size=8*scale; block_y_size=8*scale; block_z_size=1*scale;
-	c_height= s_height/block_z_size; c_cols  = s_cols/block_x_size; c_rows  = s_rows/block_y_size;
+    c_height= (s_height + block_z_size - 1) / block_z_size; 
+    c_cols  = (s_cols + block_x_size - 1) / block_x_size; 
+    c_rows  = (s_rows + block_y_size - 1) / block_y_size;
   } 
 
   // If input directories are specified, then overwrite defaults.
@@ -110,6 +117,8 @@ int main(int argc, char **argv) {
   /// Random seed
   srand(0);
 
+  std::string LABELED_IMAGE_FILENAME = argv[3];
+  std::string LABELED_IMAGE_FILENAME_EXT=argv[3]+LABELED_IMAGE_FILENAME.find_last_of(".");
   //////////////// Figure out dimensions ///////////////////
   if (strcmp(LABELED_IMAGE_FILENAME_EXT.c_str(), ".h5")==0) {
     if (strcmp(INPUT_TYPE.c_str(), "all")==0) loadImages_all_h5_init();

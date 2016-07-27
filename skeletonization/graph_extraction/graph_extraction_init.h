@@ -32,10 +32,6 @@ int b_height;
 int b_rows;
 int b_cols;
 
-int c_height= s_height/block_z_size;
-int c_cols  = s_cols/block_x_size;
-int c_rows  = s_rows/block_y_size;
-
 int BLOCK_SIZE= s_rows*s_cols*s_height;
 LABEL_TYPE* data= new LABEL_TYPE[BLOCK_SIZE];
 

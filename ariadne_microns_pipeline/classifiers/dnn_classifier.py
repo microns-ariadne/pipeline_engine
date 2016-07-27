@@ -63,8 +63,7 @@ class DNNClassifier(AbstractPixelClassifier):
             if "ld_library_path" in self.config:
                 env["LD_LIBRARY_PATH"] =\
                     os.pathsep.join(self.config["ld_library_path"])
-            args = '"' + '"'.join(args) + '"'
-            subprocess.check_call(args, cwd=exec_dir, env=env, shell=True)
+            subprocess.check_call(args, cwd=exec_dir, env=env)
             volume = np.zeros((image.shape[0] - 2 * self.get_z_pad(),
                                image.shape[1] - 2 * self.get_y_pad(),
                                image.shape[2] - 2 * self.get_x_pad()),

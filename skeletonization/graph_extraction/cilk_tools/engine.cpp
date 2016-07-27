@@ -2,7 +2,7 @@
 
 #include <vector>
 #include "./engine.h"
-
+#define cilk_for for
 template<typename VertexType, typename EdgeType>
 engine<VertexType, EdgeType>::engine(
     Graph<VertexType, EdgeType>* graph, Scheduler* scheduler) {

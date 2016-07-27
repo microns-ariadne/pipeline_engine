@@ -3,9 +3,10 @@ import luigi
 import numpy as np
 import os
 import subprocess
+import shutil
 import tempfile
 
-import rh_logging
+import rh_logger
 import rh_config
 
 from ..parameters import VolumeParameter, DatasetLocationParameter
@@ -28,7 +29,7 @@ class SkeletonizeTaskMixin:
             volume=self.volume)
     
     def output(self):
-        return luigi.LocalTarget(self.skeleton_location)
+        return luigi.LocalTarget(self.skeleton_location+".done")
 
 class SkeletonizeRunMixin:
     
@@ -51,18 +52,80 @@ class SkeletonizeRunMixin:
         os.close(self.hdf5_fd)
         os.remove(self.hdf5_file)
     
+    @staticmethod
+    def rewrite_swc(path):
+        '''Rewrite a .swc file so that the nodes are numbered starting at 1
+        
+        :param path: the path to the .swc file
+        '''
+        node_map = {}
+        node_idx = 1
+        nodes = []
+        with open(path, "r") as fd:
+            for line in fd:
+                node, ntype, x, y, z, r, conn = line.strip().split(" ")
+                node_map[node] = node_idx
+                if float(r) == 0:
+                    r = "1.000000"
+                node_idx += 1
+                nodes.append((node, ntype, x, y, z, r, conn))
+        new_path = path + ".rewrite"
+        with open(new_path, "w") as fd:
+            for node, ntype, x, y, z, r, conn in nodes:
+                node = node_map[node]
+                conn = node_map.get(conn, int(conn))
+                fd.write("%d %s %s %s %s %s %d\n" % (
+                    node, ntype, x, y, z, r, conn))
+        os.rename(path, path+".old")
+        os.rename(new_path, path)
+        os.remove(path+".old")
+    
     def ariadne_run(self):
         self.copy_to_hdf5()
         try:
+            if not os.path.isdir(self.skeleton_location):
+                os.mkdir(self.skeleton_location)
+            swcdir = os.path.join(self.skeleton_location, "SWC")
+            if not os.path.isdir(swcdir):
+                os.mkdir(swcdir)
             config = rh_config.config["skeletonization"]
             home_dir = config["home-dir"]
             ld_library_path = os.pathsep.join(config["ld_library_path"])
             env = os.environ.copy()
             env["LD_LIBRARY_PATH"] = ld_library_path
-            args = ["main", "-sb", 
-                    self.downsampling_scale,
-                    self.hdf5_file, self.output().path]
+            args = [os.path.join(home_dir, "main"),
+                    "-sb", 
+                    str(self.downsampling_scale),
+                    self.hdf5_file, self.skeleton_location,
+                    str(self.volume.width),
+                    str(self.volume.height),
+                    str(self.volume.depth)]
+            #args = '"'+'" "'.join(args)+'"'
             subprocess.check_call(args, cwd=home_dir, env=env)
+            for filename in os.listdir(swcdir):
+                if filename.endswith(".swc"):
+                    self.rewrite_swc(os.path.join(swcdir, filename))
+            with self.output().open("w") as fd:
+                fd.write("Done")
         finally:
             self.post_run()
+
+class SkeletonizeTask(SkeletonizeTaskMixin,
+                      SkeletonizeRunMixin,
+                      RequiresMixin,
+                      RunMixin,
+                      luigi.Task):
+    '''Skeletonize a segmentation volume
+    
+    This task takes a 3d segmentation volume and performs a skeletonization
+    saving the results in an SWC file.
+    
+    This code depends on the binary skeletonization executable. This should
+    be produced by the top-level makefile which compiles the program,
+    skeletonization/graph_extraction/main, and a lookup table that drives
+    the erosion process, skeletonization/graph_extraction/LUT/LUT.txt. See
+    the README.md file for the parameters for .rh-config.yaml that are
+    relevant to this program.
+    '''
+    task_namespace="ariadne_microns_pipeline"
 
