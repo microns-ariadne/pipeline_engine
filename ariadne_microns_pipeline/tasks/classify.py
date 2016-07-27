@@ -47,6 +47,12 @@ class ClassifyTaskMixin:
     def get_classifier(self):
         return self.get_classifier_target().classifier
     
+    def process_resources(self):
+        '''Ask for the resources required by the classifier'''
+        resources = self.resources.copy()
+        resources.update(self.get_classifier_target().get_resources())
+        return resources
+    
     @property
     def out_x(self):
         '''The global x coordinate of the output volume'''

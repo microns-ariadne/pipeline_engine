@@ -6,7 +6,7 @@ from scipy.ndimage import grey_dilation, grey_erosion
 
 from ..parameters import VolumeParameter, DatasetLocationParameter
 from ..targets.factory import TargetFactory
-from .utilities import RequiresMixin, RunMixin
+from .utilities import RequiresMixin, RunMixin, SingleThreadedMixin
 
 
 class SeedsMethodEnum(enum.Enum):
@@ -162,6 +162,7 @@ class FindSeedsTask(FindSeedsTaskMixin,
                     FindSeedsRunMixin,
                     RequiresMixin,
                     RunMixin,
+                    SingleThreadedMixin,
                     luigi.Task):
     '''Find seeds for a watershed.
     

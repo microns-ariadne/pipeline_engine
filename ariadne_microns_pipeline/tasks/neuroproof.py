@@ -13,7 +13,7 @@ import tempfile
 
 from ..parameters import VolumeParameter, DatasetLocationParameter
 from ..targets.factory import TargetFactory
-from utilities import RequiresMixin, RunMixin
+from utilities import RequiresMixin, RunMixin, CILKCPUMixin
 
 class NeuroproofTaskMixin:
     
@@ -105,6 +105,7 @@ class NeuroproofRunMixin:
             else:
                 ld_library_path = self.neuroproof_ld_library_path
             env["LD_LIBRARY_PATH"] = ld_library_path
+            self.configure_env(env)
             #
             # Do the dirty deed...
             #
@@ -132,5 +133,5 @@ class NeuroproofRunMixin:
 
 
 class NeuroproofTask(NeuroproofTaskMixin, NeuroproofRunMixin,
-                     RequiresMixin, RunMixin, luigi.Task):
+                     RequiresMixin, RunMixin, CILKCPUMixin, luigi.Task):
     task_namespace = "ariadne_microns_pipeline"

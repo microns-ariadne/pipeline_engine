@@ -15,6 +15,7 @@ height
 '''
 
 from cv2 import imread, imwrite
+import multiprocessing
 import numpy as np
 import os
 import rh_config
@@ -37,6 +38,17 @@ class DNNClassifier(AbstractPixelClassifier):
     
     def get_class_names(self):
         return ["membrane"]
+    
+    def get_resources(self):
+        '''Request CPU resources
+        
+        By default, ask for all CPU resources or, if "cpu_count" is
+        configured in the fc_dnn section of .rh-config.yaml, use that
+        instead.
+        '''
+        cpu_count = int(self.config.get(
+            "cpu_count", multiprocessing.cpu_count()))
+        return dict(cpu_count=cpu_count)
     
     def classify(self, image, x, y, z):
         dir_in = tempfile.mkdtemp()
@@ -63,6 +75,7 @@ class DNNClassifier(AbstractPixelClassifier):
             if "ld_library_path" in self.config:
                 env["LD_LIBRARY_PATH"] =\
                     os.pathsep.join(self.config["ld_library_path"])
+            env["CILK_NWORKERS"] = str(self.get_resources()["cpu_count"])
             subprocess.check_call(args, cwd=exec_dir, env=env)
             volume = np.zeros((image.shape[0] - 2 * self.get_z_pad(),
                                image.shape[1] - 2 * self.get_y_pad(),

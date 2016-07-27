@@ -1,6 +1,7 @@
 '''Utility methods and classes for tasks'''
 
 import luigi
+import multiprocessing
 import rh_logger
 import time
 
@@ -56,6 +57,44 @@ class RunMixin:
         delta = time.time() - t0
         rh_logger.logger.report_metric(
             task_name + ".runtime", delta)
+
+
+class CILKCPUMixin:
+    '''This mixin provides a standardized mechanism for setting CPU utilization
+    
+    CILK uses the environment variable, CILK_NWORKERS, to set the number of
+    CPUs available to a subprocess. This mixin makes that number configurable
+    for a task and asks the scheduler for the given number of CPUs.
+    '''
+    cpu_count = luigi.IntParameter(
+         default=multiprocessing.cpu_count(),
+         description="The number of CPUs/CILK workers devoted to this task")
+    
+    def process_resources(self):
+        resources = self.resources.copy()
+        resources["cpu_count"] = self.cpu_count
+        return resources
+    
+    def configure_env(self, env):
+        '''Configure the CILK subprocess environment
+        
+        Set CILK_NWORKERS for the number of CPUs to use
+        
+        :param env: a copy of os.environ to be passed to the subprocess
+        '''
+        env["CILK_NWORKERS"] = str(self.cpu_count)
+
+
+class SingleThreadedMixin:
+    '''This mixin declares that its task runs single-threaded
+    
+    The upshot of this is that the task consumes one CPU resource.
+    '''
+    def process_resources(self):
+        resources = self.resources.copy()
+        resources["cpu_count"] = 1
+        return resources
+
 
 def to_hashable(x):
     '''Make dictionaries and lists hashable

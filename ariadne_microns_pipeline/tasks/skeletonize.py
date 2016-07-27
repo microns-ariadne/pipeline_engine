@@ -11,7 +11,7 @@ import rh_config
 
 from ..parameters import VolumeParameter, DatasetLocationParameter
 from ..targets.factory import TargetFactory
-from .utilities import RequiresMixin, RunMixin
+from .utilities import RequiresMixin, RunMixin, CILKCPUMixin
 
 
 class SkeletonizeTaskMixin:
@@ -93,6 +93,7 @@ class SkeletonizeRunMixin:
             ld_library_path = os.pathsep.join(config["ld_library_path"])
             env = os.environ.copy()
             env["LD_LIBRARY_PATH"] = ld_library_path
+            self.configure_env(env)
             args = [os.path.join(home_dir, "main"),
                     "-sb", 
                     str(self.downsampling_scale),
@@ -114,6 +115,7 @@ class SkeletonizeTask(SkeletonizeTaskMixin,
                       SkeletonizeRunMixin,
                       RequiresMixin,
                       RunMixin,
+                      CILKCPUMixin,
                       luigi.Task):
     '''Skeletonize a segmentation volume
     

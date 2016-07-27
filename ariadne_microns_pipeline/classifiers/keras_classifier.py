@@ -73,6 +73,10 @@ class KerasClassifier(AbstractPixelClassifier):
     def get_z_pad(self):
         return self.zpad_size
     
+    def get_resources(self):
+        '''Request one GPU for the classifier'''
+        return dict(gpu_count=1)
+    
     def classify(self, image, x, y, z):
         #
         # Coordinates:

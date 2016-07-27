@@ -6,7 +6,7 @@ import numpy as np
 from scipy.sparse import coo_matrix
 from scipy.sparse.csgraph import connected_components
 
-from .utilities import RequiresMixin, RunMixin
+from .utilities import RequiresMixin, RunMixin, SingleThreadedMixin
 from ..parameters import VolumeParameter, DatasetLocationParameter
 from ..targets.factory import TargetFactory
 from .utilities import to_hashable
@@ -103,6 +103,7 @@ class ConnectedComponentsRunMixin:
 class ConnectedComponentsTask(ConnectedComponentsTaskMixin,
                               ConnectedComponentsRunMixin,
                               RequiresMixin, RunMixin,
+                              SingleThreadedMixin,
                               luigi.Task):
     '''This task finds the connections between the segmentations of two volumes
     

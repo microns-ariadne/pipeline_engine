@@ -9,7 +9,7 @@ import shutil
 import subprocess
 import tempfile
 
-from .utilities import RequiresMixin, RunMixin
+from .utilities import RequiresMixin, RunMixin, CILKCPUMixin
 from ..targets.factory import TargetFactory
 from ..parameters import VolumeParameter, DatasetLocationParameter
 
@@ -163,6 +163,7 @@ class NeuroproofLearnTask(
     NeuroproofLearnRunMixin,
     RequiresMixin,
     RunMixin,
+    CILKCPUMixin,
     luigi.Task):
     '''Train a Neuroproof classifier
     
