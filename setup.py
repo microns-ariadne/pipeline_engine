@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 import os
+import numpy as np
 
 from setuptools import setup, Extension
 import cython
@@ -15,7 +16,7 @@ watershed_ext = Extension(
              for _ in "ws_alg.cpp", "ws_queue.cpp"] + [
              os.path.join("ariadne_microns_pipeline", "algorithms", 
                           "_am_watershed.pyx")],
-    include_dirs=["watershed"])
+    include_dirs=["watershed", np.get_include()])
 
 setup(
     name='ariadne-microns-pipeline',
