@@ -96,21 +96,6 @@ class KerasClassifier(AbstractPixelClassifier):
         return dict(gpu_count=1)
     
     def classify(self, image, x, y, z):
-        global has_bound_cuda
-        if not has_bound_cuda:
-            has_bound_cuda=True
-            import theano.sandbox.cuda
-            import pycuda.driver
-            for device in range(pycuda.driver.Device.count()):
-                try:
-                    theano.sandbox.cuda.use("gpu%d" % device, force=True)
-                    break
-                except:
-                    continue
-            else:
-                raise RuntimeError("Failed to acquire GPU")
-            logger.report_event("Acquired GPU %d" % device)
-        import keras
         self.__finish_model()
         self.exception = None
         self.pred_queue = Queue.Queue()
@@ -206,6 +191,20 @@ class KerasClassifier(AbstractPixelClassifier):
     def prediction_processor(self):
         '''Run a thread to process predictions'''
         try:
+            global has_bound_cuda
+            if not has_bound_cuda:
+                has_bound_cuda=True
+                import theano.sandbox.cuda
+                import pycuda.driver
+                for device in range(pycuda.driver.Device.count()):
+                    try:
+                        theano.sandbox.cuda.use("gpu%d" % device, force=True)
+                        break
+                    except:
+                        continue
+                else:
+                    raise RuntimeError("Failed to acquire GPU")
+                logger.report_event("Acquired GPU %d" % device)
             while True:
                 block, x0b, x1b, y0b, y1b, z0b, z1b = self.pred_queue.get()
                 if block is None:
