@@ -3,15 +3,15 @@
 The model is composed of the json keras model and the weights
 '''
 
-import keras
-from keras.optimizers import SGD
 import numpy as np
+import os
 from scipy.ndimage import gaussian_filter
 import time
 
 from rh_logger import logger
 from ..targets.classifier_target import AbstractPixelClassifier
 
+has_bound_cuda = False
 
 class KerasClassifier(AbstractPixelClassifier):
     
@@ -30,16 +30,30 @@ class KerasClassifier(AbstractPixelClassifier):
         self.xypad_size = xypad_size
         self.zpad_size = zpad_size
         self.block_size = block_size
-        self.model = keras.models.model_from_json(
-            open(model_path, "r").read())
+        self.model_json = open(model_path, "r").read()
+        self.model = keras.models.model_from_json(self.model_json)
         self.model.load_weights(weights_path)
+        self.weights = self.model.get_weights()
         self.sigma = sigma
-        self.__finish_model()
+        self.__model_finished = False
 
     def __finish_model(self):
         '''Compile the model'''
+        if self.__model_finished:
+            return
+        import keras
+        from keras.optimizers import SGD
+        t0 = time.time()
+        self.model = keras.models.model_from_json(self.model_json)
+        logger.report_metric("keras_model_load_time", time.time() - t0)
+        t0 = time.time()
+        self.model.set_weights(self.weights)
+        logger.report_metric("keras_weights_load_time", time.time() - t0)
         sgd = SGD(lr=0.01, decay=0, momentum=0.0, nesterov=False)
+        t0 = time.time()
         self.model.compile(loss='categorical_crossentropy', optimizer=sgd)
+        logger.report_metric('keras_compile_time', time.time() - t0)
+        self.__model_finished = True
         
     def __getstate__(self):
         '''Get the pickleable state of the model'''
@@ -47,8 +61,8 @@ class KerasClassifier(AbstractPixelClassifier):
         return dict(xypad_size=self.xypad_size,
                     zpad_size=self.zpad_size,
                     block_size=self.block_size,
-                    model=self.model.to_json(),
-                    weights=self.model.get_weights(),
+                    model=self.model_json,
+                    weights=self.weights,
                     sigma=self.sigma)
     
     def __setstate__(self, state):
@@ -56,10 +70,10 @@ class KerasClassifier(AbstractPixelClassifier):
         self.xypad_size = state["xypad_size"]
         self.zpad_size = state["zpad_size"]
         self.block_size = state["block_size"]
-        self.model = keras.models.model_from_json(state["model"])
-        self.model.set_weights(state["weights"])
         self.sigma = state["sigma"]
-        self.__finish_model()
+        self.model_json = state["model"]
+        self.weights = state["weights"]
+        self.__model_finished = False
     
     def get_class_names(self):
         return ["membrane"]
@@ -78,6 +92,22 @@ class KerasClassifier(AbstractPixelClassifier):
         return dict(gpu_count=1)
     
     def classify(self, image, x, y, z):
+        global has_bound_cuda
+        if not has_bound_cuda:
+            has_bound_cuda=True
+            import theano.sandbox.cuda
+            import pycuda.driver
+            for device in range(pycuda.driver.Device.count()):
+                try:
+                    theano.sandbox.cuda.use("gpu%d" % device, force=True)
+                    break
+                except:
+                    continue
+            else:
+                raise RuntimeError("Failed to acquire GPU")
+            logger.report_event("Acquired GPU %d" % device)
+        import keras
+        self.__finish_model()
         #
         # Coordinates:
         #
@@ -118,6 +148,7 @@ class KerasClassifier(AbstractPixelClassifier):
         #
         # Classify each block
         #
+        t0_total = time.time()
         for zi in range(n_z):
             if zi == n_z-1:
                 z0a = image.shape[0] - self.block_size[0]
@@ -150,11 +181,16 @@ class KerasClassifier(AbstractPixelClassifier):
                     block.shape = [1] + list(block.shape)
                     t0 = time.time()
                     pred = self.model.predict(block)
+                    delta=time.time() - t0
                     logger.report_event(
                         "Processed block %d:%d, %d:%d, %d:%d in %f sec" %
-                        (x0a, x1a, y0a, y1a, z0a, z1a, time.time() - t0))
+                        (x0a, x1a, y0a, y1a, z0a, z1a, delta))
+                    logger.report_metric("keras_block_classification_time",
+                                         delta)
                     pred.shape = (z1b - z0b, y1b - y0b, x1b - x0b)
                     out_image[z0b:z1b, y0b:y1b, x0b:x1b] = pred * 255
+        logger.report_metric("keras_volume_classification_time",
+                             time.time() - t0_total)
         return dict(membrane=out_image)
     
     def highpass(self, img):
@@ -176,6 +212,7 @@ class KerasClassifier(AbstractPixelClassifier):
         to 1 and 0 to remove outliers.
         :returns: normalized image
         '''
+        return img.astype(np.float32) / 255.0
         sortedValues = np.sort( img.ravel())
         minVal = np.float32(sortedValues[np.int(len(sortedValues) * (saturation_level / 2))])
         maxVal = np.float32(sortedValues[np.int(len(sortedValues) * (1 - saturation_level / 2))])
