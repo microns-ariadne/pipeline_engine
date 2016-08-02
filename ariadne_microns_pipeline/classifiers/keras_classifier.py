@@ -4,8 +4,11 @@ The model is composed of the json keras model and the weights
 '''
 
 import numpy as np
+import Queue
 import os
 from scipy.ndimage import gaussian_filter
+import sys
+import threading
 import time
 
 from rh_logger import logger
@@ -27,6 +30,7 @@ class KerasClassifier(AbstractPixelClassifier):
         :param block_size: size of output block to classifier
         :param sigma: the standard deviation for the high-pass filter
         '''
+        import keras
         self.xypad_size = xypad_size
         self.zpad_size = zpad_size
         self.block_size = block_size
@@ -108,6 +112,13 @@ class KerasClassifier(AbstractPixelClassifier):
             logger.report_event("Acquired GPU %d" % device)
         import keras
         self.__finish_model()
+        self.exception = None
+        self.pred_queue = Queue.Queue()
+        self.out_queue = Queue.Queue()
+        pred_thread = threading.Thread(target=self.prediction_processor)
+        pred_thread.start()
+        out_thread = threading.Thread(target=self.output_processor)
+        out_thread.start()
         #
         # Coordinates:
         #
@@ -136,7 +147,7 @@ class KerasClassifier(AbstractPixelClassifier):
         x1 = image.shape[2] - self.get_x_pad()
         n_x = 1 + int((image.shape[2] - 1) / output_block_size[2])
         xs = np.linspace(x0, x1, n_x+1).astype(int)
-        out_image = np.zeros((z1-z0, y1 - y0, x1 - x0))
+        self.out_image = np.zeros((z1-z0, y1 - y0, x1 - x0), np.uint8)
         #
         # Normalize image
         #
@@ -168,6 +179,7 @@ class KerasClassifier(AbstractPixelClassifier):
                 y0b = y0a
                 y1b = y1a - self.get_y_pad() * 2
                 for xi in range(n_x):
+                    t0 = time.time()
                     if xi == n_x-1:
                         x0a = image.shape[2] - self.block_size[2]
                         x1a = image.shape[2]
@@ -179,19 +191,52 @@ class KerasClassifier(AbstractPixelClassifier):
                     block = KerasClassifier.normalize_image(
                         image[z0a:z1a, y0a:y1a, x0a:x1a])
                     block.shape = [1] + list(block.shape)
-                    t0 = time.time()
-                    pred = self.model.predict(block)
-                    delta=time.time() - t0
-                    logger.report_event(
-                        "Processed block %d:%d, %d:%d, %d:%d in %f sec" %
-                        (x0a, x1a, y0a, y1a, z0a, z1a, delta))
-                    logger.report_metric("keras_block_classification_time",
-                                         delta)
-                    pred.shape = (z1b - z0b, y1b - y0b, x1b - x0b)
-                    out_image[z0b:z1b, y0b:y1b, x0b:x1b] = pred * 255
+                    self.pred_queue.put((block, x0b, x1b, y0b, y1b, z0b, z1b))
+                    logger.report_metric("keras_cpu_block_processing_time",
+                                         time.time() - t0)
+        self.pred_queue.put([None] * 7)
+        pred_thread.join()
+        out_thread.join()
+        if self.exception is not None:
+            raise self.exception
         logger.report_metric("keras_volume_classification_time",
                              time.time() - t0_total)
-        return dict(membrane=out_image)
+        return dict(membrane=self.out_image)
+    
+    def prediction_processor(self):
+        '''Run a thread to process predictions'''
+        try:
+            while True:
+                block, x0b, x1b, y0b, y1b, z0b, z1b = self.pred_queue.get()
+                if block is None:
+                    break
+                t0 = time.time()
+                pred = self.model.predict(block)
+                delta=time.time() - t0
+                self.out_queue.put((pred, delta, x0b, x1b, y0b, y1b, z0b, z1b))
+        except:
+            self.exception = sys.exc_value
+            logger.report_exception()
+        self.out_queue.put([None] * 8)
+    
+    def output_processor(self):
+        '''Run a thread to process the prediction output'''
+        try:
+            while True:
+                pred, delta, x0b, x1b, y0b, y1b, z0b, z1b = self.out_queue.get()
+                if pred is None:
+                    break
+                logger.report_event(
+                    "Processed block %d:%d, %d:%d, %d:%d in %f sec" %
+                    (x0b, x1b, y0b, y1b, z0b, z1b, delta))
+                logger.report_metric("keras_block_classification_time",
+                                     delta)
+                pred.shape = (z1b - z0b, y1b - y0b, x1b - x0b)
+                self.out_image[z0b:z1b, y0b:y1b, x0b:x1b] = \
+                    (pred * 255).astype(np.uint8)
+        except:
+            self.exception = sys.exc_value
+            logger.report_exception()
     
     def highpass(self, img):
         '''Put the image through a highpass filter to remove inconsitent bkgd
@@ -212,7 +257,6 @@ class KerasClassifier(AbstractPixelClassifier):
         to 1 and 0 to remove outliers.
         :returns: normalized image
         '''
-        return img.astype(np.float32) / 255.0
         sortedValues = np.sort( img.ravel())
         minVal = np.float32(sortedValues[np.int(len(sortedValues) * (saturation_level / 2))])
         maxVal = np.float32(sortedValues[np.int(len(sortedValues) * (1 - saturation_level / 2))])
