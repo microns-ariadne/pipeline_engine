@@ -96,7 +96,6 @@ class KerasClassifier(AbstractPixelClassifier):
         return dict(gpu_count=1)
     
     def classify(self, image, x, y, z):
-        self.__finish_model()
         self.exception = None
         self.pred_queue = Queue.Queue()
         self.out_queue = Queue.Queue()
@@ -205,6 +204,7 @@ class KerasClassifier(AbstractPixelClassifier):
                 else:
                     raise RuntimeError("Failed to acquire GPU")
                 logger.report_event("Acquired GPU %d" % device)
+            self.__finish_model()
             while True:
                 block, x0b, x1b, y0b, y1b, z0b, z1b = self.pred_queue.get()
                 if block is None:
