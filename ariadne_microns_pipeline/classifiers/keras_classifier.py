@@ -2,7 +2,7 @@
 
 The model is composed of the json keras model and the weights
 '''
-
+import hashlib
 import numpy as np
 import Queue
 import os
@@ -14,10 +14,12 @@ import time
 from rh_logger import logger
 from ..targets.classifier_target import AbstractPixelClassifier
 
-has_bound_cuda = False
 
 class KerasClassifier(AbstractPixelClassifier):
     
+    has_bound_cuda = False
+    models = {}
+
     def __init__(self, model_path, weights_path, 
                  xypad_size, zpad_size, block_size, sigma):
         '''Initialize from a model and weights
@@ -41,10 +43,38 @@ class KerasClassifier(AbstractPixelClassifier):
         self.sigma = sigma
         self.__model_finished = False
 
+    @classmethod
+    def __bind_cuda(cls):
+        if cls.has_bound_cuda:
+            return
+        t0 = time.time()
+        import theano.sandbox.cuda
+        import pycuda.driver
+        for device in range(pycuda.driver.Device.count()):
+            try:
+                theano.sandbox.cuda.use("gpu%d" % device, force=True)
+                break
+            except:
+                continue
+        else:
+            raise RuntimeError("Failed to acquire GPU")
+        logger.report_metric("gpu_acquisition_time", time.time() - t0)
+        logger.report_event("Acquired GPU %d" % device)
+        cls.has_bound_cuda=True
+        
     def __finish_model(self):
         '''Compile the model'''
         if self.__model_finished:
             return
+        h = hashlib.md5()
+        h.update(self.model_json)
+        for weight in self.weights:
+            h.update(weight.data)
+        if h.digest in self.models:
+            self.model = self.models[h.digest]
+            return
+        
+        self.__bind_cuda()
         import keras
         from keras.optimizers import SGD
         t0 = time.time()
@@ -58,6 +88,7 @@ class KerasClassifier(AbstractPixelClassifier):
         self.model.compile(loss='categorical_crossentropy', optimizer=sgd)
         logger.report_metric('keras_compile_time', time.time() - t0)
         self.__model_finished = True
+        self.models[h.digest] = self.model
         
     def __getstate__(self):
         '''Get the pickleable state of the model'''
@@ -190,20 +221,7 @@ class KerasClassifier(AbstractPixelClassifier):
     def prediction_processor(self):
         '''Run a thread to process predictions'''
         try:
-            global has_bound_cuda
-            if not has_bound_cuda:
-                has_bound_cuda=True
-                import theano.sandbox.cuda
-                import pycuda.driver
-                for device in range(pycuda.driver.Device.count()):
-                    try:
-                        theano.sandbox.cuda.use("gpu%d" % device, force=True)
-                        break
-                    except:
-                        continue
-                else:
-                    raise RuntimeError("Failed to acquire GPU")
-                logger.report_event("Acquired GPU %d" % device)
+            self.__bind_cuda()
             self.__finish_model()
             while True:
                 block, x0b, x1b, y0b, y1b, z0b, z1b = self.pred_queue.get()
