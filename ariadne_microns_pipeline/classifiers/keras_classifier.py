@@ -64,6 +64,7 @@ class KerasClassifier(AbstractPixelClassifier):
             return
         t0 = time.time()
         import theano.sandbox.cuda
+        import pycuda.autoinit
         import pycuda.driver
         for device in range(pycuda.driver.Device.count()):
             try:
