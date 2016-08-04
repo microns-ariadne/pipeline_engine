@@ -4,8 +4,7 @@ The model is composed of the json keras model and the weights
 '''
 from __future__ import absolute_import
 
-from keras import backend as K
-from keras.engine import Layer, InputSpec
+import cPickle
 import hashlib
 import numpy as np
 import Queue
@@ -43,6 +42,7 @@ class KerasClassifier(AbstractPixelClassifier):
         import theano
         import keras.backend as K
         from keras.optimizers import SGD
+        from .cropping2d import Cropping2D
         
         self.xypad_size = xypad_size
         self.zpad_size = zpad_size
@@ -94,11 +94,17 @@ class KerasClassifier(AbstractPixelClassifier):
     def __getstate__(self):
         '''Get the pickleable state of the model'''
         
-        return dict(xypad_size=self.xypad_size,
-                    zpad_size=self.zpad_size,
-                    block_size=self.block_size,
-                    function=self.function,
-                    sigma=self.sigma)
+        old_recursion_limit = sys.getrecursionlimit()
+        try:
+            function_pickle = cPickle.dumps(self.function,
+                                            protocol=cPickle.HIGHEST_PROTOCOL)
+            return dict(xypad_size=self.xypad_size,
+                        zpad_size=self.zpad_size,
+                        block_size=self.block_size,
+                        function_pickle=function_pickle,
+                        sigma=self.sigma)
+        finally:
+            sys.setrecursionlimit(old_recursion_limit)
     
     def __setstate__(self, state):
         '''Restore the state from the pickle'''
@@ -106,7 +112,7 @@ class KerasClassifier(AbstractPixelClassifier):
         self.zpad_size = state["zpad_size"]
         self.block_size = state["block_size"]
         self.sigma = state["sigma"]
-        self.function = state["function"]
+        self.function_pickle = state["function_pickle"]
     
     def get_class_names(self):
         return ["membrane"]
@@ -220,6 +226,9 @@ class KerasClassifier(AbstractPixelClassifier):
         '''Run a thread to process predictions'''
         try:
             self.__bind_cuda()
+            if not hasattr(self, "function"):
+                self.function = cPickle.loads(self.function_pickle)
+                del self.function_pickle
             while True:
                 block, x0b, x1b, y0b, y1b, z0b, z1b = self.pred_queue.get()
                 if block is None:
@@ -278,63 +287,3 @@ class KerasClassifier(AbstractPixelClassifier):
         normImg[normImg<0] = 0
         normImg[normImg>255] = 255
         return (np.float32(normImg) / 255.0)
-
-# from https://github.com/fchollet/keras/issues/3162 - credit to https://github.com/ironbar
-
-class Cropping2D(Layer):
-    '''Cropping layer for 2D input (e.g. picture).
-
-    # Input shape
-        4D tensor with shape:
-        (samples, depth, first_axis_to_crop, second_axis_to_crop)
-
-    # Output shape
-        4D tensor with shape:
-        (samples, depth, first_cropped_axis, second_cropped_axis)
-
-    # Arguments
-        padding: tuple of tuple of int (length 2)
-            How many should be trimmed off at the beginning and end of
-            the 2 padding dimensions (axis 3 and 4).
-    '''
-    input_ndim = 4
-
-    def __init__(self, cropping=((1, 1), (1, 1)), dim_ordering=K.image_dim_ordering(), **kwargs):
-        super(Cropping2D, self).__init__(**kwargs)
-        assert len(cropping) == 2, 'cropping mus be two tuples, e.g. ((1,1),(1,1))'
-        assert len(cropping[0]) == 2, 'cropping[0] should be a tuple'
-        assert len(cropping[1]) == 2, 'cropping[1] should be a tuple'
-        self.cropping = tuple(cropping)
-        assert dim_ordering in {'tf', 'th'}, 'dim_ordering must be in {tf, th}'
-        self.dim_ordering = dim_ordering
-        self.input_spec = [InputSpec(ndim=4)]
-
-    def get_output_shape_for(self, input_shape):
-        if self.dim_ordering == 'th':
-
-            return (input_shape[0],
-                    input_shape[1],
-                    input_shape[2] - self.cropping[0][0] - self.cropping[0][1],
-                    input_shape[3] - self.cropping[1][0] - self.cropping[1][1])
-        elif self.dim_ordering == 'tf':
-            return (input_shape[0],
-                    input_shape[1] - self.cropping[0][0] - self.cropping[0][1],
-                    input_shape[2] - self.cropping[1][0] - self.cropping[1][1],
-                    input_shape[3])
-        else:
-            raise Exception('Invalid dim_ordering: ' + self.dim_ordering)
-
-    def call(self, x, mask=None):
-        """
-        width, height = self.output_shape()[2], self.output_shape()[3]
-        width_crop_left = self.cropping[0][0]
-        height_crop_top = self.cropping[1][0]
-
-        return x[:, :, width_crop_left:width+width_crop_left, height_crop_top:height+height_crop_top]
-        """
-        return x[:, :, self.cropping[0][0]:-self.cropping[0][1], self.cropping[1][0]:-self.cropping[1][1]]
-
-    def get_config(self):
-        config = {'cropping': self.cropping}
-        base_config = super(Cropping2D, self).get_config()
-        return dict(list(base_config.items()) + list(config.items()))
