@@ -227,7 +227,9 @@ class KerasClassifier(AbstractPixelClassifier):
         try:
             self.__bind_cuda()
             if not hasattr(self, "function"):
+                t0 = time.time()
                 self.function = cPickle.loads(self.function_pickle)
+                logger.report_metric("Function load time", time.time()-t0)
                 del self.function_pickle
             while True:
                 block, x0b, x1b, y0b, y1b, z0b, z1b = self.pred_queue.get()
