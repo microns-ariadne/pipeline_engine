@@ -2,6 +2,10 @@
 
 The model is composed of the json keras model and the weights
 '''
+from __future__ import absolute_import
+
+from keras import backend as K
+from keras.engine import Layer, InputSpec
 import hashlib
 import numpy as np
 import Queue
@@ -11,6 +15,7 @@ import sys
 import threading
 import time
 
+import rh_config
 from rh_logger import logger
 from ..targets.classifier_target import AbstractPixelClassifier
 
@@ -33,15 +38,25 @@ class KerasClassifier(AbstractPixelClassifier):
         :param sigma: the standard deviation for the high-pass filter
         '''
         import keras
+        import theano
+        import keras.backend as K
+        from keras.optimizers import SGD
+        
         self.xypad_size = xypad_size
         self.zpad_size = zpad_size
         self.block_size = block_size
-        self.model_json = open(model_path, "r").read()
-        self.model = keras.models.model_from_json(self.model_json)
-        self.model.load_weights(weights_path)
-        self.weights = self.model.get_weights()
+        model_json = open(model_path, "r").read()
+        model = keras.models.model_from_json(
+            model_json,
+            custom_objects={"Cropping2D":Cropping2D})
+        model.load_weights(weights_path)
+        sgd = SGD(lr=0.01, decay=0, momentum=0.0, nesterov=False)
+        model.compile(loss='categorical_crossentropy', optimizer=sgd)        
+        self.function = theano.function(
+            model.inputs,
+            model.outputs,
+            givens={K.learning_phase():np.uint8(0)})
         self.sigma = sigma
-        self.__model_finished = False
 
     @classmethod
     def __bind_cuda(cls):
@@ -62,42 +77,13 @@ class KerasClassifier(AbstractPixelClassifier):
         logger.report_event("Acquired GPU %d" % device)
         cls.has_bound_cuda=True
         
-    def __finish_model(self):
-        '''Compile the model'''
-        if self.__model_finished:
-            return
-        h = hashlib.md5()
-        h.update(self.model_json)
-        for weight in self.weights:
-            h.update(weight.data)
-        if h.digest in self.models:
-            self.model = self.models[h.digest]
-            return
-        
-        self.__bind_cuda()
-        import keras
-        from keras.optimizers import SGD
-        t0 = time.time()
-        self.model = keras.models.model_from_json(self.model_json)
-        logger.report_metric("keras_model_load_time", time.time() - t0)
-        t0 = time.time()
-        self.model.set_weights(self.weights)
-        logger.report_metric("keras_weights_load_time", time.time() - t0)
-        sgd = SGD(lr=0.01, decay=0, momentum=0.0, nesterov=False)
-        t0 = time.time()
-        self.model.compile(loss='categorical_crossentropy', optimizer=sgd)
-        logger.report_metric('keras_compile_time', time.time() - t0)
-        self.__model_finished = True
-        self.models[h.digest] = self.model
-        
     def __getstate__(self):
         '''Get the pickleable state of the model'''
         
         return dict(xypad_size=self.xypad_size,
                     zpad_size=self.zpad_size,
                     block_size=self.block_size,
-                    model=self.model_json,
-                    weights=self.weights,
+                    function=self.function,
                     sigma=self.sigma)
     
     def __setstate__(self, state):
@@ -106,9 +92,7 @@ class KerasClassifier(AbstractPixelClassifier):
         self.zpad_size = state["zpad_size"]
         self.block_size = state["block_size"]
         self.sigma = state["sigma"]
-        self.model_json = state["model"]
-        self.weights = state["weights"]
-        self.__model_finished = False
+        self.function = state["function"]
     
     def get_class_names(self):
         return ["membrane"]
@@ -222,13 +206,12 @@ class KerasClassifier(AbstractPixelClassifier):
         '''Run a thread to process predictions'''
         try:
             self.__bind_cuda()
-            self.__finish_model()
             while True:
                 block, x0b, x1b, y0b, y1b, z0b, z1b = self.pred_queue.get()
                 if block is None:
                     break
                 t0 = time.time()
-                pred = self.model.predict(block)
+                pred = self.function(block)[0]
                 delta=time.time() - t0
                 self.out_queue.put((pred, delta, x0b, x1b, y0b, y1b, z0b, z1b))
         except:
@@ -282,5 +265,62 @@ class KerasClassifier(AbstractPixelClassifier):
         normImg[normImg>255] = 255
         return (np.float32(normImg) / 255.0)
 
-        
-        
+# from https://github.com/fchollet/keras/issues/3162 - credit to https://github.com/ironbar
+
+class Cropping2D(Layer):
+    '''Cropping layer for 2D input (e.g. picture).
+
+    # Input shape
+        4D tensor with shape:
+        (samples, depth, first_axis_to_crop, second_axis_to_crop)
+
+    # Output shape
+        4D tensor with shape:
+        (samples, depth, first_cropped_axis, second_cropped_axis)
+
+    # Arguments
+        padding: tuple of tuple of int (length 2)
+            How many should be trimmed off at the beginning and end of
+            the 2 padding dimensions (axis 3 and 4).
+    '''
+    input_ndim = 4
+
+    def __init__(self, cropping=((1, 1), (1, 1)), dim_ordering=K.image_dim_ordering(), **kwargs):
+        super(Cropping2D, self).__init__(**kwargs)
+        assert len(cropping) == 2, 'cropping mus be two tuples, e.g. ((1,1),(1,1))'
+        assert len(cropping[0]) == 2, 'cropping[0] should be a tuple'
+        assert len(cropping[1]) == 2, 'cropping[1] should be a tuple'
+        self.cropping = tuple(cropping)
+        assert dim_ordering in {'tf', 'th'}, 'dim_ordering must be in {tf, th}'
+        self.dim_ordering = dim_ordering
+        self.input_spec = [InputSpec(ndim=4)]
+
+    def get_output_shape_for(self, input_shape):
+        if self.dim_ordering == 'th':
+
+            return (input_shape[0],
+                    input_shape[1],
+                    input_shape[2] - self.cropping[0][0] - self.cropping[0][1],
+                    input_shape[3] - self.cropping[1][0] - self.cropping[1][1])
+        elif self.dim_ordering == 'tf':
+            return (input_shape[0],
+                    input_shape[1] - self.cropping[0][0] - self.cropping[0][1],
+                    input_shape[2] - self.cropping[1][0] - self.cropping[1][1],
+                    input_shape[3])
+        else:
+            raise Exception('Invalid dim_ordering: ' + self.dim_ordering)
+
+    def call(self, x, mask=None):
+        """
+        width, height = self.output_shape()[2], self.output_shape()[3]
+        width_crop_left = self.cropping[0][0]
+        height_crop_top = self.cropping[1][0]
+
+        return x[:, :, width_crop_left:width+width_crop_left, height_crop_top:height+height_crop_top]
+        """
+        return x[:, :, self.cropping[0][0]:-self.cropping[0][1], self.cropping[1][0]:-self.cropping[1][1]]
+
+    def get_config(self):
+        config = {'cropping': self.cropping}
+        base_config = super(Cropping2D, self).get_config()
+        return dict(list(base_config.items()) + list(config.items()))
