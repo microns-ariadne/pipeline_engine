@@ -11,6 +11,8 @@ import numpy as np
 import Queue
 import os
 from scipy.ndimage import gaussian_filter
+import re
+import subprocess
 import sys
 import threading
 import time
@@ -63,10 +65,21 @@ class KerasClassifier(AbstractPixelClassifier):
         if cls.has_bound_cuda:
             return
         t0 = time.time()
+        #
+        # OK - pycuda.driver.Device.count() sometimes requires
+        #      pycuda.init() which sometimes screws up
+        #      theano.sandbox.cuda.use. So I just use nvidia-smi to
+        #      tell me about the GPUs.
+        # A typical line of output:
+        #      GPU 0: GeForce GTX TITAN X ...
+        #
         import theano.sandbox.cuda
-        import pycuda.driver
-        pycuda.driver.init()
-        for device in range(pycuda.driver.Device.count()):
+        nvidia_smi_output = subprocess.check_output(["nvidia-smi", "-L"])
+        for line in nvidia_smi_output.split("\n"):
+            match = re.search("GPU\\s(\\d+)", line)
+            if match is None:
+                continue
+            device = int(match.group(1))
             try:
                 theano.sandbox.cuda.use("gpu%d" % device, force=True)
                 break
