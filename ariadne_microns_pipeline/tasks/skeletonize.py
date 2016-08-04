@@ -52,8 +52,7 @@ class SkeletonizeRunMixin:
         os.close(self.hdf5_fd)
         os.remove(self.hdf5_file)
     
-    @staticmethod
-    def rewrite_swc(path):
+    def rewrite_swc(self, path):
         '''Rewrite a .swc file so that the nodes are numbered starting at 1
         
         :param path: the path to the .swc file
@@ -72,9 +71,12 @@ class SkeletonizeRunMixin:
         new_path = path + ".rewrite"
         with open(new_path, "w") as fd:
             for node, ntype, x, y, z, r, conn in nodes:
+                x = float(x) + self.volume.x
+                y = float(y) + self.volume.y
+                z = float(z) + self.volume.z
                 node = node_map[node]
                 conn = node_map.get(conn, int(conn))
-                fd.write("%d %s %s %s %s %s %d\n" % (
+                fd.write("%d %s %.6f %.6f %.6f %s %d\n" % (
                     node, ntype, x, y, z, r, conn))
         os.rename(path, path+".old")
         os.rename(new_path, path)

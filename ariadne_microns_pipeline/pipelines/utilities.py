@@ -44,8 +44,10 @@ class PipelineRunReportMixin:
         matplotlib.use("Pdf")
         d = {}
         conn_params = rh_config.config["luigid"]["db_connection"]
+        rh_logger.logger.report_event("Fetching task history")
         engine = sqlalchemy.create_engine(conn_params)
         self.get_task_history(self, d, engine)
+        rh_logger.logger.report_event("%d events retrieved" % len(d))
         tasks = {}
         for task_id, delta in d.items():
             if task_id.startswith("ariadne_microns_pipeline."):
@@ -61,6 +63,8 @@ class PipelineRunReportMixin:
             #
             # boxplots of individual timings
             #
+            rh_logger.logger.report_event(
+                "Plotting boxplot of timing variances per task.")
             figure = matplotlib.pyplot.figure()
             ax = figure.add_axes([0.1, 0.3, 0.8, 0.65])
             ax.boxplot(timings, labels=task_names)
@@ -74,6 +78,7 @@ class PipelineRunReportMixin:
             #
             # bar plot of total timing
             #
+            rh_logger.logger.report_event("Plotting bar plot of total sec/task")
             figure = matplotlib.pyplot.figure()
             ax = figure.add_axes([0.1, 0.3, 0.8, 0.65])
             colors = ((0, 0, 1.0), (0, .4, .6))
@@ -100,6 +105,7 @@ class PipelineRunReportMixin:
                 "Total runtime by task (sec): %.2f sec, %.2f M voxels/sec" %
                 (total_runtime, mvoxel_per_sec))
             pdf.savefig(figure)
+            rh_logger.logger.report_event("Finished plotting %s" % pdf_path)
             
         with self.output().open("w") as fd:
             writer = csv.writer(fd)

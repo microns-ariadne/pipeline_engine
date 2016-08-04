@@ -105,7 +105,7 @@ export USER_CONFIG_JAM
 
 .PHONY: all np-merge fc_dnn all_sources cilkplus-sources clean
 
-all: $(TOOLS_PREFIX)/sources neuroproof fc_dnn
+all: $(TOOLS_PREFIX)/sources neuroproof fc_dnn/src/run_dnn
 
 clean:
 	cd fc_dnn/src &&\

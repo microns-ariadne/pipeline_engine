@@ -32,6 +32,7 @@ setup(
         "Cython>=0.24.0",
         "dateutil>=2.2",
         "enum34>=1.0.0",
+        "mahotas",
         "numpy>=1.9.3",
         "h5py>=2.6.0",
         "scipy>=0.16.0",

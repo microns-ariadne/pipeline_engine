@@ -10,12 +10,21 @@ You should create a tools directory to hold these dependencies. The following
 libraries should be installed on your system along with their include files:
 
 libbz2
+libc6-dev-i386
 libfftw
 libhdf5
 libjpeg
 libpng
 libtiff
 libz
+
+Tools required to compile:
+
+cmake
+flex
+bison
+gcc
+make
 
 ## Deployment
 
