@@ -64,8 +64,8 @@ class KerasClassifier(AbstractPixelClassifier):
             return
         t0 = time.time()
         import theano.sandbox.cuda
-        import pycuda.autoinit
         import pycuda.driver
+        pycuda.driver.init()
         for device in range(pycuda.driver.Device.count()):
             try:
                 theano.sandbox.cuda.use("gpu%d" % device, force=True)
