@@ -3,6 +3,7 @@
 import luigi
 import multiprocessing
 import rh_logger
+import sys
 import time
 
 class RequiresMixin:
@@ -67,7 +68,10 @@ class CILKCPUMixin:
     for a task and asks the scheduler for the given number of CPUs.
     '''
     cpu_count = luigi.IntParameter(
-         default=multiprocessing.cpu_count(),
+         default=min(
+             luigi.configuration.get_config().getint(
+                 "resources", "cpu_count", default=sys.maxint),
+             multiprocessing.cpu_count()),
          description="The number of CPUs/CILK workers devoted to this task")
     
     def process_resources(self):
