@@ -15,6 +15,7 @@ height
 '''
 
 from cv2 import imread, imwrite
+import luigi
 import multiprocessing
 import numpy as np
 import os
@@ -46,8 +47,11 @@ class DNNClassifier(AbstractPixelClassifier):
         configured in the fc_dnn section of .rh-config.yaml, use that
         instead.
         '''
-        cpu_count = int(self.config.get(
+        max_cpu_count = luigi.configuration.get_config().getint(
+            "resources", "cpu_count", default=sys.maxint)
+        config_cpu_count = int(self.config.get(
             "cpu_count", multiprocessing.cpu_count()))
+        cpu_count = min(max_cpu_count, config_cpu_count)
         return dict(cpu_count=cpu_count)
     
     def classify(self, image, x, y, z):
