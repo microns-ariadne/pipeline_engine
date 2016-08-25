@@ -23,6 +23,7 @@ import rh_config
 import subprocess
 import tempfile
 from ..targets.classifier_target import AbstractPixelClassifier
+import sys
 
 class DNNClassifier(AbstractPixelClassifier):
     
