@@ -10,6 +10,8 @@ import numpy as np
 import Queue
 import os
 from scipy.ndimage import gaussian_filter
+from skimage.exposure import equalize_adapthist
+import skimage
 import re
 import subprocess
 import sys
@@ -27,7 +29,7 @@ class KerasClassifier(AbstractPixelClassifier):
     models = {}
 
     def __init__(self, model_path, weights_path, 
-                 xypad_size, zpad_size, block_size, sigma):
+                 xypad_size, zpad_size, block_size):
         '''Initialize from a model and weights
         
         :param model_path: path to JSON model file suitable for 
@@ -38,27 +40,12 @@ class KerasClassifier(AbstractPixelClassifier):
         :param block_size: size of output block to classifier
         :param sigma: the standard deviation for the high-pass filter
         '''
-        import keras
-        import theano
-        import keras.backend as K
-        from keras.optimizers import SGD
-        from .cropping2d import Cropping2D
-        
         self.xypad_size = xypad_size
         self.zpad_size = zpad_size
         self.block_size = block_size
-        model_json = open(model_path, "r").read()
-        model = keras.models.model_from_json(
-            model_json,
-            custom_objects={"Cropping2D":Cropping2D})
-        model.load_weights(weights_path)
-        sgd = SGD(lr=0.01, decay=0, momentum=0.0, nesterov=False)
-        model.compile(loss='categorical_crossentropy', optimizer=sgd)        
-        self.function = theano.function(
-            model.inputs,
-            model.outputs,
-            givens={K.learning_phase():np.uint8(0)})
-        self.sigma = sigma
+        self.model_path = model_path
+        self.weights_path = weights_path
+        self.model_loaded = False
 
     @classmethod
     def __bind_cuda(cls):
@@ -90,29 +77,53 @@ class KerasClassifier(AbstractPixelClassifier):
         logger.report_metric("gpu_acquisition_time", time.time() - t0)
         logger.report_event("Acquired GPU %d" % device)
         cls.has_bound_cuda=True
+    
+    def __load_model__(self):
+        if self.model_loaded:
+            return
+        key = tuple([(path, os.stat(path).st_mtime)
+                     for path in (self.model_path, self.weights_path)])
+        if key in self.models:
+            self.function = self.models[key]
+            self.model_loaded = True
+            return
+        import keras
+        import theano
+        import keras.backend as K
+        from keras.optimizers import SGD
+        from .cropping2d import Cropping2D
+
+        model_json = open(self.model_path, "r").read()
+        model = keras.models.model_from_json(
+            model_json,
+            custom_objects={"Cropping2D":Cropping2D})
+        model.load_weights(self.weights_path)
+        sgd = SGD(lr=0.01, decay=0, momentum=0.0, nesterov=False)
+        model.compile(loss='categorical_crossentropy', optimizer=sgd)        
+        self.function = theano.function(
+            model.inputs,
+            model.outputs,
+            givens={K.learning_phase():np.uint8(0)})
+        self.models[key] = self.function
+        self.model_loaded = True
         
     def __getstate__(self):
         '''Get the pickleable state of the model'''
         
-        old_recursion_limit = sys.getrecursionlimit()
-        try:
-            function_pickle = cPickle.dumps(self.function,
-                                            protocol=cPickle.HIGHEST_PROTOCOL)
-            return dict(xypad_size=self.xypad_size,
-                        zpad_size=self.zpad_size,
-                        block_size=self.block_size,
-                        function_pickle=function_pickle,
-                        sigma=self.sigma)
-        finally:
-            sys.setrecursionlimit(old_recursion_limit)
+        return dict(xypad_size=self.xypad_size,
+                    zpad_size=self.zpad_size,
+                    block_size=self.block_size,
+                    model_path=self.model_path,
+                    weights_path=self.weights_path)
     
     def __setstate__(self, state):
         '''Restore the state from the pickle'''
         self.xypad_size = state["xypad_size"]
         self.zpad_size = state["zpad_size"]
         self.block_size = state["block_size"]
-        self.sigma = state["sigma"]
-        self.function_pickle = state["function_pickle"]
+        self.weights_path = state["weights_path"]
+        self.model_path = state["model_path"]
+        self.model_loaded = False
     
     def get_class_names(self):
         return ["membrane"]
@@ -131,6 +142,7 @@ class KerasClassifier(AbstractPixelClassifier):
         return dict(gpu_count=1)
     
     def classify(self, image, x, y, z):
+        self.__load_model__()
         self.exception = None
         self.pred_queue = Queue.Queue()
         self.out_queue = Queue.Queue()
@@ -168,14 +180,6 @@ class KerasClassifier(AbstractPixelClassifier):
         xs = np.linspace(x0, x1, n_x+1).astype(int)
         self.out_image = np.zeros((z1-z0, y1 - y0, x1 - x0), np.uint8)
         #
-        # Normalize image
-        #
-        #temp = np.zeros(image.shape, np.float32)
-        #for zi in range(image.shape[0]):
-        #    temp[zi] = self.highpass(image[zi])
-        #image = temp
-        #del temp
-        #
         # Classify each block
         #
         t0_total = time.time()
@@ -188,6 +192,10 @@ class KerasClassifier(AbstractPixelClassifier):
                 z1a = z0a + self.block_size[0]
             z0b = z0a
             z1b = z1a - self.get_z_pad() * 2
+            t0 = time.time()
+            norm_img = KerasClassifier.normalize_image(image[zi])
+            logger.report_metric("keras_cpu_block_processing_time",
+                                 time.time() - t0)
             for yi in range(n_y):
                 if yi == n_y - 1:
                     y0a = image.shape[1] - self.block_size[1]
@@ -198,7 +206,6 @@ class KerasClassifier(AbstractPixelClassifier):
                 y0b = y0a
                 y1b = y1a - self.get_y_pad() * 2
                 for xi in range(n_x):
-                    t0 = time.time()
                     if xi == n_x-1:
                         x0a = image.shape[2] - self.block_size[2]
                         x1a = image.shape[2]
@@ -207,12 +214,9 @@ class KerasClassifier(AbstractPixelClassifier):
                         x1a = x0a + self.block_size[2]
                     x0b = x0a
                     x1b = x1a - self.get_x_pad() * 2
-                    block = KerasClassifier.normalize_image(
-                        image[z0a:z1a, y0a:y1a, x0a:x1a])
-                    block.shape = [1] + list(block.shape)
+                    block = norm_img[y0a:y1a, x0a:x1a]
+                    block.shape = [1, 1] + list(block.shape)
                     self.pred_queue.put((block, x0b, x1b, y0b, y1b, z0b, z1b))
-                    logger.report_metric("keras_cpu_block_processing_time",
-                                         time.time() - t0)
         self.pred_queue.put([None] * 7)
         pred_thread.join()
         out_thread.join()
@@ -263,29 +267,22 @@ class KerasClassifier(AbstractPixelClassifier):
             self.exception = sys.exc_value
             logger.report_exception()
     
-    def highpass(self, img):
-        '''Put the image through a highpass filter to remove inconsitent bkgd
-        
-        Subtract the image from a Gaussian background estimator. The Gaussian
-        is done in 2d - many of the artifacts are per-section.
-        
-        :param img: the image to be processed
-        '''
-        return img.astype(np.float32)
     
     @staticmethod
-    def normalize_image(img, saturation_level=0.05):
-        '''Normalize image to 0-1 range, removing outliers.
+    def normalize_image(img):
+        '''Normalize image to 0-1 
         
         :param img: image to be normalized
-        :param saturation_level: peg values at this top and bottom percentile
-        to 1 and 0 to remove outliers.
         :returns: normalized image
         '''
-        sortedValues = np.sort( img.ravel())
-        minVal = np.float32(sortedValues[np.int(len(sortedValues) * (saturation_level / 2))])
-        maxVal = np.float32(sortedValues[np.int(len(sortedValues) * (1 - saturation_level / 2))])
-        normImg = np.float32(img - minVal) * (255 / (maxVal-minVal))
-        normImg[normImg<0] = 0
-        normImg[normImg>255] = 255
-        return (np.float32(normImg) / 255.0)
+        version = tuple(map(int, skimage.__version__.split(".")))
+        if version < (0, 12, 0):
+            img = img.astype(np.uint16)
+        img = equalize_adapthist(img)
+        if version < (0, 12, 0):
+            # Scale image if prior to 0.12
+            imax = img.max()
+            imin = img.min()
+            img = (img.astype(np.float32) - imin) / \
+                (imax - imin + np.finfo(np.float32).eps)
+        return img - .5

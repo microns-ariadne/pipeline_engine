@@ -720,6 +720,11 @@ class PipelineTaskMixin:
             except:
                 rh_logger.logger.start_process("Ariadne pipeline",
                                                "Assembling pipeline")
+                #
+                # Configuration turns off the luigi-interface logger
+                #
+            import logging
+            logging.getLogger("luigi-interface").disabled = False
             try:
                 self.factory = AMTaskFactory()
                 rh_logger.logger.report_event(
