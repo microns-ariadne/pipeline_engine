@@ -143,7 +143,6 @@ class KerasClassifier(AbstractPixelClassifier):
         return dict(gpu_count=1)
     
     def classify(self, image, x, y, z):
-        self.__load_model__()
         self.exception = None
         self.pred_queue = Queue.Queue()
         self.out_queue = Queue.Queue()
@@ -231,6 +230,7 @@ class KerasClassifier(AbstractPixelClassifier):
         '''Run a thread to process predictions'''
         try:
             self.__bind_cuda()
+            self.__load_model__()
             if not hasattr(self, "function"):
                 t0 = time.time()
                 self.function = cPickle.loads(self.function_pickle)
