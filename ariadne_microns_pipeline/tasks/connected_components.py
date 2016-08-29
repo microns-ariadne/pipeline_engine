@@ -120,7 +120,7 @@ class ConnectedComponentsTask(ConnectedComponentsTaskMixin,
     task_namespace = 'ariadne_microns_pipeline'
 
 
-class AllConnectedCompoentsTaskMixin:
+class AllConnectedComponentsTaskMixin:
     
     input_locations = luigi.ListParameter(
         description="The filenames of the output files from the "
@@ -208,7 +208,7 @@ class AllConnectedComponentsRunMixin:
             json.dump(d, fd)
 
 
-class AllConnectedComponentsTask(AllConnectedCompoentsTaskMixin,
+class AllConnectedComponentsTask(AllConnectedComponentsTaskMixin,
                                  AllConnectedComponentsRunMixin,
                                  RequiresMixin, RunMixin,
                                  luigi.Task):
@@ -229,3 +229,4 @@ class AllConnectedComponentsTask(AllConnectedCompoentsTaskMixin,
     '''
     
     task_namespace="ariadne_microns_pipeline"
+

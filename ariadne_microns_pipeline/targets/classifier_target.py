@@ -51,6 +51,10 @@ class AbstractPixelClassifier:
         '''
         return {}
     
+    def run_via_ipc(self):
+        '''Return True to run via IPC in a pool of workers'''
+        return False
+    
     def classify(self, image, x, y, z):
         '''Classify the image
         

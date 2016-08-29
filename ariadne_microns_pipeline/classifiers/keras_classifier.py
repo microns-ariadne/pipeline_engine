@@ -138,6 +138,9 @@ class KerasClassifier(AbstractPixelClassifier):
     def get_z_pad(self):
         return self.zpad_size
     
+    def run_via_ipc(self):
+        return True
+    
     def get_resources(self):
         '''Request one GPU for the classifier'''
         return dict(gpu_count=1)

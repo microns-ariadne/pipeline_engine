@@ -30,7 +30,7 @@ setup(
     long_description=README,
     install_requires=[
         "Cython>=0.24.0",
-        "dateutil>=2.2",
+        "python-dateutil>=2.2",
         "enum34>=1.0.0",
         "mahotas",
         "numpy>=1.9.3",
@@ -40,6 +40,11 @@ setup(
         "sqlalchemy>=1.0.0",
         "luigi>=2.1.1"],
     ext_modules=[watershed_ext],
-    entry_points={},
+    entry_points={
+        "console_scripts": [
+            "microns-ipc-broker = ariadne_microns_pipeline.ipc.ipcbroker:main",
+            "microns-ipc-worker = ariadne_microns_pipeline.ipc.ipcworker:main",
+            "microns-ipc-echo = ariadne_microns_pipeline.ipc.ipcecho:main"
+            ]},
     zip_safe=False
 )

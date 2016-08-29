@@ -1,9 +1,15 @@
+import cPickle
+import rh_config
+import rh_logger
 import luigi
+import zmq
+
 from ..targets.classifier_target\
      import PixelClassifierTarget
 from ..targets.factory import TargetFactory
 from ..parameters import VolumeParameter, DatasetLocationParameter
 from ..parameters import Volume, DatasetLocation
+from ..ipc.protocol import *
 from .utilities import RequiresMixin, RunMixin
 
 
@@ -105,6 +111,47 @@ class ClassifyRunMixin:
         '''Run the classifier on the input volume to produce the outputs'''
         classifier_target, image_target = list(self.input())
         classifier = classifier_target.classifier
+        if classifier.run_via_ipc():
+            context = zmq.Context(1)
+            socket = context.socket(zmq.REQ)
+            socket.setsockopt(zmq.IDENTITY, self.task_id)
+            address = rh_config.config\
+                .get("ipc", {})\
+                .get("address", "tcp://127.0.0.1:7051")
+            socket.connect(address)
+            poll = zmq.Poller()
+            poll.register(socket, zmq.POLLIN)
+            work = cPickle.dumps(self)
+            socket.send(work)
+            while True:
+                socks = dict(poll.poll())
+                if socks.get(socket) == zmq.POLLIN:
+                    reply = socket.recv_multipart()
+                    if not reply:
+                        break
+                    if len(reply) != 2:
+                        rh_logger.logger.report_event(
+                            "Got %d args, not 2 from reply" % len(reply))
+                        continue
+                    payload = cPickle.loads(reply[1])
+                    if reply[0] == SP_RESULT:
+                        rh_logger.logger.report_event(
+                            "Remote execution completed")
+                        break
+                    elif reply[0] == SP_EXCEPTION:
+                        raise payload
+                    else:
+                        rh_logger.logger.report_event(
+                            "Unknown message type: " + reply[0])
+            socket.setsockopt(zmq.LINGER, 0)
+            socket.close()
+            context.term()
+        else:
+            self()
+    
+    def __call__(self):
+        classifier_target, image_target = list(self.input())
+        classifier = classifier_target.classifier
         image = image_target.imread()
         probs = classifier.classify(
             image, self.volume.x, self.volume.y, self.volume.z)
@@ -119,8 +166,7 @@ class ClassifyTask(ClassifyTaskMixin, ClassifyRunMixin,
     
     '''
     task_namespace = "ariadne_microns_pipeline"
-
-
+    
 class ClassifyShimTask(RequiresMixin, luigi.Task):
     '''A shim task to return one of the ClassifyTask's probability maps
     

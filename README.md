@@ -74,3 +74,12 @@ luigid:
 To get help on the pipeline task, run it from Luigi:
 
     luigi --module ariadne_microns_pipeline.pipelines ariadne_microns_pipeline.PipelineTask --help
+
+The KerasClassifier needs to run using a worker pool in order to amortize
+the cost of compiling the Theano function. To do this, start the broker:
+
+    > microns-ipc-broker
+
+then start one worker per GPU:
+
+    > microns-ipc-worker
