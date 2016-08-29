@@ -103,7 +103,8 @@ class KerasClassifier(AbstractPixelClassifier):
         self.function = theano.function(
             model.inputs,
             model.outputs,
-            givens={K.learning_phase():np.uint8(0)})
+            givens={K.learning_phase():np.uint8(0)},
+            allow_input_downcast=True)
         self.models[key] = self.function
         self.model_loaded = True
         
