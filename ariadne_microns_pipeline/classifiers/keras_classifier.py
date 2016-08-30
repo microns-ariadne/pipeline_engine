@@ -146,13 +146,32 @@ class KerasClassifier(AbstractPixelClassifier):
         return dict(gpu_count=1)
     
     def classify(self, image, x, y, z):
+        #
+        # The threading here may seem a little odd, but Theano/CUDA want
+        # to run a function on the same thread every time. So the main
+        # thread runs prediction, even if it's in the middle.
+        #
+        t0_total = time.time()
         self.exception = None
         self.pred_queue = Queue.Queue()
         self.out_queue = Queue.Queue()
-        pred_thread = threading.Thread(target=self.prediction_processor)
-        pred_thread.start()
+        preprocess_thread = threading.Thread(
+            target=self.preprocessor,
+            args=(image,))
+        preprocess_thread.start()
         out_thread = threading.Thread(target=self.output_processor)
         out_thread.start()
+        self.prediction_processor()
+        preprocess_thread.join()
+        out_thread.join()
+        if self.exception is not None:
+            raise self.exception
+        logger.report_metric("keras_volume_classification_time",
+                             time.time() - t0_total)
+        return dict(membrane=self.out_image)
+        
+    def preprocessor(self, image):
+        '''The preprocessor thread: run normalization and make blocks'''
         #
         # Coordinates:
         #
@@ -185,7 +204,6 @@ class KerasClassifier(AbstractPixelClassifier):
         #
         # Classify each block
         #
-        t0_total = time.time()
         for zi in range(n_z):
             if zi == n_z-1:
                 z0a = image.shape[0] - self.block_size[0]
@@ -221,13 +239,6 @@ class KerasClassifier(AbstractPixelClassifier):
                     block.shape = [1, 1] + list(block.shape)
                     self.pred_queue.put((block, x0b, x1b, y0b, y1b, z0b, z1b))
         self.pred_queue.put([None] * 7)
-        pred_thread.join()
-        out_thread.join()
-        if self.exception is not None:
-            raise self.exception
-        logger.report_metric("keras_volume_classification_time",
-                             time.time() - t0_total)
-        return dict(membrane=self.out_image)
     
     def prediction_processor(self):
         '''Run a thread to process predictions'''
