@@ -103,7 +103,27 @@ class ClassifyTaskMixin:
             channels=self.class_names.values(),
             pattern=self.pattern,
             volume=volume)
+
+class ClassifyTaskRunner(object):
+    '''A class that can be used to simply reconstruct and run the classify task
     
+    To use:
+    
+    ctr = ClassifyTaskRunner(task)
+    s = cPickle.dumps(ctr)
+    ctr = cPickle.loads(ctr)
+    ctr()
+    '''
+    def __init__(self, task):
+        '''Initializer
+        
+        :param task: a Luigi task with a to_str_params method
+        '''
+        self.param_str = task.to_str_params()
+    
+    def __call__(self):
+        task = ClassifyTask.from_str_params(self.param_str)
+        task()
 
 class ClassifyRunMixin:
     
@@ -121,7 +141,7 @@ class ClassifyRunMixin:
             socket.connect(address)
             poll = zmq.Poller()
             poll.register(socket, zmq.POLLIN)
-            work = cPickle.dumps(self)
+            work = cPickle.dumps(ClassifyTaskRunner(self))
             socket.send(work)
             while True:
                 socks = dict(poll.poll())

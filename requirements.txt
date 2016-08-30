@@ -8,3 +8,4 @@ scipy>=0.16.0
 scikit-learn
 sqlalchemy
 luigi>=2.1.1
+pyzmq

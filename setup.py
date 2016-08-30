@@ -38,7 +38,8 @@ setup(
         "scipy>=0.16.0",
         "scikit-learn",
         "sqlalchemy>=1.0.0",
-        "luigi>=2.1.1"],
+        "luigi>=2.1.1",
+        "pyzmq"],
     ext_modules=[watershed_ext],
     entry_points={
         "console_scripts": [
