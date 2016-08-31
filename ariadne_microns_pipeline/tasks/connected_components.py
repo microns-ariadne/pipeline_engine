@@ -8,7 +8,9 @@ from scipy.sparse.csgraph import connected_components
 
 from .utilities import RequiresMixin, RunMixin, SingleThreadedMixin
 from ..parameters import VolumeParameter, DatasetLocationParameter
+from ..parameters import MultiVolumeParameter
 from ..targets.factory import TargetFactory
+from ..targets.volume_target import VolumeTarget
 from .utilities import to_hashable
 
 class ConnectedComponentsTaskMixin:
@@ -25,7 +27,8 @@ class ConnectedComponentsTaskMixin:
         description="Look at the concordance between segmentations "
         "in this volume")
     output_location = luigi.Parameter(
-        description="The location for the JSON file containing the concorances")
+        description=
+        "The location for the JSON file containing the concordances")
 
     def input(self):
         tf = TargetFactory()
@@ -230,3 +233,100 @@ class AllConnectedComponentsTask(AllConnectedComponentsTaskMixin,
     
     task_namespace="ariadne_microns_pipeline"
 
+class VolumeRelabelingTaskMixin:
+    
+    input_volumes = MultiVolumeParameter(
+        description="Input volumes to be composited together")
+    relabeling_location = luigi.Parameter(
+        description=
+        "The location of the output file from AllConnectedComponentsTask "
+        "that gives the local/global relabeling of the segmentation")
+    output_volume = VolumeParameter(
+        description="The volume of the output segmentation")
+    output_location = DatasetLocationParameter(
+        description="The location of the output segmentation")
+    
+    def input(self):
+        '''Return the volumes to be assembled'''
+        yield luigi.LocalTarget(self.relabeling_location)
+        tf = TargetFactory()
+        for d in self.input_volumes:
+            yield tf.get_volume_target(d["location"], d["volume"])
+    
+    def output(self):
+        '''Return the volume target that will be written'''
+        tf = TargetFactory()
+        return tf.get_volume_target(self.output_location, self.output_volume)
+
+
+class VolumeRelabelingRunMixin:
+    
+    def ariadne_run(self):
+        '''Composite and relabel each of the volumes'''
+        output_result = np.zeros((self.output_volume.depth,
+                                  self.output_volume.height,
+                                  self.output_volume.width),
+                                 np.uint16)
+        output_volume_target = self.output()
+        assert isinstance(output_volume_target, VolumeTarget)
+        x0 = output_volume_target.x
+        x1 = x0 + output_volume_target.width
+        y0 = output_volume_target.y
+        y1 = y0 + output_volume_target.height
+        z0 = output_volume_target.z
+        z1 = z0 + output_volume_target.depth
+        generator = self.input()
+        #
+        # Read the local->global mappings
+        #
+        with generator.next().open("r") as fd:
+            mappings = json.load(fd)
+        #
+        # Make a dictionary of all the candidate volumes
+        #
+        volumes = {}
+        for volume in generator:
+            key = to_hashable(dict(x=volume.x,
+                                   y=volume.y,
+                                   z=volume.z,
+                                   width=volume.width,
+                                   height=volume.height,
+                                   depth=volume.depth))
+            volumes[key] = volume
+        #
+        # For each volume in the mappings, map local->global 
+        for volume, mapping in mappings["volumes"]:
+            volume = to_hashable(volume)
+            if volume not in volumes:
+                continue
+            vx0 = max(x0, volume["x"])
+            vx1 = min(x1, volume["x"] + volume["width"])
+            vy0 = max(y0, volume["y"])
+            vy1 = min(y1, volume["y"] + volume["height"])
+            vz0 = max(z0, volume["z"])
+            vz1 = min(z1, volume["z"] + volume["depth"])
+            if vx0 >= vx1 or\
+               vy0 >= vy1 or\
+               vz0 >= vz1:
+                continue
+            input_volume_target = volumes[volume]
+            mapping_idxs = np.array(mapping, np.uint16)
+            mapping_xform = np.zeros(mapping_idxs[:, 0].max()+1, np.uint16)
+            mapping_xform[mapping_idxs[:, 0]] = mapping_idxs[:, 1]
+            labels = input_volume_target.imread_part(
+                vx0, vy0, vz0,
+                vx1-vx0, vy1 - vy0, vz1 - vz0)
+            labels = mapping_xform[labels]
+            output_volume_target.imwrite_part(labels, vx0, vy0, vz0)
+        output_volume_target.finish_volume()
+
+class VolumeRelabelingTask(VolumeRelabelingTaskMixin,
+                           VolumeRelabelingRunMixin,
+                           RequiresMixin, RunMixin,
+                           luigi.Task):
+    '''Relabel a segmentation volume
+    
+    The VolumeRelabilingTask uses the output of the AllConnectedComponents
+    to map the local segmentations of several input volumes into a single
+    unitary output volume.
+    '''

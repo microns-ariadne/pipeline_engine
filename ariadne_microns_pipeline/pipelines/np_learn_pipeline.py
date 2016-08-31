@@ -3,6 +3,44 @@
 The pipeline reads a volume from Butterfly, classifies it, segments it and
 then runs Neuroproof on the classifier prediction and segmented volume.
 '''
+import luigi
+import numpy as np
+import os
+import rh_logger
+import tempfile
+
+from .utilities import PipelineRunReportMixin
+from ..targets.butterfly_target import ButterflyChannelTarget
+from ..tasks import AMTaskFactory
+from ..tasks.classify import ClassifyShimTask
+from ..tasks.find_seeds import Dimensionality, SeedsMethodEnum
+from ..tasks.nplearn import StrategyEnum
+from ..targets.classifier_target import PixelClassifierTarget
+from ..parameters import DatasetLocation, Volume, VolumeParameter
+
+'''The name of the segmentation dataset within the HDF5 file'''
+SEG_DATASET = "segmentation"
+
+'''The name of the watershed seed datasets'''
+SEEDS_DATASET = "seeds"
+
+'''The name of the border mask datasets'''
+MASK_DATASET = "mask"
+
+'''The name of the image datasets'''
+IMG_DATASET = "image"
+
+'''The name of the membrane probability datasets'''
+MEMBRANE_DATASET = "membrane"
+
+'''The name of the ground-truth dataset for statistics computation'''
+GT_DATASET = "gt"
+
+'''The name of the global membrane prediction'''
+GLOBAL_MEMBRANE_DATASET = "global_membrane"
+
+'''The name of the global segmentation'''
+GLOBAL_SEGMENTATION_DATASET = "global_segmentation"
 
 class NeuroproofLearnPipelineTaskMixin:
     
@@ -63,6 +101,7 @@ class NeuroproofLearnPipelineTaskMixin:
         default=StrategyEnum.all,
         description="Learning strategy to use")
     num_iterations = luigi.IntParameter(
+        default=1,
         description="Number of iterations used for learning")
     prune_feature = luigi.BoolParameter(
         description="Automatically prune useless features")
@@ -83,6 +122,14 @@ class NeuroproofLearnPipelineTaskMixin:
     block_depth = luigi.IntParameter(
         description="Number of planes in a processing block",
         default=2048)
+    block_xy_overlap = luigi.IntParameter(
+        description="# of pixels of overlap between adjacent blocks "
+        "in the X/Y direction",
+        default=20)
+    block_z_overlap = luigi.IntParameter(
+        description="# of pixels of overlap between adjacent blocks in the "
+        "z direction",
+        default=5)
     membrane_class_name = luigi.Parameter(
         description="The name of the pixel classifier's membrane class",
         default="membrane")
@@ -134,6 +181,127 @@ class NeuroproofLearnPipelineTaskMixin:
                                dataset_name,
                                self.get_pattern(dataset_name))
     
+    def get_connected_components_location(self, x0, x1, y0, y1, z0, z1):
+        '''Get the location of the file that links two segmentations'''
+        return os.path.join(self.temp_dirs[0],
+                            "%d-%d_%d-%d_%d-%d.json" %
+                            (x0, x1, y0, y1, z0, z1))
+    
+    def get_all_connected_components_location(self):
+        '''Get the location for the output of AllConnectedComponentsTask'''
+        return os.path.join(self.temp_dirs[0], "all_connected_components.json")
+    
+    def get_segmentation_location(self):
+        '''Get the location of the rewritten, combined segmentation'''
+        return DatasetLocation(self.get_dirs(self.volume.x,
+                                             self.volume.y,
+                                             self.volume.z),
+                               GLOBAL_SEGMENTATION_DATASET,
+                               self.get_pattern(GLOBAL_SEGMENTATION_DATASET))
+    
+    def get_global_prediction_location(self):
+        '''Get the location for the reblocked unified membrane prediction'''
+        return DatasetLocation(self.get_dirs(self.volume.x,
+                                             self.volume.y,
+                                             self.volume.z),
+                               GLOBAL_MEMBRANE_DATASET,
+                               self.get_pattern(GLOBAL_MEMBRANE_DATASET))
+    
+    def compute_requirements(self):
+        '''Compute the requirements for this task'''
+        if not hasattr(self, "requirements_computed"):
+            try:
+                rh_logger.logger.report_event("Assembling pipeline")
+            except:
+                rh_logger.logger.start_process("Ariadne pipeline",
+                                               "Assembling pipeline")
+                #
+                # Configuration turns off the luigi-interface logger
+                #
+            import logging
+            logging.getLogger("luigi-interface").disabled = False
+            try:
+                self.factory = AMTaskFactory()
+                rh_logger.logger.report_event(
+                    "Loading pixel classifier")
+                self.pixel_classifier = PixelClassifierTarget(
+                    self.pixel_classifier_path)
+                rh_logger.logger.report_event(
+                    "Computing blocks")
+                self.compute_extents()
+                #
+                # Step 1: get data from Butterfly
+                #
+                rh_logger.logger.report_event("Making Butterfly download tasks")
+                self.generate_butterfly_tasks()
+                #
+                # Step 2: run the pixel classifier on each
+                #
+                rh_logger.logger.report_event("Making classifier tasks")
+                self.generate_classifier_tasks()
+                #
+                # Step 3: make the border masks
+                #
+                rh_logger.logger.report_event("Making border mask tasks")
+                self.generate_border_mask_tasks()
+                #
+                # Step 4: find the seeds for the watershed
+                #
+                rh_logger.logger.report_event("Making watershed seed tasks")
+                self.generate_seed_tasks()
+                #
+                # Step 5: run watershed
+                #
+                rh_logger.logger.report_event("Making watershed tasks")
+                self.generate_watershed_tasks()
+                #
+                # Step 6: compute connected components between overlapping
+                #         blocks
+                #
+                rh_logger.logger.report_event(
+                    "Making connected components tasks")
+                self.generate_x_connected_components_tasks()
+                self.generate_y_connected_components_tasks()
+                self.generate_z_connected_components_tasks()
+                #
+                # Step 7: Do all connected components
+                #
+                rh_logger.logger.report_event(
+                    "Making the AllConnectedComponentsTask")
+                self.generate_all_connected_components_task()
+                #
+                # Step 8: Rewrite the segmentation
+                #
+                rh_logger.logger.report_event("Making volume relabeling task")
+                self.generate_volume_relabeling_task()
+                #
+                # Step 9: Reblock the membrane prediction
+                #
+                rh_logger.logger.report_event(
+                    "Making the membrane reblocking task")
+                self.generate_membrane_block_task()
+                #
+                # Step 10: Download the ground truth
+                #
+                rh_logger.logger.report_event(
+                    "Making the butterfly task to download the ground truth")
+                self.generate_ground_truth_task()
+                #
+                # Step 11: Do the Neuroproof training
+                #
+                rh_logger.logger.report_event(
+                    "Making the Neuroproof learning task")
+                self.generate_neuroproof_learn_task()
+                rh_logger.logger.report_event("Finished making tasks")
+                self.requirements_computed = True
+            except:
+                rh_logger.logger.report_exception()
+                raise
+    
+    def requires(self):
+        self.compute_requirements()
+        yield self.neuroproof_learn_task
+    
     def compute_extents(self):
         '''Compute various block boundaries and padding
         
@@ -171,25 +339,41 @@ class NeuroproofLearnPipelineTaskMixin:
         self.useable_depth = self.z1 - self.z0
         #
         # Compute equi-sized blocks (as much as possible)
+        # There are n-1 overlaps for n blocks
         #
-        self.n_x = int((self.useable_width-1) / self.block_width) + 1
-        self.n_y = int((self.useable_height-1) / self.block_height) + 1
-        self.n_z = int((self.useable_depth-1) / self.block_depth) + 1
-        self.xs = np.linspace(self.x0, self.x1, self.n_x + 1).astype(int)
-        self.ys = np.linspace(self.y0, self.y1, self.n_y + 1).astype(int)
-        self.zs = np.linspace(self.z0, self.z1, self.n_z + 1).astype(int)
+        self.n_x = int((self.useable_width-1-self.block_xy_overlap) /
+                       (self.block_width - self.block_xy_overlap)) + 1
+        self.n_y = int((self.useable_height-1-self.block_xy_overlap) / 
+                       (self.block_height - self.block_xy_overlap)) + 1
+        self.n_z = int((self.useable_depth-1-self.block_z_overlap) / 
+                       (self.block_depth-self.block_z_overlap)) + 1
+        self.xs = np.linspace(
+            self.x0, self.x1, self.n_x, endpoint=False).astype(int)
+        self.xe = np.zeros(self.xs.shape, int)
+        self.xe[:-1] = self.xs[1:] + self.block_xy_overlap
+        self.xe[-1] = self.x1
+        self.ys = np.linspace(
+            self.y0, self.y1, self.n_y, endpoint=False).astype(int)
+        self.ye = np.zeros(self.ys.shape, int)
+        self.ye[:-1] = self.ys[1:] + self.block_xy_overlap
+        self.ye[-1] = self.y1
+        self.zs = np.linspace(
+            self.z0, self.z1, self.n_z, endpoint=False).astype(int)
+        self.ze = np.zeros(self.zs.shape, int)
+        self.ze[:-1] = self.zs[1:] + self.block_z_overlap
+        self.ze[-1] = self.z1
 
     def generate_butterfly_tasks(self):
         '''Get volumes padded for CNN'''
         self.butterfly_tasks = np.zeros((self.n_z, self.n_y, self.n_x), object)
         for zi in range(self.n_z):
-            z0, z1 = self.zs[zi] - self.nn_z_pad, self.zs[zi+1] + self.nn_z_pad
+            z0, z1 = self.zs[zi] - self.nn_z_pad, self.ze[zi] + self.nn_z_pad
             for yi in range(self.n_y):
                 y0 = self.ys[yi] - self.nn_y_pad
-                y1 = self.ys[yi+1] + self.nn_y_pad
+                y1 = self.ye[yi] + self.nn_y_pad
                 for xi in range(self.n_x):
                     x0 = self.xs[xi] - self.nn_x_pad
-                    x1 = self.xs[xi+1] + self.nn_x_pad
+                    x1 = self.xe[xi] + self.nn_x_pad
                     volume = Volume(x0, y0, z0, x1-x0, y1-y0, z1-z0)
                     location =self.get_dataset_location(volume, IMG_DATASET)
                     self.butterfly_tasks[zi, yi, xi] =\
@@ -254,7 +438,7 @@ class NeuroproofLearnPipelineTaskMixin:
                         volume,
                         input_location,
                         location,
-                        border_width=self.np_x_pad,
+                        border_width=self.block_xy_overlap,
                         close_width=self.close_width)
                     self.border_mask_tasks[zi, yi, xi] = btask
                     btask.set_requirement(ctask)
@@ -319,3 +503,190 @@ class NeuroproofLearnPipelineTaskMixin:
                     stask.set_requirement(ctask)
                     stask.set_requirement(btask)
                     stask.set_requirement(seeds_task)
+    
+    def generate_x_connected_components_tasks(self):
+        '''Get connected components between adjacent blocks in the x direction'''
+        self.x_connected_components_tasks = \
+            np.zeros((self.n_z, self.n_y, self.n_x-1), object)
+        for zi in range(self.n_z):
+            for yi in range(self.n_y):
+                for xi in range(self.n_x-1):
+                    wtask0 = self.watershed_tasks[zi, yi, xi]
+                    wtask1 = self.watershed_tasks[zi, yi, xi+1]
+                    #
+                    # Get the concordance volume
+                    #
+                    x0 = int((wtask0.volume.x1 + wtask1.volume.x) / 2)
+                    x1 = x0+1
+                    y0 = max(wtask0.volume.y, wtask1.volume.y)
+                    y1 = min(wtask0.volume.y1, wtask1.volume.y1)
+                    z0 = max(wtask0.volume.z, wtask1.volume.z)
+                    z1 = min(wtask0.volume.z1, wtask1.volume.z1)                    
+                    cctask = self.factory.gen_connected_components_task(
+                        volume1=wtask0.volume, 
+                        location1=wtask0.output_location,
+                        volume2=wtask1.volume,
+                        location2=wtask1.output_location,
+                        overlap_volume=Volume(x0, y0, z0,
+                                              x1-x0, y1-y0, z1-z0),
+                        output_location=self.get_connected_components_location(
+                            x0, x1, y0, y1, z0, z1))
+                    self.x_connected_components_tasks[zi, yi, xi] = cctask
+                    cctask.set_requirement(wtask0)
+                    cctask.set_requirement(wtask1)
+
+    def generate_y_connected_components_tasks(self):
+        '''Get connected components between adjacent blocks in the y direction'''
+        self.y_connected_components_tasks = \
+            np.zeros((self.n_z, self.n_y-1, self.n_x), object)
+        for zi in range(self.n_z):
+            for yi in range(self.n_y-1):
+                for xi in range(self.n_x):
+                    wtask0 = self.watershed_tasks[zi, yi, xi]
+                    wtask1 = self.watershed_tasks[zi, yi+1, xi]
+                    #
+                    # Get the concordance volume
+                    #
+                    x0 = max(wtask0.volume.x, wtask1.volume.x)
+                    x1 = min(wtask0.volume.x1, wtask1.volume.x1)
+                    y0 = int((wtask0.volume.y1 + wtask1.volume.y) / 2)
+                    y1 = y0+1
+                    z0 = max(wtask0.volume.z, wtask1.volume.z)
+                    z1 = min(wtask0.volume.z1, wtask1.volume.z1)                    
+                    cctask = self.factory.gen_connected_components_task(
+                        volume1=wtask0.volume, 
+                        location1=wtask0.output_location,
+                        volume2=wtask1.volume,
+                        location2=wtask1.output_location,
+                        overlap_volume=Volume(x0, y0, z0,
+                                              x1-x0, y1-y0, z1-z0),
+                        output_location=self.get_connected_components_location(
+                            x0, x1, y0, y1, z0, z1))
+                    self.y_connected_components_tasks[zi, yi, xi] = cctask
+                    cctask.set_requirement(wtask0)
+                    cctask.set_requirement(wtask1)
+
+    def generate_z_connected_components_tasks(self):
+        '''Get connected components between adjacent blocks in the z direction'''
+        self.z_connected_components_tasks = \
+            np.zeros((self.n_z-1, self.n_y, self.n_x), object)
+        for zi in range(self.n_z-1):
+            for yi in range(self.n_y):
+                for xi in range(self.n_x):
+                    wtask0 = self.watershed_tasks[zi, yi, xi]
+                    wtask1 = self.watershed_tasks[zi+1, yi, xi]
+                    #
+                    # Get the concordance volume
+                    #
+                    x0 = max(wtask0.volume.x, wtask1.volume.x)
+                    x1 = min(wtask0.volume.x1, wtask1.volume.x1)
+                    y0 = max(wtask0.volume.y, wtask1.volume.y)
+                    y1 = min(wtask0.volume.y1, wtask1.volume.y1)                    
+                    z0 = int((wtask0.volume.z1 + wtask1.volume.z) / 2)
+                    z1 = z0+1
+                    cctask = self.factory.gen_connected_components_task(
+                        volume1=wtask0.volume, 
+                        location1=wtask0.output_location,
+                        volume2=wtask1.volume,
+                        location2=wtask1.output_location,
+                        overlap_volume=Volume(x0, y0, z0,
+                                              x1-x0, y1-y0, z1-z0),
+                        output_location=self.get_connected_components_location(
+                            x0, x1, y0, y1, z0, z1))
+                    self.z_connected_components_tasks[zi, yi, xi] = cctask
+                    cctask.set_requirement(wtask0)
+                    cctask.set_requirement(wtask1)
+
+    def generate_all_connected_components_task(self):
+        '''Generate the task that makes the global segmentation mapping'''
+        
+        all_connected_components_tasks = \
+            self.x_connected_components_tasks.flatten().tolist() +\
+            self.y_connected_components_tasks.flatten().tolist() +\
+            self.z_connected_components_tasks.flatten().tolist()
+        input_locations = map(lambda task: task.output_location, 
+                              all_connected_components_tasks)
+        output_location = self.get_all_connected_components_location()
+        self.all_connected_components_task = \
+            self.factory.gen_all_connected_components_task(
+                input_locations, output_location)
+        for task in all_connected_components_tasks:
+            self.all_connected_components_task.set_requirement(task)
+    
+    def generate_volume_relabeling_task(self):
+        '''Make a global segmentation, relabeling all block segmentations'''
+        inputs = []
+        for ds in self.watershed_tasks.flatten().tolist():
+            output = ds.output()
+            inputs.append(dict(volume=output.volume,
+                               location=output.dataset_location))
+        relabeling_location = self.all_connected_components_task.output_location
+        self.volume_relabeling_task =\
+            self.factory.gen_volume_relabeling_task(
+                input_volumes=inputs,
+                relabeling_location=relabeling_location,
+                output_volume=self.volume,
+                output_location=self.get_segmentation_location())
+        self.volume_relabeling_task.set_requirement(
+            self.all_connected_components_task)
+
+    def generate_membrane_block_task(self):
+        '''Reblock the membrane prediction'''
+        inputs = []
+        classifier_tasks = self.classifier_tasks.flatten().tolist()
+        for ds in classifier_tasks:
+            output = ds.output()
+            inputs.append(dict(volume=output.volume,
+                               location=output.dataset_location))
+        self.membrane_reblocking_task = self.factory.gen_block_task(
+            inputs=inputs,
+            output_volume=self.volume,
+            output_location=self.get_global_prediction_location())
+        for task in classifier_tasks:
+            self.membrane_reblocking_task.set_requirement(task)
+    
+    def generate_ground_truth_task(self):
+        '''Download the ground truth as one big hunk'''
+        dataset_location = self.get_dataset_location(
+            self.volume, GT_DATASET)
+        self.ground_truth_task = self.factory.gen_get_volume_task(
+            experiment=self.experiment,
+            sample=self.sample,
+            dataset=self.dataset,
+            channel=self.gt_channel,
+            url=self.url,
+            volume=self.volume,
+            location = dataset_location)
+        
+    def generate_neuroproof_learn_task(self):
+        '''Learn, baby, learn'''
+        prob_location = self.membrane_reblocking_task.output().dataset_location
+        seg_location = self.volume_relabeling_task.output().dataset_location
+        gt_location = self.ground_truth_task.output().dataset_location
+        self.neuroproof_learn_task = \
+            self.factory.gen_neuroproof_learn_task(
+                volume=self.volume,
+                prob_location=prob_location,
+                seg_location=seg_location,
+                gt_location=gt_location,
+                output_location=self.output_location)
+        self.neuroproof_learn_task.set_requirement(
+            self.volume_relabeling_task)
+        self.neuroproof_learn_task.set_requirement(
+            self.membrane_reblocking_task)
+        self.neuroproof_learn_task.set_requirement(
+            self.ground_truth_task)
+
+class NeuroproofPipelineTask(NeuroproofLearnPipelineTaskMixin, 
+                             PipelineRunReportMixin,
+                             luigi.Task):
+    '''The Neuroproof pipeline task trains a Neuroproof classifier
+    
+    The pipeline performs the steps that result in the oversegmentation
+    of the membrane probabilities. It then unites the volume blocks and
+    sends the result into neuroproof_learn to train the classifier.
+    
+    To use, create a pickle of your classifier, point at a dataset with
+    ground truth in Butterfly and the pipeline should do the rest.
+    '''
+    task_namespace = "ariadne_microns_pipeline"
