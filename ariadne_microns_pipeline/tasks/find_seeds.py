@@ -28,6 +28,13 @@ class SeedsMethodEnum(enum.Enum):
     seeds near the membrane.
     '''
     DistanceTransform=2
+    
+    '''Use connected components instead of finding seeds
+    
+    The probabilities are thresholded and connected components is run
+    on pixels lower than the threshold.
+    '''
+    ConnectedComponents=3
 
 
 class Dimensionality(enum.Enum):

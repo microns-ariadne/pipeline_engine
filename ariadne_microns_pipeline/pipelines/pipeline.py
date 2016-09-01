@@ -119,7 +119,8 @@ class PipelineTaskMixin:
         "used for smoothing the probability map",
         default=.4)
     threshold = luigi.FloatParameter(
-        description="The threshold used during segmentation for finding seeds",
+        description="The threshold used during segmentation for finding seeds"
+        " or for thresholding membrane in connected components",
         default=1)
     method = luigi.EnumParameter(enum=SeedsMethodEnum,
         default=SeedsMethodEnum.Smoothing,
@@ -320,29 +321,37 @@ class PipelineTaskMixin:
                 for xi in range(self.n_x):
                     ctask = self.classifier_tasks[zi, yi, xi]
                     btask = self.border_mask_tasks[zi, yi, xi]
-                    seeds_task = self.seed_tasks[zi, yi, xi]
                     volume = btask.volume
                     prob_target = ctask.output()
                     prob_location = DatasetLocation(
                         prob_target.paths,
                         prob_target.dataset_path,
                         prob_target.pattern)
-                    seeds_target = seeds_task.output()
-                    seeds_location = seeds_target.dataset_location
                     seg_location = \
                         self.get_dataset_location(volume, SEG_DATASET)
-                    stask = self.factory.gen_segmentation_task(
-                        volume=btask.volume,
-                        prob_location=prob_location,
-                        mask_location=btask.mask_location,
-                        seeds_location=seeds_location,
-                        seg_location=seg_location,
-                        sigma_xy=self.sigma_xy,
-                        sigma_z=self.sigma_z)
+                    if self.method != SeedsMethodEnum.ConnectedComponents:
+                        seeds_task = self.seed_tasks[zi, yi, xi]
+                        seeds_target = seeds_task.output()
+                        seeds_location = seeds_target.dataset_location
+                        stask = self.factory.gen_segmentation_task(
+                            volume=btask.volume,
+                            prob_location=prob_location,
+                            mask_location=btask.mask_location,
+                            seeds_location=seeds_location,
+                            seg_location=seg_location,
+                            sigma_xy=self.sigma_xy,
+                            sigma_z=self.sigma_z)
+                        stask.set_requirement(seeds_task)
+                    else:
+                        stask = self.factory.gen_2D_segmentation_task(
+                            volume=btask.volume,
+                            prob_location=prob_location,
+                            mask_location=btask.mask_location,
+                            seg_location=seg_location,
+                            threshold=self.threshold)
                     self.watershed_tasks[zi, yi, xi] = stask
                     stask.set_requirement(ctask)
                     stask.set_requirement(btask)
-                    stask.set_requirement(seeds_task)
     
     def generate_border_tasks(self):
         '''Create border cutouts between adjacent blocks
@@ -749,11 +758,12 @@ class PipelineTaskMixin:
                 #
                 rh_logger.logger.report_event("Making border mask tasks")
                 self.generate_border_mask_tasks()
-                #
-                # Step 4: find the seeds for the watershed
-                #
-                rh_logger.logger.report_event("Making watershed seed tasks")
-                self.generate_seed_tasks()
+                if self.method != SeedsMethodEnum.ConnectedComponents:
+                    #
+                    # Step 4: find the seeds for the watershed
+                    #
+                    rh_logger.logger.report_event("Making watershed seed tasks")
+                    self.generate_seed_tasks()
                 #
                 # Step 5: run watershed
                 #

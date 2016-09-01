@@ -64,3 +64,60 @@ class SegmentTask(SegmentTaskMixin, SegmentRunMixin, RequiresMixin,
                   RunMixin, SingleThreadedMixin, luigi.Task):
     
     task_namespace = "ariadne_microns_pipeline"
+
+class Segment2DTaskMixin:
+    
+    volume = VolumeParameter(
+        description="The volume to be segmented")
+    prob_location = DatasetLocationParameter(
+        description="The location of the probability volume")
+    mask_location = DatasetLocationParameter(
+        description="The location of the mask volume")
+    output_location = DatasetLocationParameter(
+        description="The location for the output segmentation")
+    
+    def input(self):
+        yield TargetFactory().get_volume_target(
+            location = self.prob_location,
+            volume = self.volume)
+        yield TargetFactory().get_volume_target(
+            location = self.mask_location,
+            volume = self.volume)
+    
+    def output(self):
+        return TargetFactory().get_volume_target(
+            location = self.output_location,
+            volume = self.volume)
+
+class Segment2DRunMixin:    
+
+    threshold = luigi.IntParameter(
+        default=190,
+        description="The probability threshold (from 0-255) to use as a"
+        "cutoff for (not) membrane")
+
+    def ariadne_run(self):
+        prob_target, mask_target = list(self.input())
+        threshold = self.threshold
+        fg =  mask_target.imread() & (prob_target.imread() < threshold)
+        labels = np.zeros(fg.shape, np.uint16)
+        offset = 0
+        for i in range(labels.shape[0]):
+            l, count = label(fg[i])
+            m = l != 0
+            labels[i, m] = l[m] + offset
+            offset += count
+        self.output().imwrite(labels)
+
+class Segment2DTask(Segment2DTaskMixin,
+                    Segment2DRunMixin,
+                    RequiresMixin,
+                    RunMixin,
+                    SingleThreadedMixin,
+                    luigi.Task):
+    '''The Segment2DTask performs 2D connected components on membrane probs
+    
+    The task breaks a volume into X/Y planes. It thresholds the membrane
+    probabilities and then it finds the connected components in the plane,
+    using non-membrane as the foreground.
+    '''

@@ -16,7 +16,7 @@ from .json_to_csv_task import JSONToCSVTask
 from .mask import MaskBorderTask
 from .neuroproof import NeuroproofTask
 from .nplearn import NeuroproofLearnTask, StrategyEnum
-from .segment import SegmentTask
+from .segment import SegmentTask, Segment2DTask
 from .segmentation_statistics import \
      SegmentationStatisticsTask, SegmentationReportTask
 from .skeletonize import SkeletonizeTask
@@ -149,6 +149,26 @@ class AMTaskFactory(object):
                            output_location=seg_location,
                            sigma_xy=sigma_xy,
                            sigma_z=sigma_z)
+    
+    def gen_2D_segmentation_task(
+        self, volume, prob_location, mask_location, seg_location, threshold):
+        '''Generate a 2d segmentation task
+        
+        Generate a 2D segmentation task that performs connected components
+        on the individual planes.
+        
+        :param volume: the volume to be segmented, in global coordinates
+        :param prob_location: where to find the membrane probability volume
+        :param mask_location: where to find the mask location
+        :param seg_location: where to put the segmentation
+        :param threshold: the cutoff in the membrane probabilities between
+        membrane and not-membrane, scaled from 0 to 255.
+        '''
+        return Segment2DTask(volume=volume,
+                             prob_location=prob_location,
+                             mask_location=mask_location,
+                             output_location=seg_location,
+                             threshold=threshold)
     
     def gen_skeletonize_task(
         self, volume, segmentation_location, skeleton_location):
