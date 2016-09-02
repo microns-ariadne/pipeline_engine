@@ -16,7 +16,7 @@ from .json_to_csv_task import JSONToCSVTask
 from .mask import MaskBorderTask
 from .neuroproof import NeuroproofTask
 from .nplearn import NeuroproofLearnTask, StrategyEnum
-from .segment import SegmentTask, Segment2DTask
+from .segment import SegmentTask, SegmentCC2DTask
 from .segmentation_statistics import \
      SegmentationStatisticsTask, SegmentationReportTask
 from .skeletonize import SkeletonizeTask
@@ -124,7 +124,7 @@ class AMTaskFactory(object):
     
     def gen_segmentation_task(
         self, volume, prob_location, seeds_location, mask_location,
-        seg_location, sigma_xy, sigma_z):
+        seg_location, sigma_xy, sigma_z, dimensionality):
         '''Generate a segmentation task
 
         Generate a segmentation task.  The task takes a probability map of
@@ -141,6 +141,7 @@ class AMTaskFactory(object):
         :param sigma_xy: the sigma of the smoothing gaussian in the X and Y
         directions
         :param sigma_z: the sigma of the smoothing gaussian in the Z direction
+        :param dimensionality: Whether to do 2D or 3D segmentation
         '''
         return SegmentTask(volume=volume, 
                            prob_location=prob_location,
@@ -148,9 +149,10 @@ class AMTaskFactory(object):
                            seed_location=seeds_location,
                            output_location=seg_location,
                            sigma_xy=sigma_xy,
-                           sigma_z=sigma_z)
+                           sigma_z=sigma_z,
+                           dimensionality=dimensionality)
     
-    def gen_2D_segmentation_task(
+    def gen_cc_segmentation_task(
         self, volume, prob_location, mask_location, seg_location, threshold):
         '''Generate a 2d segmentation task
         
@@ -164,7 +166,7 @@ class AMTaskFactory(object):
         :param threshold: the cutoff in the membrane probabilities between
         membrane and not-membrane, scaled from 0 to 255.
         '''
-        return Segment2DTask(volume=volume,
+        return SegmentCC2DTask(volume=volume,
                              prob_location=prob_location,
                              mask_location=mask_location,
                              output_location=seg_location,

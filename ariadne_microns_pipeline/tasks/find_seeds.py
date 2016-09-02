@@ -99,7 +99,7 @@ class FindSeedsRunMixin:
         offset=0
         seeds = []
         for plane in probs.astype(np.float32):
-            smoothed = gaussian_filter(plane.astype(np.float32, self.sigma_xy))
+            smoothed = gaussian_filter(plane.astype(np.float32), self.sigma_xy)
             thresholded = smoothed < self.threshold
             labels, count = label(thresholded)
             labels[labels != 0] += offset

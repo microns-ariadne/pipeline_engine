@@ -2,6 +2,7 @@ import luigi
 import numpy as np
 from scipy.ndimage import gaussian_filter, label
 
+from .find_seeds import Dimensionality
 from ..algorithms import watershed
 from ..targets.factory import TargetFactory
 from ..parameters import VolumeParameter, DatasetLocationParameter
@@ -23,6 +24,9 @@ class SegmentTaskMixin:
         description="The location of the mask volume")
     output_location = DatasetLocationParameter(
         description="The location for the output segmentation")
+    dimensionality = luigi.EnumParameter(
+        enum=Dimensionality,
+        description="Do either a 2D or 3D watershed, depending on this param")
 
     def input(self):
         yield TargetFactory().get_volume_target(
@@ -57,7 +61,12 @@ class SegmentRunMixin:
         prob[~mask] = 255
         smoothed = gaussian_filter(
             prob, (self.sigma_z, self.sigma_xy, self.sigma_xy))
-        seg = watershed(smoothed, labels)
+        if self.dimensionality == Dimensionality.D3:
+            seg = watershed(smoothed, labels)
+        else:
+            seg = np.zeros(smoothed.shape, np.uint16)
+            for z in range(smoothed.shape[0]):
+                seg[z:z+1] = watershed(smoothed[z:z+1], labels[z:z+1])
         seg_volume.imwrite(seg.astype(np.uint16))
 
 class SegmentTask(SegmentTaskMixin, SegmentRunMixin, RequiresMixin, 
@@ -65,7 +74,7 @@ class SegmentTask(SegmentTaskMixin, SegmentRunMixin, RequiresMixin,
     
     task_namespace = "ariadne_microns_pipeline"
 
-class Segment2DTaskMixin:
+class SegmentCCTaskMixin:
     
     volume = VolumeParameter(
         description="The volume to be segmented")
@@ -89,7 +98,7 @@ class Segment2DTaskMixin:
             location = self.output_location,
             volume = self.volume)
 
-class Segment2DRunMixin:    
+class SegmentCC2DRunMixin:    
 
     threshold = luigi.IntParameter(
         default=190,
@@ -109,8 +118,8 @@ class Segment2DRunMixin:
             offset += count
         self.output().imwrite(labels)
 
-class Segment2DTask(Segment2DTaskMixin,
-                    Segment2DRunMixin,
+class SegmentCC2DTask(SegmentCCTaskMixin,
+                    SegmentCC2DRunMixin,
                     RequiresMixin,
                     RunMixin,
                     SingleThreadedMixin,
