@@ -500,7 +500,8 @@ class NeuroproofLearnPipelineTaskMixin:
                             seeds_location=seeds_location,
                             seg_location=seg_location,
                             sigma_xy=self.sigma_xy,
-                            sigma_z=self.sigma_z)
+                            sigma_z=self.sigma_z,
+                            dimensionality=self.dimensionality)
                         stask.set_requirement(seeds_task)
                     else:
                         stask = self.factory.gen_2D_segmentation_task(
