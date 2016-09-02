@@ -101,7 +101,7 @@ class FindSeedsRunMixin:
         for plane in probs.astype(np.float32):
             smoothed = gaussian_filter(plane.astype(np.float32), self.sigma_xy)
             eroded = grey_erosion(smoothed, size=self.minimum_distance)
-            thresholded = eroded < self.threshold
+            thresholded = (smoothed < self.threshold) & (smoothed == eroded)
             labels, count = label(thresholded)
             labels[labels != 0] += offset
             offset += count
