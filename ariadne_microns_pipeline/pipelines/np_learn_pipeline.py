@@ -21,6 +21,8 @@ from ..parameters import DatasetLocation, Volume, VolumeParameter
 '''The name of the segmentation dataset within the HDF5 file'''
 SEG_DATASET = "segmentation"
 
+RESEG_DATASET = "resegmentation"
+
 '''The name of the watershed seed datasets'''
 SEEDS_DATASET = "seeds"
 
@@ -157,6 +159,9 @@ class NeuroproofLearnPipelineTaskMixin:
     temp_dirs = luigi.ListParameter(
         description="The base location for intermediate files",
         default=(tempfile.gettempdir(),))
+    wants_resegmentation = luigi.BoolParameter(
+        default=False,
+        description="Create a 2d segmentation out of the 3d watershed")
 
     def get_dirs(self, x, y, z):
         '''Return a directory suited for storing a file with the given offset
@@ -510,9 +515,17 @@ class NeuroproofLearnPipelineTaskMixin:
                             mask_location=btask.mask_location,
                             seg_location=seg_location,
                             threshold=self.threshold)
-                    self.watershed_tasks[zi, yi, xi] = stask
                     stask.set_requirement(ctask)
                     stask.set_requirement(btask)
+                    if self.wants_resegmentation:
+                        reseg_location = self.get_dataset_location(
+                            volume, RESEG_DATASET)
+                        rstask = self.factory.gen_unsegmentation_task(
+                            volume, seg_location, reseg_location)
+                        rstask.set_requirement(stask)
+                        self.watershed_tasks[zi, yi, xi] = rstask
+                    else:
+                        self.watershed_tasks[zi, yi, xi] = stask
     
     def generate_x_connected_components_tasks(self):
         '''Get connected components between adjacent blocks in the x direction'''
