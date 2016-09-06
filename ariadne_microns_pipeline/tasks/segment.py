@@ -69,7 +69,7 @@ class SegmentRunMixin:
             seg = np.zeros(smoothed.shape, np.uint16)
             for z in range(smoothed.shape[0]):
                 seg[z:z+1] = watershed(smoothed[z:z+1], labels[z:z+1])
-        seg_volume.imwrite(seg.astype(np.uint16))
+        seg_volume.imwrite(seg.astype(np.uint32))
 
 class SegmentTask(SegmentTaskMixin, SegmentRunMixin, RequiresMixin, 
                   RunMixin, SingleThreadedMixin, luigi.Task):
@@ -111,7 +111,7 @@ class SegmentCC2DRunMixin:
         prob_target, mask_target = list(self.input())
         threshold = self.threshold
         fg =  mask_target.imread() & (prob_target.imread() < threshold)
-        labels = np.zeros(fg.shape, np.uint16)
+        labels = np.zeros(fg.shape, np.uint32)
         offset = 0
         for i in range(labels.shape[0]):
             l, count = label(fg[i])

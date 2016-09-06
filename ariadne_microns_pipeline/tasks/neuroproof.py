@@ -87,7 +87,7 @@ class NeuroproofRunMixin:
                 path = os.path.join(input_seg_tempdir, "%04d.png" % z)
                 plane = np.dstack((seg_ds[z] >> 16, 
                                    (seg_ds[z] >> 8) & 0xff,
-                                   seg_ds[z] & 0xff))
+                                   seg_ds[z] & 0xff)).astype(np.uint8)
                 imwrite(path, plane)
             
             args = [self.neuroproof,
@@ -120,9 +120,10 @@ class NeuroproofRunMixin:
             planes = []
             for z, filename in enumerate(np_files):
                 plane = imread(os.path.join(output_seg_tempdir, filename), 1)
-                assert np.all(plane[:, :, 0] == 0)
-                plane = ((plane[:, :, 1].astype(np.uint16) << 8) +
-                         plane[:, :, 2].astype(np.uint16))
+                plane = (
+                    plane[:, :, 0].astype(np.uint32) +
+                    (plane[:, :, 1].astype(np.uint32) << 8) +
+                    (plane[:, :, 2].astype(np.uint32) << 16))
                 planes.append(plane)
             output_volume.imwrite(np.array(planes))
         finally:

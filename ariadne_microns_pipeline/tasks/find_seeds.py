@@ -162,7 +162,7 @@ class FindSeedsRunMixin:
                 seeds = self.find_using_2d_distance(probs)
             else:
                 seeds = self.find_using_3d_distance(probs)
-        seeds = seeds.astype(np.uint16)
+        seeds = seeds.astype(np.uint32)
         self.output().imwrite(seeds)
 
 

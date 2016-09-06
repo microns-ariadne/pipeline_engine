@@ -45,7 +45,14 @@ class PngVolumeTarget(VolumeTarget):
                  filenames=[])
         for zidx in range(volume.shape[0]):
             filename = self.__get_filename(zidx + self.z)
-            cv2.imwrite(filename, volume[zidx])
+            img = volume[zidx]
+            if volume.dtype.itemsize == 4:
+                # Do uint32 as 3 colors
+                img = np.dstack((
+                    img & 0xff,
+                    (img / 256) & 0xff,
+                    (img / 65536) & 0xff)).astype(np.uint8)
+            cv2.imwrite(filename, img)
             d["filenames"].append(filename)
 
         with self.open(mode="w") as fd:
@@ -56,7 +63,14 @@ class PngVolumeTarget(VolumeTarget):
             d = json.load(fd)
         volume = np.zeros((self.depth, self.height, self.width), d["dtype"])
         for i, filename in enumerate(d["filenames"]):
-            volume[i] = cv2.imread(filename, 2)
+            img = cv2.imread(
+                filename, cv2.IMREAD_ANYCOLOR | cv2.IMREAD_ANYDEPTH) \
+                .astype(volume.dtype)
+            if img.ndim == 3:
+                img = img[:, :, 0] +\
+                    img[:, :, 1] * 256 +\
+                    img[:, :, 2] * 65536
+            volume[i] = img
         return volume
     
     def create_volume(self, dtype, **kwargs):
