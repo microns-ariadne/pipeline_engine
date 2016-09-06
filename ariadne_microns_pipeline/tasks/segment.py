@@ -161,7 +161,7 @@ class UnsegmentRunMixin:
         # For each plane, compute the connected components using
         # the connections between similarly-labeled pixels as the edges.
         #
-        offset = 0
+        offset = 1
         idx = np.arange(np.prod(stack.shape[1:])).reshape(stack.shape[1:])
         for z in range(stack.shape[0]):
             plane = stack[z]
