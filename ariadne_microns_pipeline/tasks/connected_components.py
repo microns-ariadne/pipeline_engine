@@ -266,7 +266,7 @@ class VolumeRelabelingRunMixin:
         output_result = np.zeros((self.output_volume.depth,
                                   self.output_volume.height,
                                   self.output_volume.width),
-                                 np.uint16)
+                                 np.uint32)
         output_volume_target = self.output()
         assert isinstance(output_volume_target, VolumeTarget)
         x0 = output_volume_target.x
@@ -310,8 +310,8 @@ class VolumeRelabelingRunMixin:
                vz0 >= vz1:
                 continue
             input_volume_target = volumes[volume]
-            mapping_idxs = np.array(mapping, np.uint16)
-            mapping_xform = np.zeros(mapping_idxs[:, 0].max()+1, np.uint16)
+            mapping_idxs = np.array(mapping, np.uint32)
+            mapping_xform = np.zeros(mapping_idxs[:, 0].max()+1, np.uint32)
             mapping_xform[mapping_idxs[:, 0]] = mapping_idxs[:, 1]
             labels = input_volume_target.imread_part(
                 vx0, vy0, vz0,
