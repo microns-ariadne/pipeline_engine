@@ -16,7 +16,7 @@ from .json_to_csv_task import JSONToCSVTask
 from .mask import MaskBorderTask
 from .neuroproof import NeuroproofTask
 from .nplearn import NeuroproofLearnTask, StrategyEnum
-from .segment import SegmentTask, SegmentCC2DTask
+from .segment import SegmentTask, SegmentCC2DTask, UnsegmentTask
 from .segmentation_statistics import \
      SegmentationStatisticsTask, SegmentationReportTask
 from .skeletonize import SkeletonizeTask
@@ -171,6 +171,21 @@ class AMTaskFactory(object):
                              mask_location=mask_location,
                              output_location=seg_location,
                              threshold=threshold)
+    
+    def gen_unsegmentation_task(self, volume, input_location, output_location):
+        '''Generate a 3d to 2d unsegmentation task
+        
+        Convert a 3d segmentation into a stack of 2d segmentations. Connected
+        components is performed on the 3d volume where the edges are adjacent
+        pixels in the 2d planes with the same label.
+        
+        :param volume:  the volume to be segmented
+        :param input_location: the location of the input segmentation
+        :param output_location: the location for the output segmentation
+        '''
+        return UnsegmentTask(volume=volume, 
+                             input_location=input_location,
+                             output_location=output_location)
     
     def gen_skeletonize_task(
         self, volume, segmentation_location, skeleton_location):

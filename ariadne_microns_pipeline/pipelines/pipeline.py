@@ -16,6 +16,9 @@ import sys
 '''The name of the segmentation dataset within the HDF5 file'''
 SEG_DATASET = "segmentation"
 
+'''The name of the 2D resegmentation of the 3d segmentation'''
+RESEG_DATASET = "resegmentation"
+
 '''The name of the watershed seed datasets'''
 SEEDS_DATASET = "seeds"
 
@@ -133,6 +136,9 @@ class PipelineTaskMixin:
         default="/dev/null")
     wants_skeletonization = luigi.BoolParameter(
         description="Skeletonize the Neuroproof segmentation",
+        default=False)
+    wants_resegmentation = luigi.BoolParameter(
+        description="Convert the 3D segmentation to 2D before Neuroproof",
         default=False)
 
 
@@ -316,6 +322,7 @@ class PipelineTaskMixin:
         '''Run watershed on each pixel '''
         self.watershed_tasks = \
             np.zeros((self.n_z, self.n_y, self.n_x), object)
+        self.segmentation_tasks = self.watershed_tasks
         for zi in range(self.n_z):
             for yi in range(self.n_y):
                 for xi in range(self.n_x):
@@ -353,6 +360,25 @@ class PipelineTaskMixin:
                     self.watershed_tasks[zi, yi, xi] = stask
                     stask.set_requirement(ctask)
                     stask.set_requirement(btask)
+    
+    def generate_resegmentation_tasks(self):
+        self.resegmentation_tasks = \
+            np.zeros((self.n_z, self.n_y, self.n_x), object)
+        self.segmentation_tasks = self.resegmentation_tasks
+        for zi in range(self.n_z):
+            for yi in range(self.n_y):
+                for xi in range(self.n_x):
+                    wtask = self.watershed_tasks[zi, yi, xi]
+                    input_location = wtask.output().dataset_location
+                    volume = wtask.output().volume
+                    output_location = self.get_dataset_location(
+                        volume, RESEG_DATASET)
+                    rtask = self.factory.gen_unsegmentation_task(
+                        volume = volume,
+                        input_location = input_location,
+                        output_location = output_location)
+                    rtask.set_requirement(wtask)
+                    self.resegmentation_tasks[zi, yi, xi] = rtask
     
     def generate_border_tasks(self):
         '''Create border cutouts between adjacent blocks
@@ -456,7 +482,7 @@ class PipelineTaskMixin:
         task_sets = ((self.classifier_tasks,
                       self.x_prob_borders,
                       MEMBRANE_DATASET),
-                     (self.watershed_tasks,
+                     (self.segmentation_tasks,
                       self.x_seg_borders,
                       SEG_DATASET))
         
@@ -489,7 +515,7 @@ class PipelineTaskMixin:
         task_sets = ((self.classifier_tasks,
                       self.y_prob_borders,
                       MEMBRANE_DATASET),
-                     (self.watershed_tasks,
+                     (self.segmentation_tasks,
                       self.y_seg_borders,
                       SEG_DATASET))
         
@@ -522,7 +548,7 @@ class PipelineTaskMixin:
         task_sets = ((self.classifier_tasks,
                       self.z_prob_borders,
                       MEMBRANE_DATASET),
-                     (self.watershed_tasks,
+                     (self.segmentation_tasks,
                       self.z_seg_borders,
                       SEG_DATASET))
         
@@ -564,7 +590,7 @@ class PipelineTaskMixin:
         # 
         task_sets = (
             (self.classifier_tasks,
-             self.watershed_tasks,
+             self.segmentation_tasks,
              self.np_tasks,
              NP_DATASET,
              False),
@@ -770,6 +796,8 @@ class PipelineTaskMixin:
                 #
                 rh_logger.logger.report_event("Making watershed tasks")
                 self.generate_watershed_tasks()
+                if self.wants_resegmentation:
+                    self.generate_resegmentation_tasks()
                 #
                 # Step 6: create all the border blocks
                 #
