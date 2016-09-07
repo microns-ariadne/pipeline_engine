@@ -172,7 +172,8 @@ class AMTaskFactory(object):
                              output_location=seg_location,
                              threshold=threshold)
     
-    def gen_unsegmentation_task(self, volume, input_location, output_location):
+    def gen_unsegmentation_task(self, volume, input_location, output_location,
+                                use_min_contact, contact_threshold):
         '''Generate a 3d to 2d unsegmentation task
         
         Convert a 3d segmentation into a stack of 2d segmentations. Connected
@@ -182,10 +183,15 @@ class AMTaskFactory(object):
         :param volume:  the volume to be segmented
         :param input_location: the location of the input segmentation
         :param output_location: the location for the output segmentation
+        :param use_min_contact: only break objects if they have less than
+        a certain amount of contact area between planes
+        :param contact_threshold: minimum area to keep an object together
         '''
         return UnsegmentTask(volume=volume, 
                              input_location=input_location,
-                             output_location=output_location)
+                             output_location=output_location,
+                             use_min_contact=use_min_contact,
+                             contact_threshold=contact_threshold)
     
     def gen_skeletonize_task(
         self, volume, segmentation_location, skeleton_location):

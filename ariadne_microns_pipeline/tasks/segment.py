@@ -152,8 +152,58 @@ class UnsegmentTaskMixin:
             volume = self.volume)
 
 class UnsegmentRunMixin:
+    use_min_contact = luigi.BoolParameter(
+        default=False,
+        description="Break an object between two planes with a minimum of "
+        "contact")
+    contact_threshold = luigi.IntParameter(
+        default=100,
+        description="Break objects with less than this number of area overlap")
     
     def ariadne_run(self):
+        if self.use_min_contact:
+            self.break_at_min_contact()
+        else:
+            self.shard_all_objects()
+    
+    def break_at_min_contact(self):
+        '''Break objects in the Z direction at points of minimum contact'''
+        stack = self.input().next().imread()
+        plane1 = stack[0]
+        #
+        # The offset for new objects
+        offset = np.max(stack) + 1
+        #
+        # Mapping of input segmentation to output
+        #
+        mapping = np.arange(offset)
+        for z in range(stack.shape[0]-1):
+            #
+            # Count the # of pixels per object that overlap
+            #
+            plane0 = plane1
+            plane1 = stack[z+1]
+            mask = (plane0 == plane1) & (plane0 != 0)
+            histogram = np.bincount(plane0[mask])
+            #
+            # Find the ones that are below threshold
+            #
+            not_much_contact = np.where(
+                (histogram > 0) & (histogram < self.contact_threshold))[0]
+            n_small = len(not_much_contact)
+            if n_small > 0:
+                #
+                # Remap them to new object numbers going forward
+                #
+                mapping[not_much_contact] = np.arange(n_small) + offset
+                offset += n_small
+            #
+            # Write the plane using the object mapping
+            #
+            stack[z+1] = mapping[plane1]
+        self.output().imwrite(stack)
+        
+    def shard_all_objects(self):
         '''Convert a 3-d segmentation into planes of 2-d segmentations'''
         
         stack = self.input().next().imread()

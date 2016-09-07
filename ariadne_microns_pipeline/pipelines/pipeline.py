@@ -140,7 +140,13 @@ class PipelineTaskMixin:
     wants_resegmentation = luigi.BoolParameter(
         description="Convert the 3D segmentation to 2D before Neuroproof",
         default=False)
-
+    use_min_contact = luigi.BoolParameter(
+        default=False,
+        description="Break an object between two planes with a minimum of "
+        "contact")
+    contact_threshold = luigi.IntParameter(
+        default=100,
+        description="Break objects with less than this number of area overlap")
 
     def get_dirs(self, x, y, z):
         '''Return a directory suited for storing a file with the given offset
@@ -376,7 +382,9 @@ class PipelineTaskMixin:
                     rtask = self.factory.gen_unsegmentation_task(
                         volume = volume,
                         input_location = input_location,
-                        output_location = output_location)
+                        output_location = output_location,
+                        use_min_contact = self.use_min_contact,
+                        contact_threshold = self.contact_threshold)
                     rtask.set_requirement(wtask)
                     self.resegmentation_tasks[zi, yi, xi] = rtask
     

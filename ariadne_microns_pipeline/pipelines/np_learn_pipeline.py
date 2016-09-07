@@ -162,6 +162,13 @@ class NeuroproofLearnPipelineTaskMixin:
     wants_resegmentation = luigi.BoolParameter(
         default=False,
         description="Create a 2d segmentation out of the 3d watershed")
+    use_min_contact = luigi.BoolParameter(
+        default=False,
+        description="Break an object between two planes with a minimum of "
+        "contact")
+    contact_threshold = luigi.IntParameter(
+        default=100,
+        description="Break objects with less than this number of area overlap")
 
     def get_dirs(self, x, y, z):
         '''Return a directory suited for storing a file with the given offset
@@ -521,7 +528,9 @@ class NeuroproofLearnPipelineTaskMixin:
                         reseg_location = self.get_dataset_location(
                             volume, RESEG_DATASET)
                         rstask = self.factory.gen_unsegmentation_task(
-                            volume, seg_location, reseg_location)
+                            volume, seg_location, reseg_location,
+                            use_min_contact=self.use_min_contact,
+                            contact_threshold=self.contact_threshold)
                         rstask.set_requirement(stask)
                         self.watershed_tasks[zi, yi, xi] = rstask
                     else:
