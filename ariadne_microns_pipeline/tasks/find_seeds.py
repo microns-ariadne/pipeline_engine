@@ -94,6 +94,16 @@ class FindSeedsRunMixin:
         default=5,
         description="The distance threshold cutoff for the seeds")
     
+    def make_strel(self):
+        '''make the structuring element for the minimum distance'''
+        ixy = int(np.floor(self.minimum_distance_xy))
+        iz = int(np.floor(self.minimum_distance_z))
+        z, y, x = np.mgrid[-iz:iz+1, -ixy:ixy+1, -ixy:ixy+1].astype(np.float32)
+        strel = ((z / self.minimum_distance_z) ** 2 +
+                 (y / self.minimum_distance_xy) ** 2 +
+                 (x / self.minimum_distance_xy) ** 2) <= 1
+        return strel
+    
     def find_using_2d_smoothing(self, probs):
         '''Find seeds in each plane, smoothing, then thresholding
         
@@ -103,7 +113,7 @@ class FindSeedsRunMixin:
         seeds = []
         for plane in probs.astype(np.float32):
             smoothed = gaussian_filter(plane.astype(np.float32), self.sigma_xy)
-            size = self.minimum_distance_xy, 
+            size = self.minimum_distance_xy
             eroded = grey_erosion(smoothed, size)
             thresholded = (smoothed < self.threshold) & (smoothed == eroded)
             labels, count = label(thresholded)
@@ -119,10 +129,7 @@ class FindSeedsRunMixin:
         '''
         sigma = (self.sigma_z, self.sigma_xy, self.sigma_xy)
         smoothed = gaussian_filter(probs.astype(np.float32), sigma)
-        size = (self.minimum_distance_z,
-                self.minimum_distance_xy,
-                self.minimum_distance_xy)
-        eroded = grey_erosion(smoothed, size=size)
+        eroded = grey_erosion(smoothed, footprint=self.make_strel())
         thresholded = (smoothed < self.threshold) & (smoothed == eroded)
         labels, count = label(thresholded)
         return labels
@@ -151,10 +158,7 @@ class FindSeedsRunMixin:
             thresholded = plane < self.threshold
             distance.append(distance_transform_edt(thresholded))
         distance = np.array(distance)
-        size = (self.minimum_distance_z, 
-                self.minimum_distance_xy,
-                self.minimum_distance_xy)
-        dilated = grey_dilation(distance, size=size)
+        dilated = grey_dilation(distance, footprint=self.make_strel())
         mask = (distance == dilated) & (distance >= self.distance_threshold)
         labels, count = label(mask)
         return labels
