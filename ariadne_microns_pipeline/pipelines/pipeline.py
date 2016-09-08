@@ -131,6 +131,12 @@ class PipelineTaskMixin:
     dimensionality = luigi.EnumParameter(enum=Dimensionality,
         default=Dimensionality.D3,
         description="Whether to find seeds in planes or in a 3d volume")
+    minimum_distance_xy = luigi.FloatParameter(
+        default=5,
+        description="The minimum distance allowed between seeds")
+    minimum_distance_z = luigi.FloatParameter(
+        default=1.5,
+        description="The minimum distance allowed between seed in the z dir")
     statistics_csv_path = luigi.Parameter(
         description="The path to the CSV statistics output file.",
         default="/dev/null")
@@ -320,7 +326,9 @@ class PipelineTaskMixin:
                         sigma_z=self.sigma_z, 
                         threshold=self.threshold,
                         method=self.method,
-                        dimensionality=self.dimensionality)
+                        dimensionality=self.dimensionality,
+                        minimum_distance_xy=self.minimum_distance_xy,
+                        minimum_distance_z=self.minimum_distance_z)
                     self.seed_tasks[zi, yi, xi] = stask
                     stask.set_requirement(ctask)
 

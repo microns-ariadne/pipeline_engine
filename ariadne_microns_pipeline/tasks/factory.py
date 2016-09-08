@@ -90,8 +90,8 @@ class AMTaskFactory(object):
     def gen_find_seeds_task(
         self, volume, prob_location, seeds_location,
         dimensionality=Dimensionality.D3, method=SeedsMethodEnum.Smoothing,
-        sigma_xy=3, sigma_z=.4, threshold=1, minimum_distance=5,
-        distance_threshold=5):
+        sigma_xy=3, sigma_z=.4, threshold=1, minimum_distance_xy=5,
+        minimum_distance_z=1.5, distance_threshold=5):
         '''Generate a seed finding task
         
         This task produces seeds for watershedding.
@@ -119,7 +119,8 @@ class AMTaskFactory(object):
                              sigma_xy=sigma_xy,
                              sigma_z=sigma_z,
                              threshold=threshold,
-                             minimum_distance=minimum_distance,
+                             minimum_distance_xy=minimum_distance_xy,
+                             minimum_distance_z=minimum_distance_z,
                              distance_threshold=distance_threshold)
     
     def gen_segmentation_task(

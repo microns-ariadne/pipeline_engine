@@ -84,9 +84,12 @@ class FindSeedsRunMixin:
     threshold = luigi.FloatParameter(
         description="The intensity threshold cutoff for the seeds",
         default=1)
-    minimum_distance = luigi.FloatParameter(
+    minimum_distance_xy = luigi.FloatParameter(
         default=5,
         description="The minimum distance allowed between seeds")
+    minimum_distance_z = luigi.FloatParameter(
+        default=1.5,
+        description="The minimum distance allowed between seed in the z dir")
     distance_threshold = luigi.FloatParameter(
         default=5,
         description="The distance threshold cutoff for the seeds")
@@ -100,7 +103,8 @@ class FindSeedsRunMixin:
         seeds = []
         for plane in probs.astype(np.float32):
             smoothed = gaussian_filter(plane.astype(np.float32), self.sigma_xy)
-            eroded = grey_erosion(smoothed, size=self.minimum_distance)
+            size = self.minimum_distance_xy, 
+            eroded = grey_erosion(smoothed, size)
             thresholded = (smoothed < self.threshold) & (smoothed == eroded)
             labels, count = label(thresholded)
             labels[labels != 0] += offset
@@ -115,7 +119,10 @@ class FindSeedsRunMixin:
         '''
         sigma = (self.sigma_z, self.sigma_xy, self.sigma_xy)
         smoothed = gaussian_filter(probs.astype(np.float32), sigma)
-        eroded = grey_erosion(smoothed, size=self.minimum_distance)
+        size = (self.minimum_distance_z,
+                self.minimum_distance_xy,
+                self.minimum_distance_xy)
+        eroded = grey_erosion(smoothed, size=size)
         thresholded = (smoothed < self.threshold) & (smoothed == eroded)
         labels, count = label(thresholded)
         return labels
@@ -130,7 +137,7 @@ class FindSeedsRunMixin:
         for plane in probs.astype(np.float32):
             thresholded = plane < self.threshold
             distance = distance_transform_edt(thresholded)
-            dilated = grey_dilation(distance, size=self.minimum_distance)
+            dilated = grey_dilation(distance, size=self.minimum_distance_xy)
             mask = (distance == dilated) & (distance >= self.distance_threshold)
             labels, count = label(mask)
             labels[labels != 0] += offset
@@ -144,7 +151,10 @@ class FindSeedsRunMixin:
             thresholded = plane < self.threshold
             distance.append(distance_transform_edt(thresholded))
         distance = np.array(distance)
-        dilated = grey_dilation(distance, size=self.minimum_distance)
+        size = (self.minimum_distance_z, 
+                self.minimum_distance_xy,
+                self.minimum_distance_xy)
+        dilated = grey_dilation(distance, size=size)
         mask = (distance == dilated) & (distance >= self.distance_threshold)
         labels, count = label(mask)
         return labels
