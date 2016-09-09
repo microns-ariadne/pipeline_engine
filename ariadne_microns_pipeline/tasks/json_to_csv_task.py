@@ -7,6 +7,8 @@ class JSONToCSVTaskMixin:
     
     json_paths = luigi.ListParameter(
         description="The paths of the JSON files to be combined")
+    excluded_keys = luigi.ListParameter(
+        description="Keys to be excluded from the CSV")
     output_path = luigi.Parameter(
         description="The path to the CSV file to be created")
     
@@ -20,7 +22,9 @@ class JSONToCSVTaskMixin:
 class JSONToCSVRunMixin:
     def ariadne_run(self):
         dd = [json.load(inp.open("r")) for inp in self.input()]
-        keys = sorted(set.union(*[set(_.keys()) for _ in dd]))
+        keys = set.union(*[set(_.keys()) for _ in dd])
+        keys.difference_update(self.excluded_keys)
+        keys = sorted(keys)
         with self.output().open("w") as fd:
             writer = csv.writer(fd)
             writer.writerow(keys)

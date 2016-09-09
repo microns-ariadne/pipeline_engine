@@ -726,7 +726,8 @@ class PipelineTaskMixin:
                         json_paths.append(output_target.path)
             self.statistics_csv_task = self.factory.gen_json_to_csv_task(
                 json_paths=json_paths,
-                output_path = self.statistics_csv_path)
+                output_path = self.statistics_csv_path,
+                excluded_keys=["per_object"])
             for stask in self.statistics_tasks.flatten():
                 self.statistics_csv_task.set_requirement(stask)
             pdf_path = os.path.splitext(self.statistics_csv_path)[0] + ".pdf"

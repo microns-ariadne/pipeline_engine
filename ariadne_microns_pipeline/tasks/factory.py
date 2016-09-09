@@ -449,7 +449,8 @@ class AMTaskFactory(object):
     
     def gen_json_to_csv_task(self,
                              json_paths,
-                             output_path):
+                             output_path,
+                             excluded_keys=[]):
         '''Collect a number of JSON dictionaries into one .csv file
         
         Each JSON dictionary is a row in the CSV files and the columns are
@@ -457,7 +458,9 @@ class AMTaskFactory(object):
         
         :param json_paths: a sequence of pathnames to the JSON input files
         :param output_path: the location for the .csv file
+        :param excluded_keys: keys to exclude from the CSV
         '''
         return JSONToCSVTask(json_paths=json_paths,
-                             output_path=output_path)
+                             output_path=output_path,
+                             excluded_keys=excluded_keys)
     

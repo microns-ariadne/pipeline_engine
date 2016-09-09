@@ -1,6 +1,7 @@
 import enum
 import luigi
 import numpy as np
+import rh_logger
 from scipy.ndimage import gaussian_filter, label, distance_transform_edt
 from scipy.ndimage import grey_dilation, grey_erosion
 
@@ -132,6 +133,7 @@ class FindSeedsRunMixin:
         eroded = grey_erosion(smoothed, footprint=self.make_strel())
         thresholded = (smoothed < self.threshold) & (smoothed == eroded)
         labels, count = label(thresholded)
+        rh_logger.logger.report_event("Found %d seeds" % count)
         return labels
     
     def find_using_2d_distance(self, probs):
@@ -161,6 +163,7 @@ class FindSeedsRunMixin:
         dilated = grey_dilation(distance, footprint=self.make_strel())
         mask = (distance == dilated) & (distance >= self.distance_threshold)
         labels, count = label(mask)
+        rh_logger.logger.report_event("Found %d seeds" % count)
         return labels
         
     def ariadne_run(self):
