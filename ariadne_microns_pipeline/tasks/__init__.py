@@ -16,6 +16,7 @@ from .connected_components import \
      AllConnectedComponentsTask, ConnectedComponentsTask, VolumeRelabelingTask
 from .download_from_butterfly import DownloadFromButterflyTask
 from .factory import AMTaskFactory
+from .find_seeds import FindSeedsTask, Dimensionality, SeedsMethodEnum
 from .mask import MaskBorderTask
 from .neuroproof import NeuroproofTask
 from .nplearn import NeuroproofLearnTask
@@ -26,6 +27,7 @@ from .visualize import VisualizeTask, PipelineVisualizeTask
 all = [AllConnectedComponentsTask, BlockTask, ClassifyTask, 
        ConnectedComponentsTask,
        DownloadFromButterflyTask, AMTaskFactory,
+       FindSeedsTask, Dimensionality, SeedsMethodEnum,
        MaskBorderTask, NeuroproofTask, NeuroproofLearnTask, 
        SegmentTask, SegmentCC2DTask, UnsegmentTask,
        VisualizeTask, VolumeRelabelingTask, PipelineVisualizeTask, 

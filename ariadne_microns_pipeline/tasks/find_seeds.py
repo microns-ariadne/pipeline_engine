@@ -46,6 +46,15 @@ class Dimensionality(enum.Enum):
     
     '''Process a 3d volume as a whole'''
     D3=3
+
+class Shape(enum.Enum):
+    '''Determines the shape of the erosion structuring element'''
+    
+    '''Ellipsoid - truly based on distance, but not separable and slower'''
+    Ellipsoid=1
+    
+    '''Cube - includes points outside of ellipsoid but separable and faster'''
+    Cube=2
     
 class FindSeedsTaskMixin:
     
@@ -91,12 +100,25 @@ class FindSeedsRunMixin:
     minimum_distance_z = luigi.FloatParameter(
         default=1.5,
         description="The minimum distance allowed between seed in the z dir")
+    structuring_element = luigi.EnumParameter(
+        enum=Shape,
+        default=Shape.Cube,
+        description="The shape of the structuring element."
+        " Ellipsoid is slower, but honors the distances."
+        " Cube is faster, but excludes due to extrema at the corners of "
+        "the cube")
     distance_threshold = luigi.FloatParameter(
         default=5,
         description="The distance threshold cutoff for the seeds")
     
     def make_strel(self):
         '''make the structuring element for the minimum distance'''
+        if self.structuring_element == Shape.Cube:
+            return np.zeros([int(np.floor(_) * 2 + 1) for _ in
+                             self.minimum_distance_z,
+                             self.minimum_distance_xy,
+                             self.minimum_distance_xy], bool)
+        
         ixy = int(np.floor(self.minimum_distance_xy))
         iz = int(np.floor(self.minimum_distance_z))
         z, y, x = np.mgrid[-iz:iz+1, -ixy:ixy+1, -ixy:ixy+1].astype(np.float32)

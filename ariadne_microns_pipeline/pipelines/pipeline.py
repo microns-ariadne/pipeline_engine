@@ -851,7 +851,7 @@ class PipelineTaskMixin:
                     self.np_y_border_tasks.flatten().tolist()
                 self.requirements += \
                     self.np_z_border_tasks.flatten().tolist()
-                #ss
+                #
                 # (maybe) generate the statistics tasks
                 #
                 self.generate_statistics_tasks()

@@ -16,7 +16,8 @@ from .json_to_csv_task import JSONToCSVTask
 from .mask import MaskBorderTask
 from .neuroproof import NeuroproofTask
 from .nplearn import NeuroproofLearnTask, StrategyEnum
-from .segment import SegmentTask, SegmentCC2DTask, UnsegmentTask
+from .segment import \
+     SegmentTask, SegmentCC2DTask, SegmentCC3DTask, UnsegmentTask
 from .segmentation_statistics import \
      SegmentationStatisticsTask, SegmentationReportTask
 from .skeletonize import SkeletonizeTask
@@ -154,7 +155,9 @@ class AMTaskFactory(object):
                            dimensionality=dimensionality)
     
     def gen_cc_segmentation_task(
-        self, volume, prob_location, mask_location, seg_location, threshold):
+        self, volume, prob_location, mask_location, seg_location, threshold,
+        dimensionality=Dimensionality.D2,
+        fg_is_higher=False):
         '''Generate a 2d segmentation task
         
         Generate a 2D segmentation task that performs connected components
@@ -166,12 +169,26 @@ class AMTaskFactory(object):
         :param seg_location: where to put the segmentation
         :param threshold: the cutoff in the membrane probabilities between
         membrane and not-membrane, scaled from 0 to 255.
+        :param dimensionality: whether to do 2D or 3D connected components
+                               default is 2d
+        :param fg_is_higher: True if foreground is above threshold, False if
+                             below
         '''
-        return SegmentCC2DTask(volume=volume,
-                             prob_location=prob_location,
-                             mask_location=mask_location,
-                             output_location=seg_location,
-                             threshold=threshold)
+        if dimensionality == Dimensionality.D2:
+            return SegmentCC2DTask(volume=volume,
+                                 prob_location=prob_location,
+                                 mask_location=mask_location,
+                                 output_location=seg_location,
+                                 threshold=threshold,
+                                 fg_is_higher=fg_is_higher)
+        else:
+            return SegmentCC3DTask(volume=volume,
+                                 prob_location=prob_location,
+                                 mask_location=mask_location,
+                                 output_location=seg_location,
+                                 threshold=threshold,
+                                 fg_is_higher=fg_is_higher)
+
     
     def gen_unsegmentation_task(self, volume, input_location, output_location,
                                 use_min_contact, contact_threshold):

@@ -71,17 +71,18 @@ class ConnectedComponentsRunMixin:
         # Remove any pixels labeled with "0"
         #
         cutouts = cutouts[np.all(cutouts != 0, 1)]
-        order = np.lexsort((cutouts[:, 1], cutouts[:, 0]))
-        cutouts = cutouts[order]
+        
         if len(cutouts) > 0:
-            first = np.hstack(
-                [[True], 
-                 np.where(np.any(cutouts[:-1, :] != cutouts[1:, :], 1))[0]])
-            unique = cutouts[first]
-            as_list = [ (a, b) for a, b in unique.tolist()]
+            matrix = coo_matrix((np.ones(cutouts.shape[0], int),
+                                 (cutouts[:, 0], cutouts[:, 1])))
+            matrix.sum_duplicates()
+            a, b = matrix.nonzero()
+            counts = matrix.tocsr()[a, b].getA1().astype(int)
+            as_list = [ (int(aa), int(bb)) for aa, bb in zip(a, b)]
         else:
             as_list = []
-        d = dict(connections=as_list)
+            counts = np.zeros(0, int)
+        d = dict(connections=as_list, counts=counts.tolist())
         for volume, name in ((self.volume1, "1"),
                              (self.volume2, "2"),
                              (self.overlap_volume, "overlap")):
@@ -94,10 +95,10 @@ class ConnectedComponentsRunMixin:
         #
         # TODO: get the # of components more cheaply than looking at every voxel
         #
-        unique = np.unique(volume1.imread().ravel())
+        unique = np.where(np.bincount(volume1.imread().ravel()))[0]
         unique = unique[unique != 0]
         d["1"]["labels"] = unique.tolist()
-        unique = np.unique(volume2.imread().ravel())
+        unique = np.where(np.bincount(volume2.imread().ravel()))[0]
         unique = unique[unique != 0]
         d["2"]["labels"] = unique.tolist()
         with self.output().open("w") as fd:

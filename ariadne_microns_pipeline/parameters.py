@@ -81,6 +81,16 @@ class DatasetLocation(object):
         return "DatasetLocation: [%s].%s (%s)" % (
             ",".join(self.roots), self.dataset_name, self.pattern)
 
+'''A dataset location for a dataset that doesn't exist
+
+If a dataset is optional, use this to signify that the user doesn't
+want it.
+'''
+EMPTY_DATASET_LOCATION = DatasetLocation([], "None", "")
+
+def is_empty_dataset_location(location):
+    '''Check to see if a dataset location is the empty dataset'''
+    return len(location.roots) == 0
 
 class DatasetLocationParameter(luigi.Parameter):
     '''The particulars necessary for describing the location of a volume

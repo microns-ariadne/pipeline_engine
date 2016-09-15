@@ -7,7 +7,8 @@ from scipy.sparse import coo_matrix
 from .find_seeds import Dimensionality
 from ..algorithms import watershed
 from ..targets.factory import TargetFactory
-from ..parameters import VolumeParameter, DatasetLocationParameter
+from ..parameters import \
+     VolumeParameter, DatasetLocationParameter, is_empty_dataset_location
 from utilities import RequiresMixin, RunMixin, SingleThreadedMixin
 
 class SegmentTaskMixin:
@@ -86,14 +87,21 @@ class SegmentCCTaskMixin:
         description="The location of the mask volume")
     output_location = DatasetLocationParameter(
         description="The location for the output segmentation")
+    threshold = luigi.IntParameter(
+        default=190,
+        description="The probability threshold (from 0-255) to use as a"
+        "cutoff for (not) membrane")
+    fg_is_higher = luigi.BoolParameter(
+        description="True if the foreground is > threshold")
     
     def input(self):
         yield TargetFactory().get_volume_target(
             location = self.prob_location,
             volume = self.volume)
-        yield TargetFactory().get_volume_target(
-            location = self.mask_location,
-            volume = self.volume)
+        if not is_empty_dataset_location(self.mask_location):
+            yield TargetFactory().get_volume_target(
+                location = self.mask_location,
+                volume = self.volume)
     
     def output(self):
         return TargetFactory().get_volume_target(
@@ -102,15 +110,21 @@ class SegmentCCTaskMixin:
 
 class SegmentCC2DRunMixin:    
 
-    threshold = luigi.IntParameter(
-        default=190,
-        description="The probability threshold (from 0-255) to use as a"
-        "cutoff for (not) membrane")
-
     def ariadne_run(self):
-        prob_target, mask_target = list(self.input())
+        tgts = list(self.input())
+        prob_target = tgts[0]
+        if len(tgts) == 2:
+            mask_target = tgts[1]
+        else:
+            mask_target = None
         threshold = self.threshold
-        fg =  mask_target.imread() & (prob_target.imread() < threshold)
+        if self.fg_is_higher:
+            fg = (prob_target.imread() > threshold)
+        else:
+            fg = (prob_target.imread() < threshold)
+        if mask_target is not None:
+            fg = fg & mask_target.imread()
+            
         labels = np.zeros(fg.shape, np.uint32)
         offset = 0
         for i in range(labels.shape[0]):
@@ -131,6 +145,37 @@ class SegmentCC2DTask(SegmentCCTaskMixin,
     The task breaks a volume into X/Y planes. It thresholds the membrane
     probabilities and then it finds the connected components in the plane,
     using non-membrane as the foreground.
+    '''
+
+class SegmentCC3DRunMixin:    
+
+    def ariadne_run(self):
+        tgts = list(self.input())
+        prob_target = tgts[0]
+        if len(tgts) == 2:
+            mask_target = tgts[1]
+        else:
+            mask_target = None
+        threshold = self.threshold
+        if self.fg_is_higher:
+            fg = (prob_target.imread() > threshold)
+        else:
+            fg = (prob_target.imread() < threshold)
+        if mask_target is not None:
+            fg = fg & mask_target.imread()
+        labels, count = label(fg)
+        self.output().imwrite(labels)
+
+class SegmentCC3DTask(SegmentCCTaskMixin,
+                    SegmentCC3DRunMixin,
+                    RequiresMixin,
+                    RunMixin,
+                    SingleThreadedMixin,
+                    luigi.Task):
+    '''The Segment2DTask performs 3D connected components on membrane probs
+    
+    The task thresholds the input and then performs a 3d connected components
+    on the foreground using a 6-connected structuring element.
     '''
 
 class UnsegmentTaskMixin:
