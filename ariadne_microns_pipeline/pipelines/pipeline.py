@@ -920,7 +920,7 @@ class PipelineTaskMixin:
                         self.ys[yi],
                         self.zs[zi+1] - self.np_z_pad / 2,
                         self.xs[xi+1] - self.xs[xi], 
-                        self.ys[yi+1] - self.ys[zi], 1)
+                        self.ys[yi+1] - self.ys[yi], 1)
                     overlap_volume2 = Volume(
                         self.xs[xi],
                         self.ys[yi],
