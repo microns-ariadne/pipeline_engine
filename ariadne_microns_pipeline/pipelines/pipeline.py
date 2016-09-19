@@ -823,11 +823,12 @@ class PipelineTaskMixin:
                     # the width) from the left edge of the border block
                     #
                     overlap_volume1 = Volume(
-                        self.xs[xi+1] - self.np_x_pad / 2,
-                        self.ys[yi], self.zs[zi],
+                        border_volume.x + self.np_x_pad / 2,
+                        border_volume.y,
+                        border_volume.z,
                         1, 
-                        self.ys[yi+1] - self.ys[yi], 
-                        self.zs[zi+1] - self.zs[zi])
+                        border_volume.height,
+                        border_volume.depth)
                     #
                     # The right task overlap is 1/2 of the padding away
                     # from its left edge and 1/2 of the padding (= 3/4 of
@@ -835,10 +836,11 @@ class PipelineTaskMixin:
                     #
                     overlap_volume2 = Volume(
                         self.xs[xi+1] + self.np_x_pad / 2,
-                        self.ys[yi], self.zs[zi],
+                        border_volume.y,
+                        border_volume.z,
                         1, 
-                        self.ys[yi+1] - self.ys[yi], 
-                        self.zs[zi+1] - self.zs[zi])
+                        border_volume.height, 
+                        border_volume.depth)
                     for idx, np_task, volume, direction in (
                         (0, left_task, overlap_volume1, "x-"),
                         (1, right_task, overlap_volume2, "x+")):
@@ -871,19 +873,19 @@ class PipelineTaskMixin:
                     left_task = self.np_tasks[zi, yi, xi]
                     right_task = self.np_tasks[zi, yi+1, xi]
                     overlap_volume1 = Volume(
-                        self.xs[xi],
-                        self.ys[yi+1] - self.np_y_pad / 2,
-                        self.zs[zi],
-                        self.xs[xi+1] - self.xs[xi], 
+                        border_volume.x,
+                        border_volume.y + self.np_y_pad / 2,
+                        border_volume.z,
+                        border_volume.width, 
                         1, 
-                        self.zs[zi+1] - self.zs[zi])
+                        border_volume.depth)
                     overlap_volume2 = Volume(
-                        self.xs[xi],
+                        border_volume.x,
                         self.ys[yi+1] + self.np_y_pad / 2,
-                        self.zs[zi],
-                        self.xs[xi+1] - self.xs[xi], 
+                        border_volume.z,
+                        border_volume.width, 
                         1, 
-                        self.zs[zi+1] - self.zs[zi])
+                        border_volume.depth)
                     for idx, np_task, volume, direction in (
                         (0, left_task, overlap_volume1, "y-"),
                         (1, right_task, overlap_volume2, "y+")):
@@ -916,17 +918,17 @@ class PipelineTaskMixin:
                     left_task = self.np_tasks[zi, yi, xi]
                     right_task = self.np_tasks[zi+1, yi, xi]
                     overlap_volume1 = Volume(
-                        self.xs[xi],
-                        self.ys[yi],
-                        self.zs[zi+1] - self.np_z_pad / 2,
-                        self.xs[xi+1] - self.xs[xi], 
-                        self.ys[yi+1] - self.ys[yi], 1)
+                        border_task.volume.x,
+                        border_task.volume.y,
+                        border_task.volume.z + self.np_z_pad / 2,
+                        border_task.volume.width, 
+                        border_task.volume.height, 1)
                     overlap_volume2 = Volume(
-                        self.xs[xi],
-                        self.ys[yi],
+                        border_task.volume.x,
+                        border_task.volume.y,
                         self.zs[zi+1] + self.np_z_pad / 2,
-                        self.xs[xi+1] - self.xs[xi], 
-                        self.ys[yi+1] - self.ys[yi], 1)
+                        border_task.volume.width, 
+                        border_task.volume.height, 1)
                     for idx, np_task, volume, direction in (
                         (0, left_task, overlap_volume1, "z-"),
                         (1, right_task, overlap_volume2, "z+")):

@@ -40,6 +40,10 @@ class ConnectedComponentsTaskMixin:
     
 class ConnectedComponentsRunMixin:
     
+    min_overlap_area = luigi.IntParameter(
+        default=0,
+        description="Minimum amount of overlapping voxels when joining "
+                    "two segments.")
     def ariadne_run(self):
         '''Look within the overlap volume to find the concordances
         
@@ -78,6 +82,9 @@ class ConnectedComponentsRunMixin:
             matrix.sum_duplicates()
             a, b = matrix.nonzero()
             counts = matrix.tocsr()[a, b].getA1().astype(int)
+            if self.min_overlap_area > 0:
+                large_areas = np.where(counts >= self.min_overlap_area)
+                counts, a, b = [_[large_areas] for _ in counts, a, b]
             as_list = [ (int(aa), int(bb)) for aa, bb in zip(a, b)]
         else:
             as_list = []
