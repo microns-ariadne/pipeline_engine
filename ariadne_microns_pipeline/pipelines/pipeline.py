@@ -926,7 +926,7 @@ class PipelineTaskMixin:
                         self.ys[yi],
                         self.zs[zi+1] + self.np_z_pad / 2,
                         self.xs[xi+1] - self.xs[xi], 
-                        self.ys[yi+1] - self.ys[zi], 1)
+                        self.ys[yi+1] - self.ys[yi], 1)
                     for idx, np_task, volume, direction in (
                         (0, left_task, overlap_volume1, "z-"),
                         (1, right_task, overlap_volume2, "z+")):
