@@ -50,6 +50,12 @@ direction - the adjacency direction, e.g. "z"
 '''
 BORDER_DATASET_PATTERN = "{parent}_{direction}-border"
 
+'''The pattern for connected_components tasks
+
+direction - the adjacency direction: x-, x+, y-, y+, z-, z+
+'''
+CONNECTED_COMPONENTS_PATTERN = "connected-components_{direction}.json"
+
 
 class PipelineTaskMixin:
     '''The Ariadne-Microns pipeline'''
@@ -153,6 +159,10 @@ class PipelineTaskMixin:
     contact_threshold = luigi.IntParameter(
         default=100,
         description="Break objects with less than this number of area overlap")
+    connectivity_graph_location = luigi.Parameter(
+        default="/dev/null",
+        description="The location of the all-connected-components connectivity"
+                    " .json file. Default = do not generate it.")
 
     def get_dirs(self, x, y, z):
         '''Return a directory suited for storing a file with the given offset
@@ -176,6 +186,11 @@ class PipelineTaskMixin:
         return DatasetLocation(self.get_dirs(volume.x, volume.y, volume.z),
                                dataset_name,
                                self.get_pattern(dataset_name))
+    
+    @property
+    def wants_connectivity(self):
+        '''True if we are doing a connectivity graph'''
+        return self.connectivity_graph_location != "/dev/null"
     
     def compute_extents(self):
         '''Compute various block boundaries and padding
@@ -765,6 +780,171 @@ class PipelineTaskMixin:
                         stask.set_requirement(ntask)
                         self.skeletonize_tasks[zi, yi, xi] = stask
     
+    def generate_connectivity_graph_tasks(self):
+        '''Create the tasks that join components across blocks'''
+        if not self.wants_connectivity:
+            return
+        #
+        # Find the connected components between the big blocks and the
+        # border blocks. Then knit them together with the 
+        # AllConnectedComponentsTask
+        #
+        self.generate_x_connectivity_graph_tasks()
+        self.generate_y_connectivity_graph_tasks()
+        self.generate_z_connectivity_graph_tasks()
+        input_tasks = []
+        for task_array in (self.x_connectivity_graph_tasks,
+                           self.y_connectivity_graph_tasks,
+                           self.z_connectivity_graph_tasks):
+            input_tasks += task_array.flatten().tolist()
+        input_locations = [task.output().path for task in input_tasks]
+        self.all_connected_components_task = \
+            self.factory.gen_all_connected_components_task(
+                input_locations, self.connectivity_graph_location)
+        for task in input_tasks:
+            self.all_connected_components_task.set_requirement(task)
+    
+    def generate_x_connectivity_graph_tasks(self):
+        '''Generate connected components tasks to link blocks in x direction
+        
+        '''
+        self.x_connectivity_graph_tasks = np.zeros(
+            (self.n_z, self.n_y, self.n_x-1, 2), object)
+        for zi in range(self.n_z):
+            for yi in range(self.n_y):
+                for xi in range(self.n_x-1):
+                    border_task = self.np_x_border_tasks[zi, yi, xi]
+                    border_volume = border_task.volume
+                    left_task = self.np_tasks[zi, yi, xi]
+                    right_task = self.np_tasks[zi, yi, xi+1]
+                    #
+                    # The left task overlap is 1/2 of the padding away
+                    # from its right edge and 1/2 of the padding (= 1/4 of
+                    # the width) from the left edge of the border block
+                    #
+                    overlap_volume1 = Volume(
+                        self.xs[xi+1] - self.np_x_pad / 2,
+                        self.ys[yi], self.zs[zi],
+                        1, 
+                        self.ys[yi+1] - self.ys[yi], 
+                        self.zs[zi+1] - self.zs[zi])
+                    #
+                    # The right task overlap is 1/2 of the padding away
+                    # from its left edge and 1/2 of the padding (= 3/4 of
+                    # the width) from the right edge of the border block
+                    #
+                    overlap_volume2 = Volume(
+                        self.xs[xi+1] + self.np_x_pad / 2,
+                        self.ys[yi], self.zs[zi],
+                        1, 
+                        self.ys[yi+1] - self.ys[yi], 
+                        self.zs[zi+1] - self.zs[zi])
+                    for idx, np_task, volume, direction in (
+                        (0, left_task, overlap_volume1, "x-"),
+                        (1, right_task, overlap_volume2, "x+")):
+                        filename = CONNECTED_COMPONENTS_PATTERN.format(
+                            direction=direction)
+                        output_location = os.path.join(
+                            np_task.output_seg_location.roots[0], filename)
+                        task = self.factory.gen_connected_components_task(
+                            volume1=np_task.volume,
+                            location1=np_task.output_seg_location,
+                            volume2=border_volume,
+                            location2=border_task.output_seg_location,
+                            overlap_volume=volume,
+                            output_location=output_location)
+                        task.set_requirement(np_task)
+                        task.set_requirement(border_task)
+                        self.x_connectivity_graph_tasks[zi, yi, xi, idx] = task
+                                        
+    def generate_y_connectivity_graph_tasks(self):
+        '''Generate connected components tasks to link blocks in y direction
+        
+        '''
+        self.y_connectivity_graph_tasks = np.zeros(
+            (self.n_z, self.n_y-1, self.n_x, 2), object)
+        for zi in range(self.n_z):
+            for yi in range(self.n_y - 1):
+                for xi in range(self.n_x):
+                    border_task = self.np_y_border_tasks[zi, yi, xi]
+                    border_volume = border_task.volume
+                    left_task = self.np_tasks[zi, yi, xi]
+                    right_task = self.np_tasks[zi, yi+1, xi]
+                    overlap_volume1 = Volume(
+                        self.xs[xi],
+                        self.ys[yi+1] - self.np_y_pad / 2,
+                        self.zs[zi],
+                        self.xs[xi+1] - self.xs[xi], 
+                        1, 
+                        self.zs[zi+1] - self.zs[zi])
+                    overlap_volume2 = Volume(
+                        self.xs[xi],
+                        self.ys[yi+1] + self.np_y_pad / 2,
+                        self.zs[zi],
+                        self.xs[xi+1] - self.xs[xi], 
+                        1, 
+                        self.zs[zi+1] - self.zs[zi])
+                    for idx, np_task, volume, direction in (
+                        (0, left_task, overlap_volume1, "y-"),
+                        (1, right_task, overlap_volume2, "y+")):
+                        filename = CONNECTED_COMPONENTS_PATTERN.format(
+                            direction=direction)
+                        output_location = os.path.join(
+                            np_task.output_seg_location.roots[0], filename)
+                        task = self.factory.gen_connected_components_task(
+                            volume1=np_task.volume,
+                            location1=np_task.output_seg_location,
+                            volume2=border_volume,
+                            location2=border_task.output_seg_location,
+                            overlap_volume=volume,
+                            output_location=output_location)
+                        task.set_requirement(np_task)
+                        task.set_requirement(border_task)
+                        self.y_connectivity_graph_tasks[zi, yi, xi, idx] = task
+                                        
+    def generate_z_connectivity_graph_tasks(self):
+        '''Generate connected components tasks to link blocks in z direction
+        
+        '''
+        self.z_connectivity_graph_tasks = np.zeros(
+            (self.n_z-1, self.n_y, self.n_x, 2), object)
+        for zi in range(self.n_z-1):
+            for yi in range(self.n_y):
+                for xi in range(self.n_x):
+                    border_task = self.np_z_border_tasks[zi, yi, xi]
+                    border_volume = border_task.volume
+                    left_task = self.np_tasks[zi, yi, xi]
+                    right_task = self.np_tasks[zi+1, yi, xi]
+                    overlap_volume1 = Volume(
+                        self.xs[xi],
+                        self.ys[yi],
+                        self.zs[zi+1] - self.np_z_pad / 2,
+                        self.xs[xi+1] - self.xs[xi], 
+                        self.zs[yi+1] - self.ys[zi], 1)
+                    overlap_volume2 = Volume(
+                        self.xs[xi],
+                        self.ys[yi],
+                        self.zs[zi+1] + self.np_z_pad / 2,
+                        self.xs[xi+1] - self.xs[xi], 
+                        self.zs[yi+1] - self.ys[zi], 1)
+                    for idx, np_task, volume, direction in (
+                        (0, left_task, overlap_volume1, "z-"),
+                        (1, right_task, overlap_volume2, "z+")):
+                        filename = CONNECTED_COMPONENTS_PATTERN.format(
+                            direction=direction)
+                        output_location = os.path.join(
+                            np_task.output_seg_location.roots[0], filename)
+                        task = self.factory.gen_connected_components_task(
+                            volume1=np_task.volume,
+                            location1=np_task.output_seg_location,
+                            volume2=border_volume,
+                            location2=border_task.output_seg_location,
+                            overlap_volume=volume,
+                            output_location=output_location)
+                        task.set_requirement(np_task)
+                        task.set_requirement(border_task)
+                        self.z_connectivity_graph_tasks[zi, yi, xi, idx] = task
+
     def compute_requirements(self):
         '''Compute the requirements for this task'''
         if not hasattr(self, "requirements"):
@@ -831,6 +1011,11 @@ class PipelineTaskMixin:
                 rh_logger.logger.report_event("Making skeletonize tasks")
                 self.generate_skeletonize_tasks()
                 #
+                # Step 9: The connectivity graph.
+                #
+                rh_logger.logger.report_event("Making connectivity graph")
+                self.generate_connectivity_graph_tasks()
+                #
                 # The requirements:
                 #
                 # The skeletonize tasks if skeletonization is done
@@ -844,6 +1029,8 @@ class PipelineTaskMixin:
                         self.skeletonize_tasks.flatten().tolist()
                 else:
                     self.requirements += self.np_tasks.flatten().tolist()
+                if self.wants_connectivity:
+                    self.requirements.append(self.all_connected_components_task)
                 
                 self.requirements += \
                     self.np_x_border_tasks.flatten().tolist()

@@ -114,10 +114,10 @@ class FindSeedsRunMixin:
     def make_strel(self):
         '''make the structuring element for the minimum distance'''
         if self.structuring_element == Shape.Cube:
-            return np.zeros([int(np.floor(_) * 2 + 1) for _ in
-                             self.minimum_distance_z,
-                             self.minimum_distance_xy,
-                             self.minimum_distance_xy], bool)
+            return np.ones([int(np.floor(_) * 2 + 1) for _ in
+                            self.minimum_distance_z,
+                            self.minimum_distance_xy,
+                            self.minimum_distance_xy], bool)
         
         ixy = int(np.floor(self.minimum_distance_xy))
         iz = int(np.floor(self.minimum_distance_z))
