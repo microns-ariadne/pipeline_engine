@@ -134,6 +134,7 @@ $(TOOLS_PREFIX)/sparsehash/sparsehash-install:
 	make install
 
 all_sources: $(TOOLS_PREFIX)/sources/opencv-2.4.9.zip \
+	     $(TOOLS_PREFIX)/sources/autoconf-2.64.tar.gz \
 		$(CILKPLUS_PREFIX)/cilkplus-gcc\
 		$(TOOLS_PREFIX)/sources/boost-1.61.0.tar.gz\
 		$(TOOLS_PREFIX)/sources/vigra-1.10.0-src.tar.gz
@@ -174,7 +175,7 @@ $(TOOLS_PREFIX)/cilkplus/cilkplus-gcc:
 
 $(TOOLS_PREFIX)/cilkplus/cilkplus-install/bin/g++: $(TOOLS_PREFIX)/cilkplus/cilkplus-gcc $(TOOLS_PREFIX)/autoconf/autoconf-install/bin/autoconf
 	cd $(CILKPLUS_PREFIX)/cilkplus-gcc &&\
-	git clean -xfd
+	git clean -xfd &&\
 	./contrib/download_prerequisites &&\
 	mkdir -p $(CILKPLUS_PREFIX)/build &&\
 	cd $(CILKPLUS_PREFIX)/build &&\
