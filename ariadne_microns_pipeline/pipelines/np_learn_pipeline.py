@@ -15,6 +15,7 @@ from ..tasks import AMTaskFactory
 from ..tasks.classify import ClassifyShimTask
 from ..tasks.find_seeds import Dimensionality, SeedsMethodEnum
 from ..tasks.nplearn import StrategyEnum
+from ..tasks.connected_components import LogicalOperation
 from ..targets.classifier_target import PixelClassifierTarget
 from ..parameters import DatasetLocation, Volume, VolumeParameter
 
@@ -175,6 +176,10 @@ class NeuroproofLearnPipelineTaskMixin:
     contact_threshold = luigi.IntParameter(
         default=100,
         description="Break objects with less than this number of area overlap")
+    cc_min_overlap_percent = luigi.FloatParameter(
+        default=75,
+        description="The minimum amount of overap needed to join across the "
+                    "blocks using connected components.")
 
     def get_dirs(self, x, y, z):
         '''Return a directory suited for storing a file with the given offset
@@ -571,6 +576,8 @@ class NeuroproofLearnPipelineTaskMixin:
                                               x1-x0, y1-y0, z1-z0),
                         output_location=self.get_connected_components_location(
                             x0, x1, y0, y1, z0, z1))
+                    cctask.min_overlap_percent = self.cc_min_overlap_percent
+                    cctask.operation = LogicalOperation.AND
                     self.x_connected_components_tasks[zi, yi, xi] = cctask
                     cctask.set_requirement(wtask0)
                     cctask.set_requirement(wtask1)
@@ -602,6 +609,8 @@ class NeuroproofLearnPipelineTaskMixin:
                                               x1-x0, y1-y0, z1-z0),
                         output_location=self.get_connected_components_location(
                             x0, x1, y0, y1, z0, z1))
+                    cctask.min_overlap_percent = self.cc_min_overlap_percent
+                    cctask.operation = LogicalOperation.AND
                     self.y_connected_components_tasks[zi, yi, xi] = cctask
                     cctask.set_requirement(wtask0)
                     cctask.set_requirement(wtask1)
@@ -633,6 +642,8 @@ class NeuroproofLearnPipelineTaskMixin:
                                               x1-x0, y1-y0, z1-z0),
                         output_location=self.get_connected_components_location(
                             x0, x1, y0, y1, z0, z1))
+                    cctask.min_overlap_percent = self.cc_min_overlap_percent
+                    cctask.operation = LogicalOperation.AND
                     self.z_connected_components_tasks[zi, yi, xi] = cctask
                     cctask.set_requirement(wtask0)
                     cctask.set_requirement(wtask1)

@@ -1,5 +1,6 @@
 '''Tasks for finding connected components across blocks'''
 
+import enum
 import json
 import luigi
 import numpy as np
@@ -12,6 +13,10 @@ from ..parameters import MultiVolumeParameter
 from ..targets.factory import TargetFactory
 from ..targets.volume_target import VolumeTarget
 from .utilities import to_hashable
+
+class LogicalOperation(enum.Enum):
+    OR = 1
+    AND = 2
 
 class ConnectedComponentsTaskMixin:
     
@@ -40,10 +45,18 @@ class ConnectedComponentsTaskMixin:
     
 class ConnectedComponentsRunMixin:
     
-    min_overlap_area = luigi.IntParameter(
-        default=0,
-        description="Minimum amount of overlapping voxels when joining "
-                    "two segments.")
+    min_overlap_percent = luigi.FloatParameter(
+        default=50,
+        description="Minimum amount of percent overlapping voxels when joining "
+                    "two segments relative to the areas of each of the "
+                    "segments in the overlap volume.")
+    operation = luigi.EnumParameter(
+        enum=LogicalOperation,
+        default=LogicalOperation.OR,
+        description="Whether to join if either objects overlap the other "
+                    "by the minimum amount (""OR"") or whether they both "
+                    "have to overlap the other by the minimum amount (""AND"")")
+    
     def ariadne_run(self):
         '''Look within the overlap volume to find the concordances
         
@@ -82,9 +95,20 @@ class ConnectedComponentsRunMixin:
             matrix.sum_duplicates()
             a, b = matrix.nonzero()
             counts = matrix.tocsr()[a, b].getA1().astype(int)
-            if self.min_overlap_area > 0:
-                large_areas = np.where(counts >= self.min_overlap_area)
-                counts, a, b = [_[large_areas] for _ in counts, a, b]
+            if self.min_overlap_percent > 0:
+                frac = float(self.min_overlap_percent) / 100
+                cutout_a_area = np.bincount(cutouts[:, 0]).astype(float)
+                cutout_b_area = np.bincount(cutouts[:, 1]).astype(float)
+                frac_a = counts.astype(float) / cutout_a_area[a]
+                frac_b = counts.astype(float) / cutout_b_area[b]
+                if self.operation == LogicalOperation.OR:
+                    large_enough = \
+                        np.where((frac_a >= frac ) | (frac_b >= frac))[0]
+                else:
+                    large_enough = \
+                        np.where((frac_a >= frac ) & (frac_b >= frac))[0]
+                    
+                counts, a, b = [_[large_enough] for _ in counts, a, b]
             as_list = [ (int(aa), int(bb)) for aa, bb in zip(a, b)]
         else:
             as_list = []
