@@ -79,15 +79,27 @@ void run_learning(LearnOptions& options)
 	printf("READ FILES 1 \n");
     vector<VolumeProbPtr> prob_list = VolumeProb::create_volume_array(
         options.prediction_filename.c_str(), PRED_DATASET_NAME);
+	printf("prob_list.shape[Z/Y/X] = [%d,%d,%d]\n", 
+	    (int)((*prob_list[0])).shape(2),
+	    (int)((*prob_list[0])).shape(1),
+	    (int)((*prob_list[0])).shape(0));
     
 	printf("READ FILES 2\n");
 	
     VolumeLabelPtr watershed_data = VolumeLabelData::create_volume(
             options.watershed_filename.c_str(), SEG_DATASET_NAME, false);
+	printf("watershed_data.shape[Z/Y/X] = [%d,%d,%d]\n", 
+	    (int)((*watershed_data)).shape(2),
+	    (int)((*watershed_data)).shape(1),
+	    (int)((*watershed_data)).shape(0));
 
 	printf("READ FILES 3\n");
     VolumeLabelPtr groundtruth_data = VolumeLabelData::create_volume(
             options.groundtruth_filename.c_str(), SEG_DATASET_NAME, false);
+	printf("groundtruth_data.shape[Z/Y/X] = [%d,%d,%d]\n", 
+	    (int)((*groundtruth_data)).shape(2),
+	    (int)((*groundtruth_data)).shape(1),
+	    (int)((*groundtruth_data)).shape(0));
     
 	printf("READ FILES 4\n");
 		
