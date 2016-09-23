@@ -30,7 +30,7 @@ class FindSynapsesTaskMixin:
             volume = self.volume)
     
     def output(self):
-        yield TargetFactory().get_volume_target(
+        return TargetFactory().get_volume_target(
             location = self.output_location,
             volume = self.volume)
     

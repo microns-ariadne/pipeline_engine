@@ -183,6 +183,14 @@ class PipelineTaskMixin:
     min_synapse_area = luigi.IntParameter(
         description="Minimum area for a synapse",
         default=250)
+    synapse_xy_erosion = luigi.IntParameter(
+        default=4,
+        description = "# of pixels to erode the neuron segmentation in the "
+                      "X and Y direction prior to synapse segmentation.")
+    synapse_z_erosion = luigi.IntParameter(
+        default=1,
+        description = "# of pixels to erode the neuron segmentation in the "
+                      "Z direction prior to synapse segmentation.")
     synapse_xy_sigma = luigi.FloatParameter(
         description="Sigma for smoothing Gaussian for synapse segmentation "
                      "in the x and y directions.",
@@ -191,6 +199,20 @@ class PipelineTaskMixin:
         description="Sigma for smoothing Gaussian for symapse segmentation "
                      "in the z direction.",
         default=.5)
+    synapse_min_size_2d = luigi.IntParameter(
+        default=25,
+        description="Remove isolated synapse foreground in a plane if "
+        "less than this # of pixels")
+    synapse_max_size_2d = luigi.IntParameter(
+        default=10000,
+        description = "Remove large patches of mislabeled synapse in a plane "
+        "that have an area greater than this")
+    synapse_min_size_3d = luigi.IntParameter(
+        default=500,
+        description = "Minimum size in voxels of a synapse")
+    min_synapse_depth = luigi.IntParameter(
+        default=3,
+        description="Minimum acceptable size of a synapse in the Z direction")
     synapse_threshold = luigi.FloatParameter(
         description="Threshold for synapse voxels vs background voxels",
         default=128.)
@@ -1025,33 +1047,29 @@ class PipelineTaskMixin:
             for yi in range(self.n_y):
                 for xi in range(self.n_x):
                     ctask = self.synapse_classifier_tasks[zi, yi, xi]
+                    nptask = self.np_tasks[zi, yi, xi]
                     volume = ctask.output().volume
                     ctask_loc = ctask.output().dataset_location
+                    np_loc = nptask.output().dataset_location
                     stask_loc = self.get_dataset_location(
                         volume, SYN_SEG_DATASET)
-                    filtered_loc = self.get_dataset_location(
-                        volume, FILTERED_SYN_SEG_DATASET)
-                    stask = self.factory.gen_cc_segmentation_task(
+                    stask = self.factory.gen_find_synapses_task(
                         volume=volume,
-                        prob_location=ctask_loc,
-                        mask_location=EMPTY_DATASET_LOCATION,
-                        seg_location=stask_loc,
+                        syn_location=ctask_loc,
+                        neuron_segmentation=np_loc,
+                        output_location=stask_loc,
                         threshold=self.synapse_threshold,
-                        dimensionality=Dimensionality.D3,
-                        fg_is_higher=True)
-                    stask.xy_sigma = self.synapse_xy_sigma
-                    stask.z_sigma = self.synapse_z_sigma
-                    ftask = self.factory.gen_filter_task(
-                        volume=volume,
-                        input_location=stask_loc,
-                        output_location=filtered_loc,
-                        min_area=self.min_synapse_area)
-                    #
-                    # Wire 'em up
-                    #
+                        erosion_xy=self.synapse_xy_erosion,
+                        erosion_z=self.synapse_z_erosion,
+                        sigma_xy=self.synapse_xy_sigma,
+                        sigma_z=self.synapse_z_sigma,
+                        min_size_2d=self.synapse_min_size_2d,
+                        max_size_2d=self.synapse_max_size_2d,
+                        min_size_3d=self.min_synapse_area,
+                        min_slice=self.min_synapse_depth)
                     stask.set_requirement(ctask)
-                    ftask.set_requirement(stask)
-                    self.synapse_segmentation_tasks[zi, yi, xi] = ftask
+                    stask.set_requirement(nptask)
+                    self.synapse_segmentation_tasks[zi, yi, xi] = stask
     
     def generate_synapse_connectivity_tasks(self):
         '''Make tasks that connect neurons to synapses'''
