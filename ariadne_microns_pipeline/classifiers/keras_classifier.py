@@ -104,7 +104,8 @@ class KerasClassifier(AbstractPixelClassifier):
             model.inputs,
             model.outputs,
             givens={K.learning_phase():np.uint8(0)},
-            allow_input_downcast=True)
+            allow_input_downcast=True,
+            on_unused_input='ignore')
         self.models[key] = self.function
         self.model_loaded = True
         
@@ -219,7 +220,7 @@ class KerasClassifier(AbstractPixelClassifier):
                                  time.time() - t0)
             for yi in range(n_y):
                 if yi == n_y - 1:
-                    y0a = image.shape[1] - self.block_size[1]
+                    y0a = max(0, image.shape[1] - self.block_size[1])
                     y1a = image.shape[1]
                 else:
                     y0a = ys[yi] - self.get_y_pad()
@@ -228,7 +229,7 @@ class KerasClassifier(AbstractPixelClassifier):
                 y1b = y1a - self.get_y_pad() * 2
                 for xi in range(n_x):
                     if xi == n_x-1:
-                        x0a = image.shape[2] - self.block_size[2]
+                        x0a = max(0, image.shape[2] - self.block_size[2])
                         x1a = image.shape[2]
                     else:
                         x0a = xs[xi] - self.get_x_pad()

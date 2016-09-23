@@ -110,6 +110,10 @@ class SegmentCCTaskMixin:
 
 class SegmentCC2DRunMixin:    
 
+    sigma = luigi.FloatParameter(
+        default=0.0,
+        description="Smoothing sigma of Gaussian applied prior to segmentation")
+    
     def ariadne_run(self):
         tgts = list(self.input())
         prob_target = tgts[0]
@@ -118,10 +122,14 @@ class SegmentCC2DRunMixin:
         else:
             mask_target = None
         threshold = self.threshold
+        prob = prob_target.imread()
+        if self.sigma > 0:
+            prob = gaussian_filter(prob, (0, self.sigma, self.sigma))
         if self.fg_is_higher:
-            fg = (prob_target.imread() > threshold)
+            fg = (prob > threshold)
         else:
-            fg = (prob_target.imread() < threshold)
+            fg = (prob < threshold)
+        del prob
         if mask_target is not None:
             fg = fg & mask_target.imread()
             
@@ -148,7 +156,14 @@ class SegmentCC2DTask(SegmentCCTaskMixin,
     '''
 
 class SegmentCC3DRunMixin:    
-
+    xy_sigma = luigi.FloatParameter(
+        default=0.0,
+        description="Smooothing sigma in the x and y direction "
+                    "applied prior to thresholding")
+    z_sigma = luigi.FloatParameter(
+        default=0.0,
+        description="Smoothing sigma applied in the z direction")
+    
     def ariadne_run(self):
         tgts = list(self.input())
         prob_target = tgts[0]
@@ -157,10 +172,15 @@ class SegmentCC3DRunMixin:
         else:
             mask_target = None
         threshold = self.threshold
+        prob = prob_target.imread()
+        if self.xy_sigma > 0 or self.z_sigma > 0:
+            prob = gaussian_filter(
+                prob, sigma=(self.z_sigma, self.xy_sigma, self.xy_sigma))
         if self.fg_is_higher:
-            fg = (prob_target.imread() > threshold)
+            fg = (prob > threshold)
         else:
-            fg = (prob_target.imread() < threshold)
+            fg = (prob < threshold)
+        del prob
         if mask_target is not None:
             fg = fg & mask_target.imread()
         labels, count = label(fg)
