@@ -5,6 +5,7 @@ the executable's location.
 '''
 
 from cv2 import imread, imwrite
+import h5py
 import luigi
 import numpy as np
 import os
@@ -12,6 +13,7 @@ import subprocess
 import tempfile
 
 from ..parameters import VolumeParameter, DatasetLocationParameter
+from ..parameters import MultiDatasetLocationParameter
 from ..targets.factory import TargetFactory
 from utilities import RequiresMixin, RunMixin, CILKCPUMixin
 
@@ -22,6 +24,10 @@ class NeuroproofTaskMixin:
     prob_location = DatasetLocationParameter(
         description="Location of the membrane probability dataset. "
         "Note: the probabilities can't be sharded.")
+    additional_locations = MultiDatasetLocationParameter(
+        default=[],
+        description="Locations of additional probability maps "
+        "to aid Neuroproof")
     input_seg_location = DatasetLocationParameter(
         description="Location of the input segmentation dataset. "
         "Note: the segmentation can't be sharded.")
@@ -34,6 +40,8 @@ class NeuroproofTaskMixin:
         yield tf.get_volume_target(self.prob_location, self.volume)
         yield tf.get_volume_target(self.input_seg_location, 
                                    self.volume)
+        for location in self.additional_locations:
+            yield tf.get_volume_target(location, self.volume)
     
     def output(self):
         '''Return the output segmentation'''
@@ -61,16 +69,13 @@ class NeuroproofRunMixin:
         # classifier-file: path to either the .xml or .h5 agglomeration
         #                  classifier
         #
-        prob_volume, seg_volume = list(self.input())
+        inputs = self.input()
+        prob_volume = inputs.next()
+        seg_volume = inputs.next()
+        additional_maps = list(inputs)
         #
-        # This neuroproof takes color segmentation files as a stack of .PNG
-        # files in a single directory. The .png files are in color with the
-        # uppermost 8 bits of a 24-bit integer in the blue channel,
-        # the middle 8 bits in the green channel and the lower 8 bits
-        # in the red channel.
-        #
-        # For utmost safety, we read it into core and write it back out to
-        # a temporary directory.
+        # Write out an HDF5 file with the probabilities. Write others
+        # as .png files.
         #
         prob_ds = prob_volume.imread()
         seg_ds = seg_volume.imread()
@@ -79,6 +84,18 @@ class NeuroproofRunMixin:
         output_seg_tempdir = tempfile.mkdtemp()
         output_seg_file = os.path.join(output_seg_tempdir, "neuroproof")
         try:
+            prob_volume = prob_ds.astype(np.float32) / 255.
+            prob_volume = [prob_volume, prob_volume]
+            for tgt in additional_maps:
+                prob_volume.append(tgt.imread().astype(np.float32) / 255.)
+            prob_volume = np.array(prob_volume)
+            prob_volume = prob_volume.transpose(3, 2, 1, 0)
+            
+            probs_path = os.path.join(prob_tempdir, "probs.h5")
+            with h5py.File(probs_path, "w") as fd:
+                fd.create_dataset("volume/predictions", data=prob_volume)
+            del prob_volume
+                
             for z in range(prob_ds.shape[0]):
                 path = os.path.join(prob_tempdir, "%04d.png" % z)
                 plane = prob_ds[z]
@@ -93,7 +110,7 @@ class NeuroproofRunMixin:
             args = [self.neuroproof,
                     "--output-file=%s" % output_seg_file,
                     input_seg_tempdir,
-                    prob_tempdir,
+                    probs_path,
                     self.classifier_filename]
             #
             # Inject the custom LD_LIBRARY_PATH into the subprocess environment
@@ -109,7 +126,7 @@ class NeuroproofRunMixin:
             #
             # Do the dirty deed...
             #
-            subprocess.check_call(args, env=env)
+            subprocess.check_call(args, env=env, close_fds=True)
             #
             # Read the result and write into the volume
             #

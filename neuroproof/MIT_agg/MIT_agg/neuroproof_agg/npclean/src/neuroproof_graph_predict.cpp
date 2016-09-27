@@ -172,12 +172,21 @@ void run_prediction(PredictOptions& options)
     
     printf("-- Read dirs\n");
     
-    get_dir_files(options.prediction_filename, prob_input_files);
+    size_t ext_pos = options.prediction_filename.find_last_of('.');
+    bool is_hdf5 = false;
+    if (ext_pos != string::npos) {
+	std:string ext = options.prediction_filename.substr(ext_pos);
+	is_hdf5 = ((ext == ".hdf5") || (ext == ".h5"));
+    }
+    vector<VolumeProbPtr> prob_list;
+    if (is_hdf5) {
+	prob_list = VolumeProb::create_volume_array(
+	    options.prediction_filename.c_str(), PRED_DATASET_NAME);
+    } else {
+	get_dir_files(options.prediction_filename, prob_input_files);
+	prob_list = VolumeProb::create_volume_from_images(prob_input_files);
+    }    
     get_dir_files(options.watershed_filename, ws_input_files);
-    
-    vector<VolumeProbPtr> prob_list = cilk_spawn VolumeProb::create_volume_from_images(prob_input_files);
-    
-    //VolumeLabelPtr initial_labels = cilk_spawn VolumeLabelData::create_volume_from_images(ws_input_files);
     VolumeLabelPtr initial_labels = cilk_spawn VolumeLabelData::create_volume_from_images_seg(ws_input_files);
     
     //ProfilerStart("profile.data");

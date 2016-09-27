@@ -160,6 +160,28 @@ class MultiVolumeParameter(luigi.Parameter):
                                         dataset_name=location.dataset_name,
                                         pattern=location.pattern)))
         return json.dumps(l)
+
+class MultiDatasetLocationParameter(luigi.Parameter):
+    '''A parameter representing an indeterminate number of datasets
+    
+    This is useful when aggregating a number of datasets that are defined
+    over the same volume.
+    '''
+    def parse(self, x):
+        l = json.loads(x)
+        result = []
+        for d in l:
+            result.append(DatasetLocation(roots=d["roots"],
+                                          dataset_name=d["dataset_name"],
+                                          pattern=d["pattern"]))
+    
+    def serialize(self, x):
+        result = []
+        for dataset_location in x:
+            result.append(dict(roots=dataset_location.roots,
+                               dataset_name=dataset_location.dataset_name,
+                               pattern=dataset_location.pattern))
+        return json.dumps(result)
     
 all = [Volume, VolumeParameter, DatasetLocation, DatasetLocationParameter,
        MultiVolumeParameter]

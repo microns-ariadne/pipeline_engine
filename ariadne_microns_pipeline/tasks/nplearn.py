@@ -12,6 +12,7 @@ import tempfile
 from .utilities import RequiresMixin, RunMixin, CILKCPUMixin
 from ..targets.factory import TargetFactory
 from ..parameters import VolumeParameter, DatasetLocationParameter
+from ..parameters import MultiDatasetLocationParameter
 
 
 class StrategyEnum(enum.Enum):
@@ -30,6 +31,9 @@ class NeuroproofLearnTaskMixin:
         description="Volume of the ground truth, probabilities & segmentation")
     prob_location = DatasetLocationParameter(
         description="Location of the probability prediction volume")
+    additional_locations = MultiDatasetLocationParameter(
+        default=[],
+        description="Additional probability map locations for Neuroproof")
     seg_location = DatasetLocationParameter(
         description="Location of the pipeline's watershed segmentation")
     gt_location = DatasetLocationParameter(
@@ -47,6 +51,9 @@ class NeuroproofLearnTaskMixin:
                                    volume=self.volume)
         yield tf.get_volume_target(location=self.gt_location,
                                    volume=self.volume)
+        for location in self.additional_locations:
+            yield tf.get_volume_target(location=location,
+                                       volume=self.volume)
     
     def output(self):
         return luigi.LocalTarget(self.output_location)
@@ -83,7 +90,11 @@ class NeuroproofLearnRunMixin:
         #
         # gt.h5 contains a stack dataset
         #
-        prob_target, seg_target, gt_target = list(self.input())
+        inputs = self.inputs()
+        prob_target = inputs.next()
+        seg_target = inputs.next()
+        gt_target = inputs.next()
+        additional_map_targets = list(inputs)
         task_name = self.task_name()
         tempdir = tempfile.mkdtemp()
         rh_logger.logger.report_event(
@@ -94,7 +105,10 @@ class NeuroproofLearnRunMixin:
             gt_path = os.path.join(tempdir, "gt.h5")
             
             prob_volume = prob_target.imread().astype(np.float32) / 255.
-            prob_volume = np.array([prob_volume, prob_volume])
+            prob_volume = [prob_volume, prob_volume]
+            for tgt in additional_map_targets:
+                prob_volume.append(tgt.imread().astype(np.float32) / 255.)
+            prob_volume = np.array(prob_volume)
             prob_volume = prob_volume.transpose(3, 2, 1, 0)
             rh_logger.logger.report_event("%s: writing pred.h5" % task_name)
             with h5py.File(pred_path, "w") as fd:
