@@ -11,7 +11,10 @@ from .classify import ClassifyTask
 from .connected_components import AllConnectedComponentsTask
 from .connected_components import ConnectedComponentsTask
 from .connected_components import VolumeRelabelingTask
+from .connect_synapses import ConnectSynapsesTask
+from .filter import FilterSegmentationTask
 from .find_seeds import FindSeedsTask, Dimensionality, SeedsMethodEnum
+from .find_synapses import FindSynapsesTask
 from .json_to_csv_task import JSONToCSVTask
 from .mask import MaskBorderTask
 from .neuroproof import NeuroproofTask
@@ -211,6 +214,21 @@ class AMTaskFactory(object):
                              use_min_contact=use_min_contact,
                              contact_threshold=contact_threshold)
     
+    def gen_filter_task(self, volume, input_location, output_location,
+                        min_area):
+        '''Generate a task that filters small objects
+        
+        :param volume: the volume of the segmentation
+        :param input_location: the location of the input segmentation
+        :param output_location: the location for the output segmentation
+        :param min_area: the minimum allowable area for a segment
+        '''
+        return FilterSegmentationTask(
+            volume=volume,
+            input_location=input_location,
+            output_location=output_location,
+            min_area=min_area)
+    
     def gen_skeletonize_task(
         self, volume, segmentation_location, skeleton_location):
         '''Generate a skeletonize task
@@ -227,7 +245,74 @@ class AMTaskFactory(object):
             volume=volume,
             segmentation_location=segmentation_location,
             skeleton_location=skeleton_location)
+    
+    def gen_find_synapses_task(
+        self, volume, syn_location, neuron_segmentation, output_location,
+        erosion_xy, erosion_z, sigma_xy, sigma_z, threshold,
+        min_size_2d, max_size_2d, min_size_3d, min_slice):
+        '''Generate a task to segment synapses
         
+        :param volume: the volume to segment
+        :param syn_location: the location of the synapse prob map
+        :param neuron_location: the location of the neuron prob map
+        :param output_location: the location for the output segmentation
+        :param erosion_xy: how much to erode neurons in the x/y direction
+        :param erosion_z: how much to erode neurons in the z direction
+        :param sigma_xy: The sigma for the smoothing gaussian in the x and y
+                         directions
+        :param sigma_z: The sigma for the smoothing Gaussian in the z direction
+        :param threshold: The probability threshold above which, a voxel is
+                          deemed to be part of a synapse.
+        :param min_size_2d: discard any 2d segments with area less than this.
+        :param max_size_2d: discard any 2d segments with area greater than this.
+        :param min_size_3d: discard any 3d segments with area less than this.
+        :param min_slice: discard any 3d segments whose z-extent is lt this.
+        '''
+        return FindSynapsesTask(volume=volume,
+                                input_location=syn_location,
+                                neuron_segmentation=neuron_segmentation,
+                                output_location=output_location,
+                                erosion_xy=erosion_xy,
+                                erosion_z= erosion_z,
+                                sigma_xy=sigma_xy,
+                                sigma_z=sigma_z,
+                                threshold=threshold,
+                                min_size_2d=min_size_2d,
+                                max_size_2d=max_size_2d,
+                                min_size_3d=min_size_3d,
+                                min_slice=min_slice)
+    
+    def gen_connect_synapses_task(
+        self, volume, synapse_location, neuron_location, output_location,
+        xy_dilation, z_dilation, min_contact):
+        '''Generate a task to connect synapses to neurons
+        
+        :param volume: the volume containing the synapses and neurons
+        :param synapse_location: the location of the synapse segmentation
+                                 dataset
+        :param neuron_location: the location of the neuron segmentation dataset
+        :param output_location: the location for the json file containing
+                                the connections
+        :param xy_dilation: how much to dilate the synapses in the X and Y
+                            directions before overlapping with neurons
+        :param z_dilation: how much to dilate in the Z direction
+        :param min_contact: do not connect if fewer than this many overlapping
+                            voxels
+        
+        The structure of the output is a dictionary of lists. The lists
+        are columns of labels and the rows are two neuron labels that
+        match one segment label.
+        
+        The dictionary keys are "neuron_1", "neuron_2", "synapse"
+        '''
+        return ConnectSynapsesTask(
+            volume=volume,
+            synapse_seg_location=synapse_location,
+            neuron_seg_location=neuron_location,
+            output_location=output_location,
+            xy_dilation=xy_dilation,
+            z_dilation=z_dilation,
+            min_contact=min_contact)
 
     def __get_neuroproof_config(self, program):
         '''Return the location of the given program and its LD_LIBRARY_PATH

@@ -30,7 +30,7 @@ class FindSynapsesTaskMixin:
             volume = self.volume)
     
     def output(self):
-        yield TargetFactory().get_volume_target(
+        return TargetFactory().get_volume_target(
             location = self.output_location,
             volume = self.volume)
     
@@ -79,7 +79,7 @@ class FindSynapsesRunMixin:
                          self.erosion_xy * 2 + 1,
                          self.erosion_xy * 2 + 1), bool)
         erode_segmentation(neuron_segmentation, strel, in_place=True)
-        volume[neuron_segmentation == 0] = 0
+        volume[neuron_segmentation != 0] = 0
         #
         # Perform the segmentation on the synapse probability map
         #

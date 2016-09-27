@@ -1,5 +1,12 @@
 """ipcecho.py echo on the IPC broker/worker network
 
+Baby test of the IPC mechanism:
+
+microns-ipc-echo "Hello world"
+
+or
+
+microns-ipc-echo --fail "Hello world"
 """
 
 import argparse
@@ -19,11 +26,17 @@ class Work:
         rh_logger.logger.report_event(self.phrase)
         return self.phrase
 
+class Fail:
+    def __call__(self):
+        raise Exception("I *&^%ed up")
+
 def process_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--address",
                         default="tcp://localhost:7051",
                         help="Network address of the broker")
+    parser.add_argument("--fail", default=False, action="store_true",
+                        help="Throw an exeption instead of echoing")
     parser.add_argument("phrase",
                         help="Phrase to echo")
     args = parser.parse_args()
@@ -38,7 +51,10 @@ def main():
     socket.connect(args.address)
     poll = zmq.Poller()
     poll.register(socket, zmq.POLLIN)
-    work = Work(args.phrase)
+    if args.fail:
+        work = Fail()
+    else:
+        work = Work(args.phrase)
     socket.send(cPickle.dumps(work))
     while True:
         socks = dict(poll.poll(timeout=10))

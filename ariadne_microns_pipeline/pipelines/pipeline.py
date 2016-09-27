@@ -8,6 +8,7 @@ from ..targets.classifier_target import PixelClassifierTarget
 from ..targets.hdf5_target import HDF5FileTarget
 from ..targets.butterfly_target import ButterflyChannelTarget
 from ..parameters import Volume, VolumeParameter, DatasetLocation
+from ..parameters import EMPTY_DATASET_LOCATION
 import numpy as np
 import os
 import tempfile
@@ -15,6 +16,12 @@ import sys
 
 '''The name of the segmentation dataset within the HDF5 file'''
 SEG_DATASET = "segmentation"
+
+'''The name of the synapse segmentation dataset'''
+SYN_SEG_DATASET = "synapse-segmentation"
+
+'''The name of the filtered (by area) synapse segmentation dataset'''
+FILTERED_SYN_SEG_DATASET = "filtered-synapse-segmentation"
 
 '''The name of the 2D resegmentation of the 3d segmentation'''
 RESEG_DATASET = "resegmentation"
@@ -30,6 +37,9 @@ IMG_DATASET = "image"
 
 '''The name of the membrane probability datasets'''
 MEMBRANE_DATASET = "membrane"
+
+'''The name of the synapse probability datasets'''
+SYNAPSE_DATASET = "synapse"
 
 '''The name of the neuroproofed segmentation datasets'''
 NP_DATASET = "neuroproof"
@@ -60,8 +70,6 @@ CONNECTED_COMPONENTS_PATTERN = "connected-components_{direction}.json"
 class PipelineTaskMixin:
     '''The Ariadne-Microns pipeline'''
     
-    #output_path=luigi.Parameter(
-    #    description="The path to the HDF5 file holding the results")
     experiment = luigi.Parameter(
         description="The Butterfly experiment that produced the dataset")
     sample = luigi.Parameter(
@@ -115,6 +123,9 @@ class PipelineTaskMixin:
     membrane_class_name = luigi.Parameter(
         description="The name of the pixel classifier's membrane class",
         default="membrane")
+    synapse_class_name = luigi.Parameter(
+        description="The name of the pixel classifier's synapse class",
+        default="synapse")
     close_width = luigi.IntParameter(
         description="The width of the structuring element used for closing "
         "when computing the border masks.",
@@ -163,6 +174,63 @@ class PipelineTaskMixin:
         default="/dev/null",
         description="The location of the all-connected-components connectivity"
                     " .json file. Default = do not generate it.")
+    min_percent_connected = luigi.FloatParameter(
+         default=75.0,
+         description="Minimum overlap required to join segments across blocks")
+    #
+    # NB: minimum synapse area in AC3 was 561, median was ~5000
+    #
+    min_synapse_area = luigi.IntParameter(
+        description="Minimum area for a synapse",
+        default=250)
+    synapse_xy_erosion = luigi.IntParameter(
+        default=4,
+        description = "# of pixels to erode the neuron segmentation in the "
+                      "X and Y direction prior to synapse segmentation.")
+    synapse_z_erosion = luigi.IntParameter(
+        default=1,
+        description = "# of pixels to erode the neuron segmentation in the "
+                      "Z direction prior to synapse segmentation.")
+    synapse_xy_sigma = luigi.FloatParameter(
+        description="Sigma for smoothing Gaussian for synapse segmentation "
+                     "in the x and y directions.",
+        default=3)
+    synapse_z_sigma = luigi.FloatParameter(
+        description="Sigma for smoothing Gaussian for symapse segmentation "
+                     "in the z direction.",
+        default=.5)
+    synapse_min_size_2d = luigi.IntParameter(
+        default=25,
+        description="Remove isolated synapse foreground in a plane if "
+        "less than this # of pixels")
+    synapse_max_size_2d = luigi.IntParameter(
+        default=10000,
+        description = "Remove large patches of mislabeled synapse in a plane "
+        "that have an area greater than this")
+    synapse_min_size_3d = luigi.IntParameter(
+        default=500,
+        description = "Minimum size in voxels of a synapse")
+    min_synapse_depth = luigi.IntParameter(
+        default=3,
+        description="Minimum acceptable size of a synapse in the Z direction")
+    synapse_threshold = luigi.FloatParameter(
+        description="Threshold for synapse voxels vs background voxels",
+        default=128.)
+    #
+    # parameters for synapse connection
+    #
+    synapse_xy_dilation = luigi.IntParameter(
+        description="How much to dilate the synapse segmentation in the "
+                    "x and y direction before matching with neurons.",
+        default=3)
+    synapse_z_dilation = luigi.IntParameter(
+        description="How much to dilate the synapse segmentation in the z "
+                    "direction before matching with neurons.",
+        default=0)
+    min_synapse_neuron_contact = luigi.IntParameter(
+        description="The minimum number of overlapping voxels needed "
+                    "to consider joining neuron to synapse",
+        default=25)
 
     def get_dirs(self, x, y, z):
         '''Return a directory suited for storing a file with the given offset
@@ -266,6 +334,8 @@ class PipelineTaskMixin:
         Take each butterfly task and run a pixel classifier on its output.
         '''
         self.classifier_tasks = np.zeros((self.n_z, self.n_y, self.n_x), object)
+        self.synapse_classifier_tasks = np.zeros(
+            (self.n_z, self.n_y, self.n_x), object)
         for zi in range(self.n_z):
             for yi in range(self.n_y):
                 for xi in range(self.n_x):
@@ -278,7 +348,8 @@ class PipelineTaskMixin:
                     paths = self.get_dirs(self.xs[xi], self.ys[yi], self.zs[zi])
                     ctask = self.factory.gen_classify_task(
                         paths=paths,
-                        datasets={self.membrane_class_name: MEMBRANE_DATASET},
+                        datasets={self.membrane_class_name: MEMBRANE_DATASET,
+                                  self.synapse_class_name: SYNAPSE_DATASET},
                         pattern=self.get_pattern(MEMBRANE_DATASET),
                         img_volume=btask.volume,
                         img_location=img_location,
@@ -292,6 +363,13 @@ class PipelineTaskMixin:
                         classify_task=ctask,
                         dataset_name=MEMBRANE_DATASET)
                     self.classifier_tasks[zi, yi, xi] = shim_task
+                    #
+                    # Create a shim that returns the synapse volume
+                    #
+                    shim_task = ClassifyShimTask.make_shim(
+                        classify_task=ctask,
+                        dataset_name=SYNAPSE_DATASET)
+                    self.synapse_classifier_tasks[zi, yi, xi] = shim_task
     
     def generate_border_mask_tasks(self):
         '''Create a border mask for each block'''
@@ -797,6 +875,14 @@ class PipelineTaskMixin:
                            self.y_connectivity_graph_tasks,
                            self.z_connectivity_graph_tasks):
             input_tasks += task_array.flatten().tolist()
+        #
+        # Apply parameterizations common to x, y and z
+        #
+        for task in input_tasks:
+            task.min_overlap_percent = self.min_percent_connected
+        #
+        # Build the all-connected-components task
+        #
         input_locations = [task.output().path for task in input_tasks]
         self.all_connected_components_task = \
             self.factory.gen_all_connected_components_task(
@@ -946,6 +1032,74 @@ class PipelineTaskMixin:
                         task.set_requirement(np_task)
                         task.set_requirement(border_task)
                         self.z_connectivity_graph_tasks[zi, yi, xi, idx] = task
+    
+    def generate_synapse_segmentation_tasks(self):
+        '''Generate connected-components and filter tasks for synapses
+        
+        '''
+        #
+        # Segment the synapses using connected components on a blurred
+        # probability map, then filter by size
+        #
+        self.synapse_segmentation_tasks = np.zeros(
+            (self.n_z, self.n_y, self.n_x), object)
+        for zi in range(self.n_z):
+            for yi in range(self.n_y):
+                for xi in range(self.n_x):
+                    ctask = self.synapse_classifier_tasks[zi, yi, xi]
+                    nptask = self.np_tasks[zi, yi, xi]
+                    volume = ctask.output().volume
+                    ctask_loc = ctask.output().dataset_location
+                    np_loc = nptask.output().dataset_location
+                    stask_loc = self.get_dataset_location(
+                        volume, SYN_SEG_DATASET)
+                    stask = self.factory.gen_find_synapses_task(
+                        volume=volume,
+                        syn_location=ctask_loc,
+                        neuron_segmentation=np_loc,
+                        output_location=stask_loc,
+                        threshold=self.synapse_threshold,
+                        erosion_xy=self.synapse_xy_erosion,
+                        erosion_z=self.synapse_z_erosion,
+                        sigma_xy=self.synapse_xy_sigma,
+                        sigma_z=self.synapse_z_sigma,
+                        min_size_2d=self.synapse_min_size_2d,
+                        max_size_2d=self.synapse_max_size_2d,
+                        min_size_3d=self.min_synapse_area,
+                        min_slice=self.min_synapse_depth)
+                    stask.set_requirement(ctask)
+                    stask.set_requirement(nptask)
+                    self.synapse_segmentation_tasks[zi, yi, xi] = stask
+    
+    def generate_synapse_connectivity_tasks(self):
+        '''Make tasks that connect neurons to synapses'''
+        self.synapse_connectivity_tasks = np.zeros(
+            (self.n_z, self.n_y, self.n_x), object)
+        for zi in range(self.n_z):
+            for yi in range(self.n_y):
+                for xi in range(self.n_x):
+                    segtask = self.synapse_segmentation_tasks[zi, yi, xi]
+                    volume = segtask.output().volume
+                    syn_location = segtask.output().dataset_location
+                    ntask = self.np_tasks[zi, yi, xi]
+                    neuron_location = ntask.output().dataset_location
+                    output_location = os.path.join(
+                        self.get_dirs(
+                            self.xs[xi], self.ys[yi], self.zs[zi])[0],
+                        "synapse_connectivity.json")
+                    
+                    sctask = self.factory.gen_connect_synapses_task(
+                        volume=volume,
+                        synapse_location=syn_location,
+                        neuron_location=neuron_location,
+                        output_location=output_location,
+                        xy_dilation=self.synapse_xy_dilation,
+                        z_dilation=self.synapse_z_dilation,
+                        min_contact=self.min_synapse_neuron_contact)
+                    sctask.set_requirement(segtask)
+                    sctask.set_requirement(ntask)
+                    self.synapse_connectivity_tasks[zi, yi, xi] = sctask
+                    
 
     def compute_requirements(self):
         '''Compute the requirements for this task'''
@@ -1013,10 +1167,20 @@ class PipelineTaskMixin:
                 rh_logger.logger.report_event("Making skeletonize tasks")
                 self.generate_skeletonize_tasks()
                 #
-                # Step 9: The connectivity graph.
+                # Step 9: Segment the synapses
+                #
+                rh_logger.logger.report_event("Segment synapses")
+                self.generate_synapse_segmentation_tasks()
+                #
+                # Step 10: The connectivity graph.
                 #
                 rh_logger.logger.report_event("Making connectivity graph")
                 self.generate_connectivity_graph_tasks()
+                #
+                # Step 11: Connect synapses to neurites
+                #
+                rh_logger.logger.report_event("Connecting synapses and neurons")
+                self.generate_synapse_connectivity_tasks()
                 #
                 # The requirements:
                 #
@@ -1033,13 +1197,8 @@ class PipelineTaskMixin:
                     self.requirements += self.np_tasks.flatten().tolist()
                 if self.wants_connectivity:
                     self.requirements.append(self.all_connected_components_task)
-                
                 self.requirements += \
-                    self.np_x_border_tasks.flatten().tolist()
-                self.requirements += \
-                    self.np_y_border_tasks.flatten().tolist()
-                self.requirements += \
-                    self.np_z_border_tasks.flatten().tolist()
+                    self.synapse_connectivity_tasks.flatten().tolist()
                 #
                 # (maybe) generate the statistics tasks
                 #

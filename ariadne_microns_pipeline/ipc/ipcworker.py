@@ -103,7 +103,7 @@ def main():
                 except:
                     rh_logger.logger.report_exception()
                     e = sys.exc_info()[1]
-                    frames = [client, "", SP_EXCEPTION, e]
+                    frames = [client, "", SP_EXCEPTION, cPickle.dumps(e)]
                     worker.send_multipart(frames)
         if heartbeat_timeout < time.time():
             heartbeat_misses += 1

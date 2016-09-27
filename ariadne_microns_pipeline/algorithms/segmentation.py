@@ -71,7 +71,7 @@ def segment_vesicle_style(prob,
         z = location[0]
         if z.stop - z.start < min_slice:
             bad[i+1] = True
-    fg[z, bad[l]] = False
+    fg[bad[l]] = False
     #
     # Do 18-connected connected-components
     #
