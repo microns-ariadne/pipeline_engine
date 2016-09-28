@@ -202,6 +202,12 @@ class KerasClassifier(AbstractPixelClassifier):
         n_x = 1 + int((x1-x0 - 1) / output_block_size[2])
         xs = np.linspace(x0, x1, n_x+1).astype(int)
         self.out_image = np.zeros((z1-z0, y1 - y0, x1 - x0), np.uint8)
+        t0 = time.time()
+        norm_img = [
+            KerasClassifier.normalize_image(image[zi])
+            for zi in range(image.shape[0])]
+        logger.report_metric("keras_cpu_block_processing_time",
+                             time.time() - t0)
         #
         # Classify each block
         #
@@ -214,10 +220,6 @@ class KerasClassifier(AbstractPixelClassifier):
                 z1a = z0a + self.block_size[0]
             z0b = z0a
             z1b = z1a - self.get_z_pad() * 2
-            t0 = time.time()
-            norm_img = KerasClassifier.normalize_image(image[zi])
-            logger.report_metric("keras_cpu_block_processing_time",
-                                 time.time() - t0)
             for yi in range(n_y):
                 if yi == n_y - 1:
                     y0a = max(0, image.shape[1] - self.block_size[1])
@@ -236,8 +238,12 @@ class KerasClassifier(AbstractPixelClassifier):
                         x1a = x0a + self.block_size[2]
                     x0b = x0a
                     x1b = x1a - self.get_x_pad() * 2
-                    block = norm_img[y0a:y1a, x0a:x1a]
-                    block.shape = [1, 1] + list(block.shape)
+                    block = np.array([norm_img[z][y0a:y1a, x0a:x1a]
+                                      for z in range(z0a, z1a)])
+                    if block.shape[0] == 1:
+                        block.shape = [1, 1, block.shape[-2], block.shape[-1]]
+                    else:
+                        block.shape = [1, 1] + list(block.shape)
                     self.pred_queue.put((block, x0b, x1b, y0b, y1b, z0b, z1b))
         self.pred_queue.put([None] * 7)
     

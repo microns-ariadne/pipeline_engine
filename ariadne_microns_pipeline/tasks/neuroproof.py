@@ -96,10 +96,6 @@ class NeuroproofRunMixin:
                 fd.create_dataset("volume/predictions", data=prob_volume)
             del prob_volume
                 
-            for z in range(prob_ds.shape[0]):
-                path = os.path.join(prob_tempdir, "%04d.png" % z)
-                plane = prob_ds[z]
-                imwrite(path, plane)
             for z in range(seg_ds.shape[0]):
                 path = os.path.join(input_seg_tempdir, "%04d.png" % z)
                 plane = np.dstack((seg_ds[z] >> 16, 

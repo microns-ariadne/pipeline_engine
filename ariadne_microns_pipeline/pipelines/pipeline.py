@@ -126,6 +126,10 @@ class PipelineTaskMixin:
     synapse_class_name = luigi.Parameter(
         description="The name of the pixel classifier's synapse class",
         default="synapse")
+    additional_neuroproof_channels = luigi.ListParameter(
+        default=[],
+        description="The names of additional classifier classes "
+                    "that are fed into Neuroproof as channels")
     close_width = luigi.IntParameter(
         description="The width of the structuring element used for closing "
         "when computing the border masks.",
@@ -336,6 +340,14 @@ class PipelineTaskMixin:
         self.classifier_tasks = np.zeros((self.n_z, self.n_y, self.n_x), object)
         self.synapse_classifier_tasks = np.zeros(
             (self.n_z, self.n_y, self.n_x), object)
+        self.additional_classifier_tasks = dict(
+            [(k, np.zeros((self.n_z, self.n_y, self.n_x), object))
+             for k in self.additional_neuroproof_channels])
+        datasets={self.membrane_class_name: MEMBRANE_DATASET,
+                  self.synapse_class_name: SYNAPSE_DATASET}
+        for channel in self.additional_neuroproof_channels:
+            if channel != SYNAPSE_DATASET:
+                datasets[channel] = channel
         for zi in range(self.n_z):
             for yi in range(self.n_y):
                 for xi in range(self.n_x):
@@ -348,8 +360,7 @@ class PipelineTaskMixin:
                     paths = self.get_dirs(self.xs[xi], self.ys[yi], self.zs[zi])
                     ctask = self.factory.gen_classify_task(
                         paths=paths,
-                        datasets={self.membrane_class_name: MEMBRANE_DATASET,
-                                  self.synapse_class_name: SYNAPSE_DATASET},
+                        datasets=datasets,
                         pattern=self.get_pattern(MEMBRANE_DATASET),
                         img_volume=btask.volume,
                         img_location=img_location,
@@ -370,6 +381,15 @@ class PipelineTaskMixin:
                         classify_task=ctask,
                         dataset_name=SYNAPSE_DATASET)
                     self.synapse_classifier_tasks[zi, yi, xi] = shim_task
+                    if SYNAPSE_DATASET in self.additional_neuroproof_channels:
+                        t = self.additional_classifier_tasks[SYNAPSE_DATASET]
+                        t[zi, yi, xi] = shim_task
+                    for name in self.additional_neuroproof_channels:
+                        shim_task = ClassifyShimTask.make_shim(
+                            classify_task=ctask,
+                            dataset_name=name)
+                        self.additional_classifier_tasks[name][zi, yi, xi] = \
+                            shim_task
     
     def generate_border_mask_tasks(self):
         '''Create a border mask for each block'''
@@ -583,17 +603,31 @@ class PipelineTaskMixin:
             np.zeros((self.n_z, self.n_y, self.n_x-1), object)
         self.x_prob_borders = \
             np.zeros((self.n_z, self.n_y, self.n_x-1), object)
+        self.x_additional_borders = \
+            dict([(k, np.zeros((self.n_z, self.n_y, self.n_x-1), object))
+                  for k in self.additional_neuroproof_channels])
         #
         # The task sets are composed of the input task arrays
         # the output border task arrays and the dataset name of
         # the input tasks
         #
-        task_sets = ((self.classifier_tasks,
+        task_sets = [(self.classifier_tasks,
                       self.x_prob_borders,
                       MEMBRANE_DATASET),
                      (self.segmentation_tasks,
                       self.x_seg_borders,
-                      SEG_DATASET))
+                      SEG_DATASET)]
+        if SYNAPSE_DATASET in self.additional_neuroproof_channels:
+            task_sets.append((
+                self.synapse_classifier_tasks,
+                self.x_additional_borders[SYNAPSE_DATASET],
+                SYNAPSE_DATASET))
+        for i, channel in enumerate(self.additional_neuroproof_channels):
+            if channel != SYNAPSE_DATASET:
+                task_sets.append((
+                   self.additional_classifier_tasks[channel],
+                   self.x_additional_borders[channel],
+                   channel))
         
         for zi in range(self.n_z):
             for yi in range(self.n_y):
@@ -616,17 +650,31 @@ class PipelineTaskMixin:
             np.zeros((self.n_z, self.n_y-1, self.n_x), object)
         self.y_prob_borders = \
             np.zeros((self.n_z, self.n_y-1, self.n_x), object)
+        self.y_additional_borders = \
+            dict([(k, np.zeros((self.n_z, self.n_y-1, self.n_x), object))
+                  for k in self.additional_neuroproof_channels])
         #
         # The task sets are composed of the input task arrays
         # the output border task arrays and the dataset name of
         # the input tasks
         #
-        task_sets = ((self.classifier_tasks,
+        task_sets = [(self.classifier_tasks,
                       self.y_prob_borders,
                       MEMBRANE_DATASET),
                      (self.segmentation_tasks,
                       self.y_seg_borders,
-                      SEG_DATASET))
+                      SEG_DATASET)]
+        if SYNAPSE_DATASET in self.additional_neuroproof_channels:
+            task_sets.append((
+                self.synapse_classifier_tasks,
+                self.y_additional_borders[SYNAPSE_DATASET],
+                SYNAPSE_DATASET))
+        for i, channel in enumerate(self.additional_neuroproof_channels):
+            if channel != SYNAPSE_DATASET:
+                task_sets.append((
+                   self.additional_classifier_tasks[channel],
+                   self.y_additional_borders[channel],
+                   channel))
         
         for zi in range(self.n_z):
             for ytop in range(self.n_y-1):
@@ -649,17 +697,31 @@ class PipelineTaskMixin:
             np.zeros((self.n_z-1, self.n_y, self.n_x), object)
         self.z_prob_borders = \
             np.zeros((self.n_z-1, self.n_y, self.n_x), object)
+        self.z_additional_borders = \
+            dict([(k, np.zeros((self.n_z-1, self.n_y, self.n_x), object))
+                  for k in self.additional_neuroproof_channels])
         #
         # The task sets are composed of the input task arrays
         # the output border task arrays and the dataset name of
         # the input tasks
         #
-        task_sets = ((self.classifier_tasks,
+        task_sets = [(self.classifier_tasks,
                       self.z_prob_borders,
                       MEMBRANE_DATASET),
                      (self.segmentation_tasks,
                       self.z_seg_borders,
-                      SEG_DATASET))
+                      SEG_DATASET)]
+        if SYNAPSE_DATASET in self.additional_neuroproof_channels:
+            task_sets.append((
+                self.synapse_classifier_tasks,
+                self.z_additional_borders[SYNAPSE_DATASET],
+                SYNAPSE_DATASET))
+        for i, channel in enumerate(self.additional_neuroproof_channels):
+            if channel != SYNAPSE_DATASET:
+                task_sets.append((
+                   self.additional_classifier_tasks[channel],
+                   self.z_additional_borders[channel],
+                   channel))
         
         for zabove in range(self.n_z-1):
             zbelow = zabove + 1
@@ -691,6 +753,7 @@ class PipelineTaskMixin:
         #
         # The task sets are composed of
         # classifier tasks
+        # additional classifier tasks
         # segmentation tasks
         # output tasks
         # output dataset name
@@ -699,28 +762,32 @@ class PipelineTaskMixin:
         # 
         task_sets = (
             (self.classifier_tasks,
+             self.additional_classifier_tasks,
              self.segmentation_tasks,
              self.np_tasks,
              NP_DATASET,
              False),
             (self.x_prob_borders,
+             self.x_additional_borders,
              self.x_seg_borders,
              self.np_x_border_tasks,
              BORDER_DATASET_PATTERN.format(parent=NP_DATASET, direction="x"),
              True),
             (self.y_prob_borders,
+             self.y_additional_borders,
              self.y_seg_borders,
              self.np_y_border_tasks,
              BORDER_DATASET_PATTERN.format(parent=NP_DATASET, direction="y"),
              True),
             (self.z_prob_borders,
+             self.z_additional_borders,
              self.z_seg_borders,
              self.np_z_border_tasks,
              BORDER_DATASET_PATTERN.format(parent=NP_DATASET, direction="z"),
              True)
         )
-        for classifier_tasks, seg_tasks, np_tasks, dataset_name, is_border\
-            in task_sets:
+        for classifier_tasks, additional_classifier_tasks, seg_tasks, np_tasks, \
+            dataset_name, is_border in task_sets:
 
             for zi in range(classifier_tasks.shape[0]):
                 for yi in range(classifier_tasks.shape[1]):
@@ -736,8 +803,16 @@ class PipelineTaskMixin:
                             input_seg_location=seg_task.output_location,
                             output_seg_location=output_seg_location,
                             classifier_filename=self.neuroproof_classifier_path)
+                        additional_tasks = [ 
+                            additional_classifier_tasks[k][zi, yi, xi]
+                            for k in self.additional_neuroproof_channels]
+                        additional_locations = [
+                            task.output().dataset_location for task in
+                            additional_tasks]
+                        np_task.additional_locations = additional_locations
                         np_task.set_requirement(classifier_task)
                         np_task.set_requirement(seg_task)
+                        map(np_task.set_requirement, additional_tasks)
                         np_tasks[zi, yi, xi] = np_task
     
     def generate_gt_cutouts(self):

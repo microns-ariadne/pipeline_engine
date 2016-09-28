@@ -90,7 +90,7 @@ class NeuroproofLearnRunMixin:
         #
         # gt.h5 contains a stack dataset
         #
-        inputs = self.inputs()
+        inputs = self.input()
         prob_target = inputs.next()
         seg_target = inputs.next()
         gt_target = inputs.next()
@@ -116,11 +116,9 @@ class NeuroproofLearnRunMixin:
                 del prob_volume
             with h5py.File(watershed_path, "w") as fd:
                 seg_volume = seg_target.imread().astype(np.int32)
-                #seg_volume = seg_volume.transpose(2, 1, 0)
                 fd.create_dataset("stack", data=seg_volume)
                 del seg_volume
             gt_volume = gt_target.imread().astype(np.int32)
-            #gt_volume = gt_volume.transpose(2, 1, 0)
             with h5py.File(gt_path, "w") as fd:
                 fd.create_dataset("stack", data=gt_volume)
             del gt_volume

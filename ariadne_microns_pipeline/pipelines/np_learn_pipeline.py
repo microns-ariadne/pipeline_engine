@@ -89,6 +89,10 @@ class NeuroproofLearnPipelineTaskMixin:
     # The neuroproof classifier
     #
     #########
+    additional_class_names = luigi.ListParameter(
+        default=[],
+        description="The names of additional classifier classes to be used "
+                    "as additional context in Neuroproof.")
     output_location = luigi.Parameter(
         description="Location for the classifier file. Use an .xml extension "
         "to use the OpenCV random forest classifier. Use an .h5 extension "
@@ -304,6 +308,9 @@ class NeuroproofLearnPipelineTaskMixin:
                 rh_logger.logger.report_event(
                     "Making the membrane reblocking task")
                 self.generate_membrane_block_task()
+                rh_logger.logger.report_event(
+                    "Making additional class reblocking tasks")
+                self.generate_additional_block_tasks()
                 #
                 # Step 10: Download the ground truth
                 #
@@ -416,6 +423,13 @@ class NeuroproofLearnPipelineTaskMixin:
         Take each butterfly task and run a pixel classifier on its output.
         '''
         self.classifier_tasks = np.zeros((self.n_z, self.n_y, self.n_x), object)
+        self.additional_class_tasks = np.zeros(
+            (self.n_z, self.n_y, self.n_x, len(self.additional_class_names)),
+            object)
+        datasets = {
+            self.membrane_class_name: MEMBRANE_DATASET}
+        for class_name in self.additional_class_names:
+            datasets[class_name] = class_name
         for zi in range(self.n_z):
             for yi in range(self.n_y):
                 for xi in range(self.n_x):
@@ -428,7 +442,7 @@ class NeuroproofLearnPipelineTaskMixin:
                     paths = self.get_dirs(self.xs[xi], self.ys[yi], self.zs[zi])
                     ctask = self.factory.gen_classify_task(
                         paths=paths,
-                        datasets={self.membrane_class_name: MEMBRANE_DATASET},
+                        datasets=datasets,
                         pattern=self.get_pattern(MEMBRANE_DATASET),
                         img_volume=btask.volume,
                         img_location=img_location,
@@ -442,6 +456,12 @@ class NeuroproofLearnPipelineTaskMixin:
                         classify_task=ctask,
                         dataset_name=MEMBRANE_DATASET)
                     self.classifier_tasks[zi, yi, xi] = shim_task
+                    for i, name in enumerate(self.additional_class_names):
+                        shim_task = ClassifyShimTask.make_shim(
+                            classify_task=ctask,
+                            dataset_name=name)
+                        self.additional_class_tasks[zi, yi, xi, i] =\
+                            shim_task
     
     def generate_border_mask_tasks(self):
         '''Create a border mask for each block'''
@@ -696,6 +716,28 @@ class NeuroproofLearnPipelineTaskMixin:
         for task in classifier_tasks:
             self.membrane_reblocking_task.set_requirement(task)
     
+    def generate_additional_block_tasks(self):
+        '''Reblock each of the additional channels into Neuroproof'''
+        self.additional_reblocking_tasks = np.zeros(
+            self.additional_class_tasks.shape[-1], object)
+        for idx, name in enumerate(self.additional_class_names):
+            location = DatasetLocation(
+                self.get_dirs(self.volume.x, self.volume.y, self.volume.z),
+                "global-%s" % name,
+                self.get_pattern("global-%s" % name))
+            inputs = []
+            for ds in self.additional_class_tasks[:, :, :, idx].flatten():
+                output = ds.output()
+                inputs.append(dict(volume=output.volume,
+                                   location=output.dataset_location))
+            task = self.factory.gen_block_task(
+                inputs=inputs,
+                output_volume=self.volume,
+                output_location=location)
+            map(task.set_requirement,
+                self.additional_class_tasks[:, :, :, idx].flatten())
+            self.additional_reblocking_tasks[idx] = task
+    
     def generate_ground_truth_task(self):
         '''Download the ground truth as one big hunk'''
         dataset_location = self.get_dataset_location(
@@ -721,12 +763,17 @@ class NeuroproofLearnPipelineTaskMixin:
                 seg_location=seg_location,
                 gt_location=gt_location,
                 output_location=self.output_location)
+        self.neuroproof_learn_task.additional_locations = \
+            [_.output().dataset_location 
+             for _ in self.additional_reblocking_tasks]
         self.neuroproof_learn_task.set_requirement(
             self.volume_relabeling_task)
         self.neuroproof_learn_task.set_requirement(
             self.membrane_reblocking_task)
         self.neuroproof_learn_task.set_requirement(
             self.ground_truth_task)
+        map(self.neuroproof_learn_task.set_requirement,
+            self.additional_reblocking_tasks)
 
 class NeuroproofPipelineTask(NeuroproofLearnPipelineTaskMixin, 
                              PipelineRunReportMixin,
