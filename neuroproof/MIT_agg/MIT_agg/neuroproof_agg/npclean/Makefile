@@ -14,7 +14,6 @@
 # CILK_DIR=tools/cilk/cilkplus-install
 #
 # BOOST_DIR=tools/boost/boost-install
-BOOST_DIR=/home/leek/tools/boost/boost-install
 CXX=$(CILK_DIR)/bin/g++
 
 OBJ_DIR=./build/
