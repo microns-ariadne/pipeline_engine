@@ -18,10 +18,18 @@ import sys
 import threading
 import time
 
+import enum
 import rh_config
 from rh_logger import logger
 from ..targets.classifier_target import AbstractPixelClassifier
 
+class NormalizeMethod(enum.Enum):
+    '''The algorithm to use to normalize image planes'''
+
+    '''Use a local adaptive histogram filter to normalize'''
+    EQUALIZE_ADAPTHIST=1,
+    '''Rescale to -.5, .5, discarding outliers'''
+    RESCALE=2
 
 class KerasClassifier(AbstractPixelClassifier):
     
@@ -29,7 +37,8 @@ class KerasClassifier(AbstractPixelClassifier):
     models = {}
 
     def __init__(self, model_path, weights_path, 
-                 xypad_size, zpad_size, block_size):
+                 xypad_size, zpad_size, block_size,
+                 normalize_method):
         '''Initialize from a model and weights
         
         :param model_path: path to JSON model file suitable for 
@@ -38,7 +47,9 @@ class KerasClassifier(AbstractPixelClassifier):
         :param xypad_size: padding needed in x and y
         :param zpad_size: padding needed in z
         :param block_size: size of output block to classifier
-        :param sigma: the standard deviation for the high-pass filter
+        :param normalize_method: the method to use when normalizing intensity.
+              one of NormalizeMethod.EQUALIZE_ADAPTHIST or
+              NormalizeMethod.RESCALE
         '''
         self.xypad_size = xypad_size
         self.zpad_size = zpad_size
@@ -46,6 +57,7 @@ class KerasClassifier(AbstractPixelClassifier):
         self.model_path = model_path
         self.weights_path = weights_path
         self.model_loaded = False
+        self.normalize_method = normalize_method
 
     @classmethod
     def __bind_cuda(cls):
@@ -116,7 +128,8 @@ class KerasClassifier(AbstractPixelClassifier):
                     zpad_size=self.zpad_size,
                     block_size=self.block_size,
                     model_path=self.model_path,
-                    weights_path=self.weights_path)
+                    weights_path=self.weights_path,
+                    normalize_method=self.normalize_method.name)
     
     def __setstate__(self, state):
         '''Restore the state from the pickle'''
@@ -126,6 +139,10 @@ class KerasClassifier(AbstractPixelClassifier):
         self.weights_path = state["weights_path"]
         self.model_path = state["model_path"]
         self.model_loaded = False
+        if "normalize_method" in state:
+            self.normalize_method = NormalizeMethod[state["normalize_method"]]
+        else:
+            self.normalize_method = NormalizeMethod.EQUALIZE_ADAPTHIST
     
     def get_class_names(self):
         return ["membrane"]
@@ -204,7 +221,7 @@ class KerasClassifier(AbstractPixelClassifier):
         self.out_image = np.zeros((z1-z0, y1 - y0, x1 - x0), np.uint8)
         t0 = time.time()
         norm_img = [
-            KerasClassifier.normalize_image(image[zi])
+            self.normalize_image(image[zi])
             for zi in range(image.shape[0])]
         logger.report_metric("keras_cpu_block_processing_time",
                              time.time() - t0)
@@ -289,10 +306,27 @@ class KerasClassifier(AbstractPixelClassifier):
             self.exception = sys.exc_value
             logger.report_exception()
     
+    def normalize_image(self, img):
+        '''Normalize an image plane's intensity to the range, -.5:.5'''
+        if self.normalize_method == NormalizeMethod.EQUALIZE_ADAPTHIST:
+            return self.normalize_image_adapthist(img)
+        else:
+            return self.normalize_image_rescale(img)
     
-    @staticmethod
-    def normalize_image(img):
-        '''Normalize image to 0-1 
+    def normalize_image_rescale(self, img, saturation_level=0.05):
+        '''Normalize the image by rescaling after discaring outliers'''
+        sortedValues = np.sort( img.ravel())                                        
+        minVal = np.float32(
+            sortedValues[np.int(len(sortedValues) * (saturation_level / 2))])                                                                      
+        maxVal = np.float32(
+            sortedValues[np.int(len(sortedValues) * (1 - saturation_level / 2))])                                                                  
+        normImg = np.float32(img - minVal) * (255 / (maxVal-minVal))                
+        normImg[normImg<0] = 0                                                      
+        normImg[normImg>255] = 255                                                  
+        return (np.float32(normImg) / 255.0) - .5
+    
+    def normalize_image_adapthist(self, img):
+        '''Normalize image using a locally adaptive histogram
         
         :param img: image to be normalized
         :returns: normalized image
