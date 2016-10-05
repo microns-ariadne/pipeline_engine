@@ -32,6 +32,7 @@ setup(
         "Cython>=0.24.0",
         "python-dateutil>=2.2",
         "enum34>=1.0.0",
+        "hungarian>=0.2.3",
         "mahotas",
         "numpy>=1.9.3",
         "pandas>=0.15.0",

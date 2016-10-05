@@ -70,6 +70,9 @@ class VisualizeRunMixin:
     z_nm = luigi.FloatParameter(
         default=30,
         description="Voxel dimension in the z direction")
+    z_off = luigi.IntParameter(
+        default=0,
+        description="# of z-slices to offset polygon")
     
     def ariadne_run(self):
         if self.want_ply:
@@ -273,6 +276,7 @@ class VisualizeRunMixin:
             l = labels[tfirst]
             t = triangles[tfirst:tlast].reshape((tlast - tfirst) * 3, 3)
             t[:, 1:] *= self.xy_nm / 1000.
+            t[:, 0] += self.z_off
             t[:, 0] *= self.z_nm / 1000.
             order = np.lexsort([t[:, 2],  t[:, 1], t[:, 0]])
             t = t[order]

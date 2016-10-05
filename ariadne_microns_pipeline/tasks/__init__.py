@@ -14,21 +14,26 @@ from .block import BlockTask
 from .classify import ClassifyTask
 from .connected_components import \
      AllConnectedComponentsTask, ConnectedComponentsTask, VolumeRelabelingTask
+from .connect_synapses import ConnectSynapsesTask
 from .download_from_butterfly import DownloadFromButterflyTask
 from .factory import AMTaskFactory
 from .find_seeds import FindSeedsTask, Dimensionality, SeedsMethodEnum
 from .mask import MaskBorderTask
+from .match_neurons import MatchNeuronsTask
+from .match_synapses import MatchSynapsesTask
 from .neuroproof import NeuroproofTask
 from .nplearn import NeuroproofLearnTask
 from .segment import SegmentTask, SegmentCC2DTask, UnsegmentTask
 from .skeletonize import SkeletonizeTask
+from .synapse_statistics import SynapseStatisticsTask
 from .visualize import VisualizeTask, PipelineVisualizeTask
 
 all = [AllConnectedComponentsTask, BlockTask, ClassifyTask, 
-       ConnectedComponentsTask,
+       ConnectedComponentsTask, ConnectSynapsesTask,
        DownloadFromButterflyTask, AMTaskFactory,
        FindSeedsTask, Dimensionality, SeedsMethodEnum,
-       MaskBorderTask, NeuroproofTask, NeuroproofLearnTask, 
+       MaskBorderTask, MatchNeuronsTask, MatchSynapsesTask,
+       NeuroproofTask, NeuroproofLearnTask, 
        SegmentTask, SegmentCC2DTask, UnsegmentTask,
        VisualizeTask, VolumeRelabelingTask, PipelineVisualizeTask, 
-       SkeletonizeTask]
+       SkeletonizeTask, SynapseStatisticsTask]

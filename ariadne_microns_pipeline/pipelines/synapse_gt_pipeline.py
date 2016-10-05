@@ -13,7 +13,7 @@ from ..parameters import EMPTY_DATASET_LOCATION
 from ..targets.butterfly_target import ButterflyChannelTarget
 from ..tasks.factory import AMTaskFactory
 from ..tasks import Dimensionality
-from ..tasks.utilities import RunMixin
+from ..tasks.utilities import RequiresMixin, RunMixin, to_hashable
 
 SEG_DATASET = "segmentation"
 SYN_DATASET = "synapses"
@@ -22,13 +22,14 @@ ANALYSIS_FILE = "analysis.json"
 
 '''The documentation for the JSON output'''
 JSON_DOC = '''
-        graph: a dictionary of 3 vectors
-           a: the object number of the first neurite
-           b: the object number of the second neurite
-        
-        paths: a dictionary of 3 vectors - this structure enumerates
-               all paths from one neuron through a second neuron to a third
-               neuron.
+        synapse_map: a dictionary of vectors. The key to the dictionary is
+                     the volume of the subblock analyzed and the value
+                     of the dictionary is a vector of the global synapse
+                     label number for the synapse whose index into the vector
+                     is the label number of the synapse.
+        synapse: the global object number of the synapse
+        neuron: the global object number of the neuron connecting the
+                   synapse.
 '''
 
 class SynapseGtPipelineTaskMixin:
@@ -66,7 +67,7 @@ class SynapseGtPipelineTaskMixin:
         self.compute_requirements()
         return self.requirements
     
-    def inputs(self):
+    def input(self):
         for task in self.analysis_tasks.flatten():
             yield task.output()
 
@@ -285,86 +286,36 @@ class SynapseGtPipelineRunMixin:
         neurite = []
         synapse = []
         overlap = []
-        offset = 0
-        for target in self.inputs():
+        offset = 1
+        synapse_map = {}
+        for target in self.input():
             d = json.load(target.open("r"))
+            d_neuron = d["1"]
+            d_synapse = d["2"]
+            volume = to_hashable(dict(x=d_neuron["x"],
+                                      y=d_neuron["y"],
+                                      z=d_neuron["z"],
+                                      width=d_neuron["width"],
+                                      height=d_neuron["height"],
+                                      depth=d_neuron["depth"]))
             connections = np.array(d["connections"])
-            neurite.append(connections[:, 0])
-            synapse.append(connections[:, 1] + offset)
-            overlap.append(np.array(d["counts"]))
-            offset += np.max(connections[:, 1])
-        #
-        # Create a sparse array of counts of overlapping voxels in order
-        # to aggregate multiple possible instances of same neuron / synapse
-        # combo
-        #
-        neurite, synapse, overlap = map(np.hstack, [neurite, synapse, overlap])
-        matrix = coo_matrix((overlap, (neurite, synapse)))
-        matrix.sum_duplicates()
-        neurite, synapse = matrix.nonzero()
-        overlap = matrix.tocsr()[neurite, synapse].getA1()
-        #
-        # sort by -overlap and synapse to get neurites per synapse with
-        #      neurites with most overlap first.
-        #
-        order = np.lexsort((-overlap, synapse))
-        neurite, synapse, overlap = \
-            [_[order] for _ in neurite, synapse, overlap]
-        first = np.hstack([[True], synapse[:-1] != synapse[1:], [True]])
-        indices = np.where(first)[0]
-        counts = indices[1:] - indices[:-1]
-        indices = indices[:-1]
-        #
-        # Potentially, there are some synapses with only a single neurite
-        # overlapping. Get rid of that corner case.
-        #
-        mask = counts == 1
-        synapses_with_too_few_neurites = synapse[indices[mask]]
-        indices, counts = [_[~mask] for _ in indices, counts]
-        #
-        # And finally, a and b are the first and second neurite in the
-        # indexed array
-        #
-        a = neurite[indices]
-        b = neurite[indices + 1]
-        synapse = synapse[indices]
-        #---------------------------------------------
-        #
-        #     A -> B -> C Path computation
-        #
-        #---------------------------------------------
-        #
-        # Get the unique a/b combos.
-        #
-        matrix = coo_matrix((np.ones(len(a)*2), 
-                             (np.hstack((a, b)), np.hstack((b, a)))))
-        matrix.sum_duplicates()
-        #
-        # In Einstein notation, we want
-        #
-        #   ab
-        # m    m
-        #        bc
-        #
-        #          ac
-        # to get m     which is the # of ways to get from a to c
-        #
-        # That's the dot product of the matrix with itself. How handy.
-        #
-        # Remember to erase the diagonals which are self -> something -> self
-        matrix = np.dot(matrix, matrix)
-        aa, cc = matrix.nonzero()
-        mask = aa != cc
-        aa, cc = aa[mask], cc[mask]
+            synapse_local_labels = np.array(d_synapse["labels"])
+            sm = np.zeros(synapse_local_labels.max()+1, int)
+            sm[synapse_local_labels] = \
+                offset + np.arange(len(synapse_local_labels))
+            synapse_map[volume] = sm.tolist()
+            neurite.append(connections[:, 0].tolist())
+            synapse.append(sm[connections[:, 1]].tolist())
+            overlap.append(d["counts"])
+            offset += len(synapse_local_labels)
         #
         # Put together the dictionary
         #
-        # To do: maybe the counts of ways to get from A->B is interesting?
-        #
         result = dict(
-            graph = dict(a=a.tolist(), 
-                         b=b.tolist()),
-            paths = tuple([_.tolist() for _ in aa, cc]))
+            neuron = sum(neurite, []),
+            synapse = sum(synapse, []),
+            overlap = sum(overlap, []),
+            synapse_map = synapse_map)
         #
         # Write it out
         #
@@ -380,5 +331,36 @@ class SynapseGtPipelineTask(SynapseGtPipelineTaskMixin,
     following structure:
     
     '''+JSON_DOC
+    
+    task_namespace = "ariadne_microns_pipeline"
+
+class SynapseGtTaskMixin:
+    '''Class for running just the final aggregation'''
+    
+    synapse_neuron_connection_locations = luigi.ListParameter(
+        description="Locations of the output files from the "
+        "ConnectedComponentsTasks that join neuron to synapse")
+    output_location = luigi.Parameter(
+        description="The location for the output.json file")
+    
+    def input(self):
+        for filename in self.synapse_neuron_connection_locations:
+            yield luigi.LocalTarget(filename)
+    
+    def output(self):
+        return luigi.LocalTarget(self.output_location)
+
+class SynapseGtTask(SynapseGtTaskMixin,
+                    SynapseGtPipelineRunMixin,
+                    RunMixin,
+                    RequiresMixin,
+                    luigi.Task):
+    '''Compile a global mapping of synapse to neuron
+    
+    This task takes the .json files produced by matching ground-truth
+    synapse to ground-truth neuron (from the ConnectedComponentsTask)
+    and produces a JSON file  with the following structure:
+    
+    ''' + JSON_DOC
     
     task_namespace = "ariadne_microns_pipeline"

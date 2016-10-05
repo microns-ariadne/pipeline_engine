@@ -131,14 +131,23 @@ class NeuroproofRunMixin:
                 lambda _:_.startswith("neuroproof") and _.endswith(".png"),
                 os.listdir(output_seg_tempdir)))
             planes = []
+            unique = []
             for z, filename in enumerate(np_files):
                 plane = imread(os.path.join(output_seg_tempdir, filename), 1)
                 plane = (
                     plane[:, :, 0].astype(np.uint32) +
                     (plane[:, :, 1].astype(np.uint32) << 8) +
                     (plane[:, :, 2].astype(np.uint32) << 16))
+                unique.append(np.unique(plane.flatten()))
                 planes.append(plane)
-            output_volume.imwrite(np.array(planes))
+            #
+            # Rework the labels so they are consecutive
+            #
+            unique = np.unique(np.hstack(unique))
+            lmap = np.zeros(np.max(unique)+1, np.uint32)
+            lmap[unique] = np.arange(len(unique)) + 1
+            planes = np.array(map(lambda _:lmap[_], planes))
+            output_volume.imwrite(planes)
         finally:
             for path in prob_tempdir, input_seg_tempdir, output_seg_tempdir:
                 for filename in os.listdir(path):

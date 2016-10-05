@@ -49,4 +49,3 @@ class MaskBorderTask(MaskBorderTaskMixin, MaskBorderRunMixin,
                      RequiresMixin, RunMixin, luigi.Task):
 
     task_namespace = "ariadne_microns_pipeline"
-    

@@ -133,7 +133,14 @@ class ConnectSynapsesRunMixin:
         neuron_1 = neuron_labels[idx]
         synapses = synapse_labels[idx]
         neuron_2 = neuron_labels[idx+1]
-        result = dict(neuron_1=neuron_1.tolist(),
+        volume = dict(x=self.volume.x,
+                      y=self.volume.y,
+                      z=self.volume.z,
+                      width=self.volume.width,
+                      height=self.volume.height,
+                      depth=self.volume.depth)
+        result = dict(volume=volume,
+                      neuron_1=neuron_1.tolist(),
                       neuron_2=neuron_2.tolist(),
                       synapse=synapses.tolist())
         with self.output().open("w") as fd:

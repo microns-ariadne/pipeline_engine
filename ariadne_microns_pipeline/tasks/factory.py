@@ -17,6 +17,8 @@ from .find_seeds import FindSeedsTask, Dimensionality, SeedsMethodEnum
 from .find_synapses import FindSynapsesTask
 from .json_to_csv_task import JSONToCSVTask
 from .mask import MaskBorderTask
+from .match_neurons import MatchNeuronsTask
+from .match_synapses import MatchSynapsesTask
 from .neuroproof import NeuroproofTask
 from .nplearn import NeuroproofLearnTask, StrategyEnum
 from .segment import \
@@ -24,6 +26,7 @@ from .segment import \
 from .segmentation_statistics import \
      SegmentationStatisticsTask, SegmentationReportTask
 from .skeletonize import SkeletonizeTask
+from .synapse_statistics import SynapseStatisticsTask
 from .utilities import to_hashable
 
 class AMTaskFactory(object):
@@ -313,7 +316,71 @@ class AMTaskFactory(object):
             xy_dilation=xy_dilation,
             z_dilation=z_dilation,
             min_contact=min_contact)
+    
+    def gen_match_neurons_task(
+        self, volume, gt_location, detected_location, output_location):
+        '''Match detected neurons to ground truth based on maximum overlap
 
+        :param volume: the volume being analyzed
+        :param gt_location: the location on disk of the ground truth neuron
+                            segmentation
+        :param detected_location: the location on disk of the automated
+                                  neuron segmentation
+        :param output_location: the location on disk for the .json file
+                                that gives the gt neuron that matches
+                                the detected
+        '''
+        return MatchNeuronsTask(
+            volume=volume,
+            gt_location=gt_location,
+            detected_location=detected_location,
+            output_location=output_location)
+    
+    def gen_match_synapses_task(
+        self, volume, gt_location, detected_location, output_location,
+        method):
+        '''Generate a task to match ground truth synapses to detected
+        
+        :param volume: The volume to analyze
+        :param gt_location: The location of the ground-truth neurons on disk
+        :param detected_location: The location of the detected neurons
+            on disk
+        :param output_location: where to store the .json file with the
+            synapse-synapse correlates
+        :param method: one of the MatchMethod enums - either "overlap" to
+        match detected and gt synapses by maximum overlap or "distance"
+        to match them by closest distance.
+        '''
+        return MatchSynapsesTask(volume=volume,
+                                 gt_location=gt_location,
+                                 detected_location=detected_location,
+                                 output_location=output_location,
+                                 match_method=method)
+    
+    def gen_synapse_statistics_task(
+        self, synapse_matches, detected_synapse_connections, neuron_map,
+        gt_neuron_maps, gt_synapse_connections, output_location):
+        '''Calculate precision/recall on synapse-synapse connections
+        
+        :param synapse_matches: .json file produced by SynapseGtTask
+                                containing global synapse/neuron connections
+        :param detected_synapse_connections: sequence of .json files
+             containing connections between detected synapses and neurons
+        :param neuron_map: .json file containing output of 
+            AllConnectedComponents giving the mapping of local neuron label
+            to global neuron label
+        :param gt_neuron_maps: .json files mstching the local labels of
+            detected neurons to those of ground-truth neurons
+        
+        '''
+        return SynapseStatisticsTask(
+            synapse_matches=synapse_matches,
+            detected_synapse_connections=detected_synapse_connections,
+            neuron_map=neuron_map,
+            gt_neuron_maps=gt_neuron_maps,
+            gt_synapse_connections=gt_synapse_connections,
+            output_location=output_location)
+        
     def __get_neuroproof_config(self, program):
         '''Return the location of the given program and its LD_LIBRARY_PATH
         

@@ -4,11 +4,13 @@ from .utilities import PipelineRunReportMixin
 from ..tasks.factory import AMTaskFactory
 from ..tasks.classify import ClassifyShimTask
 from ..tasks.find_seeds import SeedsMethodEnum, Dimensionality
+from ..tasks.match_synapses import MatchMethod
 from ..targets.classifier_target import PixelClassifierTarget
 from ..targets.hdf5_target import HDF5FileTarget
 from ..targets.butterfly_target import ButterflyChannelTarget
 from ..parameters import Volume, VolumeParameter, DatasetLocation
 from ..parameters import EMPTY_DATASET_LOCATION
+from ..pipelines.synapse_gt_pipeline import SynapseGtTask
 import numpy as np
 import os
 import tempfile
@@ -47,6 +49,18 @@ NP_DATASET = "neuroproof"
 '''The name of the ground-truth dataset for statistics computation'''
 GT_DATASET = "gt"
 
+'''The name of the sub-block ground-truth dataset'''
+GT_BLOCK_DATASET = "gt-block"
+
+'''The name of the synapse gt dataset'''
+SYN_GT_DATASET = "synapse-gt"
+
+'''The name of the ground-truth annotation mask dataset'''
+GT_MASK_DATASET = "gt-mask"
+
+'''The name of the segmentation of the synapse gt dataset'''
+SYN_SEG_GT_DATASET = "synapse-gt-segmentation"
+
 '''The name of the predicted segmentation for statistics computation'''
 PRED_DATASET = "pred"
 
@@ -66,6 +80,8 @@ direction - the adjacency direction: x-, x+, y-, y+, z-, z+
 '''
 CONNECTED_COMPONENTS_PATTERN = "connected-components_{direction}.json"
 
+'''Signals that the channel isn't available (e.g. no ground truth)'''
+NO_CHANNEL = "no-channel"
 
 class PipelineTaskMixin:
     '''The Ariadne-Microns pipeline'''
@@ -77,9 +93,19 @@ class PipelineTaskMixin:
     dataset = luigi.Parameter(
         description="The name of the volume that was imaged")
     channel = luigi.Parameter(
+        default="raw",
         description="The name of the channel from which we take data")
     gt_channel = luigi.Parameter(
+        default="gt",
         description="The name of the channel containing the ground truth")
+    gt_mask_channel = luigi.Parameter(
+        default=NO_CHANNEL,
+        description="The name of the channel containing the mask indicating "
+        "the volume that is annotated with ground-truth")
+    synapse_channel = luigi.Parameter(
+        default="synapse",
+        description="The name of the channel containing ground truth "
+        "synapse data")
     url = luigi.Parameter(
         description="The URL of the Butterfly REST endpoint")
     pixel_classifier_path = luigi.Parameter(
@@ -161,6 +187,10 @@ class PipelineTaskMixin:
     statistics_csv_path = luigi.Parameter(
         description="The path to the CSV statistics output file.",
         default="/dev/null")
+    synapse_statistics_path = luigi.Parameter(
+        default="/dev/null",
+        description=
+        "The path to the .json synapse connectivity statistics file")
     wants_skeletonization = luigi.BoolParameter(
         description="Skeletonize the Neuroproof segmentation",
         default=False)
@@ -235,6 +265,14 @@ class PipelineTaskMixin:
         description="The minimum number of overlapping voxels needed "
                     "to consider joining neuron to synapse",
         default=25)
+    #
+    # parameters for synapse statistics
+    #
+    synapse_match_method = luigi.EnumParameter(
+        enum=MatchMethod,
+        default=MatchMethod.overlap,
+        description="Method for matching detected synapses against "
+        "ground-truth synapses")
 
     def get_dirs(self, x, y, z):
         '''Return a directory suited for storing a file with the given offset
@@ -263,6 +301,21 @@ class PipelineTaskMixin:
     def wants_connectivity(self):
         '''True if we are doing a connectivity graph'''
         return self.connectivity_graph_location != "/dev/null"
+    
+    @property
+    def wants_neuron_statistics(self):
+        '''True if we want to calculate neuron segmentation accuracy'''
+        return self.statistics_csv_path != "/dev/null"
+    
+    @property
+    def wants_synapse_statistics(self):
+        '''True if we are scoring synapses against ground truth'''
+        return self.synapse_statistics_path != "/dev/null"
+    
+    @property
+    def has_annotation_mask(self):
+        '''True if there is a mask of the ground-truth annotated volume'''
+        return self.gt_mask_channel != NO_CHANNEL
     
     def compute_extents(self):
         '''Compute various block boundaries and padding
@@ -816,35 +869,77 @@ class PipelineTaskMixin:
                         np_tasks[zi, yi, xi] = np_task
     
     def generate_gt_cutouts(self):
-        '''Generate volumes of ground truth segmentation'''
+        '''Generate volumes of ground truth segmentation
         
-        self.gt_block_tasks = np.zeros((self.n_z, self.n_y, self.n_x), object)
+        Get the ground-truth neuron data, the synapse data if needed and
+        the mask of the annotated area, if present
+        '''
+        if self.wants_neuron_statistics or self.wants_synapse_statistics:
+            self.gt_tasks = \
+                np.zeros((self.n_z, self.n_y, self.n_x), object)
+        if self.wants_synapse_statistics:
+            self.gt_synapse_tasks = \
+                np.zeros((self.n_z, self.n_y, self.n_x), object)
+        if self.has_annotation_mask:
+            self.gt_mask_tasks = \
+                np.zeros((self.n_z, self.n_y, self.n_x), object)
         for zi in range(self.n_z):
-            z0 = self.zs[zi] + self.np_z_pad
-            z1 = self.zs[zi+1] - self.np_z_pad
+            z0 = self.zs[zi]
+            z1 = self.zs[zi+1]
             for yi in range(self.n_y):
-                y0 = self.ys[yi] + self.np_y_pad
-                y1 = self.ys[yi+1] - self.np_y_pad
+                y0 = self.ys[yi]
+                y1 = self.ys[yi+1]
                 for xi in range(self.n_x):
-                    x0 = self.xs[xi] + self.np_x_pad
-                    x1 = self.xs[xi+1] - self.np_x_pad
+                    x0 = self.xs[xi]
+                    x1 = self.xs[xi+1]
                     volume=Volume(x0, y0, z0, x1-x0, y1-y0, z1-z0)
-                    dataset_location = self.get_dataset_location(
-                        volume, GT_DATASET)
-                    btask = self.factory.gen_get_volume_task(
-                        self.experiment,
-                        self.sample,
-                        self.dataset,
-                        self.gt_channel,
-                        self.url,
-                        volume,
-                        dataset_location)
-                    self.gt_block_tasks[zi, yi, xi] = btask
-    
+                    self.generate_gt_cutout(volume, yi, xi, zi)
+
+    def generate_gt_cutout(self, volume, yi, xi, zi):
+        '''Generate gt cutouts for a given volume'''
+        dataset_location = self.get_dataset_location(
+            volume, GT_DATASET)
+        if self.wants_neuron_statistics or self.wants_synapse_statistics:
+            btask = self.factory.gen_get_volume_task(
+                self.experiment,
+                self.sample,
+                self.dataset,
+                self.gt_channel,
+                self.url,
+                volume,
+                dataset_location)
+            self.gt_tasks[zi, yi, xi] = btask
+        if self.wants_synapse_statistics:
+            synapse_gt_location = self.get_dataset_location(
+                volume, SYN_GT_DATASET)
+            self.gt_synapse_tasks[zi, yi, xi] =\
+                self.factory.gen_get_volume_task(
+                    experiment=self.experiment,
+                    sample=self.sample,
+                    dataset=self.dataset,
+                    channel=self.synapse_channel,
+                    url=self.url,
+                    volume=volume,
+                    location=synapse_gt_location)
+        if self.has_annotation_mask:
+            gt_mask_location = self.get_dataset_location(
+                volume, GT_MASK_DATASET)
+            self.gt_mask_tasks[zi, yi, xi] = \
+                self.factory.gen_get_volume_task(
+                    experiment=self.experiment,
+                    sample=self.sample,
+                    dataset=self.dataset,
+                    channel=self.gt_mask_channel,
+                    url=self.url,
+                    volume=volume,
+                    location=gt_mask_location)
+            
     def generate_pred_cutouts(self):
         '''Generate volumes matching the ground truth segmentations'''
         self.pred_block_tasks = np.zeros((self.n_z, self.n_y, self.n_x),
                                          object)
+        self.gt_block_tasks = np.zeros((self.n_z, self.n_y, self.n_x),
+                                       object)
         for zi in range(self.n_z):
             z0 = self.zs[zi] + self.np_z_pad
             z1 = self.zs[zi+1] - self.np_z_pad
@@ -855,6 +950,9 @@ class PipelineTaskMixin:
                     x0 = self.xs[xi] + self.np_x_pad
                     x1 = self.xs[xi+1] - self.np_x_pad
                     volume=Volume(x0, y0, z0, x1-x0, y1-y0, z1-z0)
+                    #
+                    # Reblock the segmentation prediction
+                    #
                     dataset_location = self.get_dataset_location(
                         volume, PRED_DATASET)
                     nptask = self.np_tasks[zi, yi, xi]
@@ -864,12 +962,23 @@ class PipelineTaskMixin:
                               location=nptask.output_seg_location)])
                     btask.set_requirement(nptask)
                     self.pred_block_tasks[zi, yi, xi] = btask
+                    #
+                    # Reblock the ground-truth
+                    #
+                    dataset_location = self.get_dataset_location(
+                        volume, GT_BLOCK_DATASET)
+                    gt_task = self.gt_tasks[zi, yi, xi]
+                    btask = self.factory.gen_block_task(
+                        volume, dataset_location,
+                        [dict(volume=gt_task.volume,
+                              location=gt_task.output().dataset_location)])
+                    btask.set_requirement(gt_task)
+                    self.gt_block_tasks[zi, yi, xi] = btask
                     
     def generate_statistics_tasks(self):
-        if self.statistics_csv_path != "/dev/null":
+        if self.wants_neuron_statistics:
             self.statistics_tasks = np.zeros((self.n_z, self.n_y, self.n_x),
                                              object)
-            self.generate_gt_cutouts()
             self.generate_pred_cutouts()
             json_paths = []
             for zi in range(self.n_z):
@@ -883,7 +992,7 @@ class PipelineTaskMixin:
                             "segmentation_statistics.json")
                         stask = self.factory.gen_segmentation_statistics_task(
                             volume=ptask.output_volume, 
-                            gt_seg_location=gttask.destination,
+                            gt_seg_location=gttask.output().dataset_location,
                             pred_seg_location=ptask.output_location,
                             output_location=output_location)
                         stask.set_requirement(ptask)
@@ -1174,8 +1283,154 @@ class PipelineTaskMixin:
                     sctask.set_requirement(segtask)
                     sctask.set_requirement(ntask)
                     self.synapse_connectivity_tasks[zi, yi, xi] = sctask
-                    
-
+    
+    def generate_synapse_statistics_tasks(self):
+        '''Make tasks that calculate precision/recall on synapses'''
+        if not self.wants_synapse_statistics:
+            return
+        #
+        # This is a pipeline in and of itself:
+        #
+        # Butterfly -> synapse ground truth
+        # Synapse ground truth -> segmentation
+        # Connect GT neurites to GT synapses
+        # Match GT synapses against detected synapses
+        # Match GT neurites against detected neurites
+        # Compile a global mapping of synapse to neuron
+        # Calculate statistics based on this information
+        # 
+        synapse_neuron_connection_tasks = np.zeros(
+            (self.n_z, self.n_y, self.n_x), object)
+        d_gt_neuron_tasks = np.zeros(
+            (self.n_z, self.n_y, self.n_x), object)
+        d_gt_synapse_tasks = np.zeros(
+            (self.n_z, self.n_y, self.n_x), object)
+        for zi in range(self.n_z):
+            z0 = self.zs[zi]
+            z1 = self.zs[zi+1]
+            for yi in range(self.n_y):
+                y0 = self.ys[yi]
+                y1 = self.ys[yi+1]
+                for xi in range(self.n_x):
+                    x0 = self.xs[xi]
+                    x1 = self.xs[xi+1]
+                    volume=Volume(x0, y0, z0, x1-x0, y1-y0, z1-z0)
+                    synapse_gt_task = self.gt_synapse_tasks[zi, yi, xi]
+                    synapse_gt_location = \
+                        synapse_gt_task.output().dataset_location
+                    #
+                    # Segment
+                    #
+                    synapse_gt_seg_location = self.get_dataset_location(
+                        volume, SYN_SEG_GT_DATASET)
+                    synapse_gt_seg_task = self.factory.gen_cc_segmentation_task(
+                        volume=volume,
+                        prob_location=synapse_gt_seg_location,
+                        mask_location=EMPTY_DATASET_LOCATION,
+                        seg_location = synapse_gt_seg_location,
+                        threshold=0,
+                        dimensionality=Dimensionality.D3,
+                        fg_is_higher=True)
+                    synapse_gt_seg_task.set_requirement(synapse_gt_task)
+                    #
+                    # Connect gt segments to gt neurites
+                    #
+                    gt_neuron_task = self.gt_tasks[zi, yi, xi]
+                    gt_synapse_neuron_location = os.path.join(
+                        self.get_dirs(x0, y0, z0)[0], 
+                        "gt-synapse-neuron-connections.json")
+                    gt_synapse_neuron_task = \
+                        self.factory.gen_connected_components_task(
+                            volume,
+                            gt_neuron_task.output().dataset_location,
+                            volume,
+                            synapse_gt_seg_location,
+                            volume,
+                            gt_synapse_neuron_location)
+                    gt_synapse_neuron_task.set_requirement(gt_neuron_task)
+                    gt_synapse_neuron_task.set_requirement(synapse_gt_seg_task)
+                    synapse_neuron_connection_tasks[zi, yi, xi] = \
+                        gt_synapse_neuron_task
+                    #
+                    # Match GT synapses against detected synapses
+                    #
+                    synapse_seg_task = \
+                        self.synapse_segmentation_tasks[zi, yi, xi]
+                    synapse_seg_location = \
+                        synapse_seg_task.output().dataset_location
+                    synapse_match_location = os.path.join(
+                        self.get_dirs(x0, y0, z0)[0], "synapse-match.json")
+                    synapse_match_task = self.factory.gen_match_synapses_task(
+                        volume=volume,
+                        gt_location=synapse_gt_seg_location,
+                        detected_location=synapse_seg_location,
+                        output_location=synapse_match_location,
+                        method=self.synapse_match_method)
+                    synapse_match_task.set_requirement(synapse_seg_task)
+                    synapse_match_task.set_requirement(synapse_gt_seg_task)
+                    if self.has_annotation_mask:
+                        gt_mask_task = self.gt_mask_tasks[zi, yi, xi]
+                        gt_mask_location = \
+                            gt_mask_task.output().dataset_location
+                        synapse_match_task.mask_location = gt_mask_location
+                        synapse_match_task.set_requirement(gt_mask_task)
+                    d_gt_synapse_tasks[zi, yi, xi] = synapse_match_task
+                    #
+                    # Match GT neurons against detected neurons
+                    #
+                    neuron_match_location = os.path.join(
+                        self.get_dirs(x0, y0, z0)[0], "neuron-match.json")
+                    neuron_seg_task = self.segmentation_tasks[zi, yi, xi]
+                    neuron_seg_location = \
+                        neuron_seg_task.output().dataset_location
+                    neuron_match_task=self.factory.gen_match_neurons_task(
+                        volume=volume,
+                        gt_location=gt_neuron_task.output().dataset_location,
+                        detected_location=neuron_seg_location,
+                        output_location=neuron_match_location)
+                    neuron_match_task.set_requirement(neuron_seg_task)
+                    neuron_match_task.set_requirement(gt_neuron_task)
+                    d_gt_neuron_tasks[zi, yi, xi] = neuron_match_task
+        #
+        # Compile the global synapse / neuron connection map
+        #
+        synapse_neuron_connections = [
+            task.output().path 
+            for task in synapse_neuron_connection_tasks.flatten()]
+        synapse_gt_location = os.path.join(
+            self.temp_dirs[0],"synapse-gt-neuron-connections.json")
+        synapse_gt_task = SynapseGtTask(
+            synapse_neuron_connection_locations=synapse_neuron_connections,
+            output_location=synapse_gt_location)
+        map(synapse_gt_task.set_requirement, 
+            synapse_neuron_connection_tasks.flatten())
+        #
+        # Create the statistics task
+        #
+        def locs_of(tasks):
+            return [task.output().path for task in tasks]
+        statistics_task_location = "synapse-statistics.json"
+        synapse_match_tasks = d_gt_synapse_tasks.flatten()
+        detected_synapse_connection_tasks = \
+            synapse_neuron_connection_tasks.flatten()
+        gt_neuron_map_tasks = d_gt_neuron_tasks.flatten()
+        self.synapse_statistics_task = self.factory.gen_synapse_statistics_task(
+            locs_of(synapse_match_tasks),
+            locs_of(synapse_neuron_connection_tasks.flatten()),
+            neuron_map=self.all_connected_components_task.output().path,
+            gt_neuron_maps=locs_of(gt_neuron_map_tasks),
+            gt_synapse_connections=synapse_gt_location,
+            output_location=self.synapse_statistics_path)
+        self.synapse_statistics_task.set_requirement(
+            self.all_connected_components_task)
+        self.synapse_statistics_task.set_requirement(synapse_gt_task)
+        map(self.synapse_statistics_task.set_requirement, 
+            synapse_match_tasks)
+        map(self.synapse_statistics_task.set_requirement,
+            synapse_neuron_connection_tasks)
+        map(self.synapse_statistics_task.set_requirement,
+            gt_neuron_map_tasks)
+        
     def compute_requirements(self):
         '''Compute the requirements for this task'''
         if not hasattr(self, "requirements"):
@@ -1203,6 +1458,8 @@ class PipelineTaskMixin:
                 #
                 rh_logger.logger.report_event("Making Butterfly download tasks")
                 self.generate_butterfly_tasks()
+                rh_logger.logger.report_event("Making gt cutout tasks")
+                self.generate_gt_cutouts()
                 #
                 # Step 2: run the pixel classifier on each
                 #
@@ -1257,6 +1514,11 @@ class PipelineTaskMixin:
                 rh_logger.logger.report_event("Connecting synapses and neurons")
                 self.generate_synapse_connectivity_tasks()
                 #
+                # Step 12: find ground-truth synapses and compute statistics
+                #
+                rh_logger.logger.report_event("Comparing synapses to gt")
+                self.generate_synapse_statistics_tasks()
+                #
                 # The requirements:
                 #
                 # The skeletonize tasks if skeletonization is done
@@ -1272,6 +1534,8 @@ class PipelineTaskMixin:
                     self.requirements += self.np_tasks.flatten().tolist()
                 if self.wants_connectivity:
                     self.requirements.append(self.all_connected_components_task)
+                if self.wants_synapse_statistics:
+                    self.requirements.append(self.synapse_statistics_task)
                 self.requirements += \
                     self.synapse_connectivity_tasks.flatten().tolist()
                 #

@@ -1,5 +1,8 @@
+import enum
+import hungarian
 import numpy as np
 from scipy.ndimage.filters import maximum_filter
+from scipy.sparse import coo_matrix
 import fast64counter
 import mahotas
 import matplotlib
@@ -16,8 +19,8 @@ def thin_boundaries(im, mask):
 
     # make sure image is not all zero
     if np.sum(im) == 0:
-       im[:] = 1.0
-       im[0,:] = 2.0
+        im[:] = 1.0
+        im[0,:] = 2.0
 
     # repeatedly expand regions by one pixel until the background is gone
     while (im[mask] == 0).sum() > 0:
@@ -332,19 +335,195 @@ def plot_evaluations():
     # #plt.legend()
     # plt.show()
 
-    
-    
 
-if __name__=="__main__":
-#    seeds = run_evaluation_segmentations3D()
-
-    network_names = [os.path.basename(p[:-1]) for p in glob.glob('AC4_small/boundaryProbabilities/*/')]
-
-    for name in network_names:
-        if not os.path.exists('AC4_small/'+name+'.pkl'):
-            print name, "is new"
-            seeds = run_evaluation_boundary_predictions(name)
-        else:
-            print name, "is already done"
     
-    plot_evaluations()
+def match_synapses_by_overlap(gt, detected, min_overlap_pct):
+    '''Determine the best ground truth synapse for a detected synapse by overlap
+    
+    :param gt: the ground-truth labeling of the volume. 0 = not synapse,
+               1+ are the labels for each synapse
+    :param detected: the computer-generated labeling of the volume
+    :param min_overlap_pct: the percentage of voxels that must overlap
+               for the algorithm to consider two objects.
+    
+    The algorithm tries to maximize the number of overlapping voxels
+    globally. It finds the overlap between each pair of gt and detected
+    objects. The cost is the number of voxels uncovered by both, given the
+    choice.
+    
+    There must be an alternative cost for each gt matching nothing and
+    for each detected matching nothing. This is the area of the thing minus
+    the min_overlap_pct so that anything matching less than the min_overlap_pct
+    will match against nothing.
+    
+    Return two vectors. The first vector is the matching label in d for each
+    gt label (with zero for "not a match"). The second vector is the matching
+    label in gt for each detected label.
+    '''
+    gt_areas = np.bincount(gt.flatten())
+    gt_areas[0] = 0
+    #
+    # gt_map is a map of the original label #s for the labels that are > 0
+    #        We work with the gt_map indices, nto the label #s
+    # gt_r_map goes the other way
+    #
+    gt_map = np.where(gt_areas > 0)[0]
+    gt_r_map = np.zeros(len(gt_areas), int)
+    n_gt = len(gt_map)
+    gt_r_map[gt_map] = np.arange(n_gt)
+    #
+    # for detected...
+    #
+    d_areas = np.bincount(detected.flatten())
+    d_map = np.where(d_areas > 0)[0]
+    d_r_map = np.zeros(len(d_areas), int)
+    n_d = len(d_map)
+    d_r_map[d_map] = np.arange(n_d)
+    #
+    # Get the matrix of correspondences.
+    #
+    z, y, x = np.where((gt > 0) & (detected > 0))
+    matrix = coo_matrix((np.ones(len(z), int), 
+                         (gt_r_map[gt[z, y, x]], 
+                          d_r_map[detected[z, y, x]])),
+                        shape=(n_gt, n_d))
+    matrix.sum_duplicates()
+    matrix = matrix.toarray()
+    #
+    # The score of each cell is the number of voxels in each cell minus
+    # double the overlap - the amount of voxels covered in each map by
+    # the overlap.
+    #
+    matrix = \
+        gt_areas[gt_map][:, np.newaxis] +\
+        d_areas[d_map][np.newaxis, :] -\
+        matrix
+    #
+    # The alternative is that the thing matches nothing. We augment
+    # the matrix with alternatives for each object, for instance:
+    #
+    # DA3 inf inf x   0    0
+    # DA2 inf x   inf 0    0
+    # DA1 x   inf inf 0    0
+    # G2  y   y   y   inf  x
+    # G1  y   y   y   x    inf
+    #     D1  D2  D3  GA1  GA2
+    #
+    # x is the area of the thing * (1 - min_pct_overlap)
+    # y is the area of both things - 2x overlap
+    #
+    big_matrix = np.zeros((n_gt+n_d, n_gt+n_d), np.float32)
+    big_matrix[:n_gt, :n_d] = matrix
+    big_matrix[n_gt:, :n_d] = np.inf
+    big_matrix[:n_gt, n_d:] = np.inf
+    big_matrix[n_gt+np.arange(n_d), np.arange(n_d)] = \
+        (1.0 - float(min_overlap_pct) / 100) * d_areas[d_map]
+    big_matrix[np.arange(n_gt), n_d+np.arange(n_gt)] = \
+        (1.0 - float(min_overlap_pct) / 100) * gt_areas[gt_map]
+    #
+    # Solve it
+    #
+    d_match, gt_match = hungarian.lap(big_matrix)
+    #
+    # Get rid of the augmented results
+    #
+    d_match = d_match[:n_gt]
+    gt_match = gt_match[:n_d]
+    #
+    # The gt with matches in d have d not in the alternative range
+    #
+    gt_winners = np.where(d_match < n_d)[0]
+    gt_result = np.zeros(len(gt_areas), int)
+    gt_result[gt_map[gt_winners]] = d_map[d_match[gt_winners]]
+    #
+    # Same for d
+    #
+    d_winners = np.where(gt_match < n_gt)[0]
+    d_result = np.zeros(len(d_areas), int)
+    d_result[d_map[d_winners]] = gt_map[gt_match[d_winners]]
+    
+    return gt_result, d_result
+
+def match_synapses_by_distance(gt, detected, xy_nm, z_nm, max_distance):
+    '''Match the closest pairs of ground-truth and detected synapses
+    
+    :param gt: a label volume of the ground-truth synapses
+    :param detected: a label volume of the detected synapses
+    :param xy_nm: size of voxel in the x/y direction
+    :param z_nm: size of voxel in the z direction
+    :param max_distance: maximum allowed distance for a match
+    
+    Centroids are calculated for each object and pairwise distances
+    are calculated for each object. These are fed into a global optimization
+    which tries to find the matching of gt with detected that results
+    in the minimum distance.
+    
+    An alternative is proposed for each object that is the maximum distance
+    and all pairs greater than the maximum distance are given a distance
+    of infinity. This enforces the max_distance constraint.
+    '''
+    z, y, x = np.mgrid[0:gt.shape[0], 0:gt.shape[1], 0:gt.shape[2]]
+    areas = np.bincount(gt.flatten())
+    areas[0] = 0
+    n_gt_orig = len(areas)
+    gt_map = np.where(areas > 0)[0]
+    n_gt = len(gt_map)
+    xc_gt = np.bincount(gt.flatten(), x.flatten())[gt_map] / areas[gt_map]
+    yc_gt = np.bincount(gt.flatten(), y.flatten())[gt_map] / areas[gt_map]
+    zc_gt = np.bincount(gt.flatten(), z.flatten())[gt_map] / areas[gt_map]
+    
+    areas = np.bincount(detected.flatten())
+    areas[0] = 0
+    n_d_orig = len(areas)
+    d_map = np.where(areas > 0)[0]
+    n_d = len(d_map)
+    xc_d = np.bincount(detected.flatten(), x.flatten())[d_map] / areas[d_map]
+    yc_d = np.bincount(detected.flatten(), y.flatten())[d_map] / areas[d_map]
+    zc_d = np.bincount(detected.flatten(), z.flatten())[d_map] / areas[d_map]
+    
+    matrix = np.sqrt(
+        ((xc_gt[:, np.newaxis] - xc_d[np.newaxis, :]) * xy_nm) ** 2 +
+        ((yc_gt[:, np.newaxis] - yc_d[np.newaxis, :]) * xy_nm) ** 2 +
+        ((zc_gt[:, np.newaxis] - zc_d[np.newaxis, :]) * z_nm) ** 2)
+    matrix[matrix > max_distance] = np.inf
+    #
+    # The alternative is that the thing matches nothing. We augment
+    # the matrix with alternatives for each object, for instance:
+    #
+    # DA3 inf inf x   0    0
+    # DA2 inf x   inf 0    0
+    # DA1 x   inf inf 0    0
+    # G2  y   y   y   inf  x
+    # G1  y   y   y   x    inf
+    #     D1  D2  D3  GA1  GA2
+    #
+    big_matrix = np.zeros((n_gt+n_d, n_gt+n_d), np.float32)
+    big_matrix[:n_gt, :n_d] = matrix
+    big_matrix[n_gt:, :n_d] = np.inf
+    big_matrix[:n_gt, n_d:] = np.inf
+    big_matrix[n_gt+np.arange(n_d), np.arange(n_d)] = max_distance
+    big_matrix[np.arange(n_gt), n_d+np.arange(n_gt)] = max_distance
+    
+    #
+    # Solve it
+    #
+    d_match, gt_match = hungarian.lap(big_matrix)
+    #
+    # Get rid of the augmented results
+    #
+    d_match = d_match[:n_gt]
+    gt_match = gt_match[:n_d]
+    #
+    # The gt with matches in d have d not in the alternative range
+    #
+    gt_winners = np.where(d_match < n_d)[0]
+    gt_result = np.zeros(n_gt_orig, int)
+    gt_result[gt_map[gt_winners]] = d_map[d_match[gt_winners]]
+    #
+    # Same for d
+    #
+    d_winners = np.where(gt_match < n_gt)[0]
+    d_result = np.zeros(n_d_orig, int)
+    d_result[d_map[d_winners]] = gt_map[gt_match[d_winners]]
+    
+    return gt_result, d_result
