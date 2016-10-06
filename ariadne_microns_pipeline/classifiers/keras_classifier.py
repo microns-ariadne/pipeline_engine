@@ -29,7 +29,9 @@ class NormalizeMethod(enum.Enum):
     '''Use a local adaptive histogram filter to normalize'''
     EQUALIZE_ADAPTHIST=1,
     '''Rescale to -.5, .5, discarding outliers'''
-    RESCALE=2
+    RESCALE=2,
+    '''Rescale 0-255 to 0-1 and otherwise do no normalization'''
+    NONE=3
 
 class KerasClassifier(AbstractPixelClassifier):
     
@@ -310,8 +312,10 @@ class KerasClassifier(AbstractPixelClassifier):
         '''Normalize an image plane's intensity to the range, -.5:.5'''
         if self.normalize_method == NormalizeMethod.EQUALIZE_ADAPTHIST:
             return self.normalize_image_adapthist(img)
-        else:
+        elif self.normalize_method == NormalizeMethod.RESCALE:
             return self.normalize_image_rescale(img)
+        else:
+            return img.astype(float) / 255.0
     
     def normalize_image_rescale(self, img, saturation_level=0.05):
         '''Normalize the image by rescaling after discaring outliers'''

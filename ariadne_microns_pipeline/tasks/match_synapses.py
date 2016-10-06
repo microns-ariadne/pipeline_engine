@@ -3,6 +3,7 @@
 import enum
 import json
 import luigi
+import numpy as np
 
 from ..algorithms.evaluation import match_synapses_by_distance
 from ..algorithms.evaluation import match_synapses_by_overlap
@@ -85,8 +86,11 @@ class MatchSynapsesRunMixin:
             # Erase any synapse outside of the annotated volume
             #
             mask_tgt = inputs.next()
-            mask = mask.imread()
-            d[~mask] = 0
+            mask = mask_tgt.imread()
+            d[mask == 0] = 0
+        d_hist = np.bincount(d.flatten())
+        d_hist[0] = 0
+        d_labels = np.where(d_hist)[0]
             
         if self.match_method == MatchMethod.overlap:
             matching_d, matching_gt = match_synapses_by_overlap(
@@ -103,7 +107,8 @@ class MatchSynapsesRunMixin:
         with self.output().open("w") as fd:
             json.dump(dict(
                 volume=volume,
-                detetected_per_gt=matching_d.tolist(),
+                detected_labels=d_labels.tolist(),
+                detected_per_gt=matching_d.tolist(),
                 gt_per_detected=matching_gt.tolist()), fd)
 
 class MatchSynapsesTask(MatchSynapsesTaskMixin,
@@ -130,6 +135,7 @@ class MatchSynapsesTask(MatchSynapsesTaskMixin,
                      "idx", has no matching detected synapse.
     gt_per_detected: a sequence of matching ground-truth synapses for each
                      detected. See "detected_per_gt" for explanation.
+    detected_labels: the labels taken into consideration when matching.
     '''
     
     task_namespace = "ariadne_microns_pipeline"

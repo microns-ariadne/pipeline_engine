@@ -1299,8 +1299,6 @@ class PipelineTaskMixin:
         # Compile a global mapping of synapse to neuron
         # Calculate statistics based on this information
         # 
-        synapse_neuron_connection_tasks = np.zeros(
-            (self.n_z, self.n_y, self.n_x), object)
         d_gt_neuron_tasks = np.zeros(
             (self.n_z, self.n_y, self.n_x), object)
         d_gt_synapse_tasks = np.zeros(
@@ -1318,6 +1316,7 @@ class PipelineTaskMixin:
                     synapse_gt_task = self.gt_synapse_tasks[zi, yi, xi]
                     synapse_gt_location = \
                         synapse_gt_task.output().dataset_location
+                    gt_neuron_task = self.gt_tasks[zi, yi, xi]
                     #
                     # Segment
                     #
@@ -1325,32 +1324,13 @@ class PipelineTaskMixin:
                         volume, SYN_SEG_GT_DATASET)
                     synapse_gt_seg_task = self.factory.gen_cc_segmentation_task(
                         volume=volume,
-                        prob_location=synapse_gt_seg_location,
+                        prob_location=synapse_gt_location,
                         mask_location=EMPTY_DATASET_LOCATION,
                         seg_location = synapse_gt_seg_location,
                         threshold=0,
                         dimensionality=Dimensionality.D3,
                         fg_is_higher=True)
                     synapse_gt_seg_task.set_requirement(synapse_gt_task)
-                    #
-                    # Connect gt segments to gt neurites
-                    #
-                    gt_neuron_task = self.gt_tasks[zi, yi, xi]
-                    gt_synapse_neuron_location = os.path.join(
-                        self.get_dirs(x0, y0, z0)[0], 
-                        "gt-synapse-neuron-connections.json")
-                    gt_synapse_neuron_task = \
-                        self.factory.gen_connected_components_task(
-                            volume,
-                            gt_neuron_task.output().dataset_location,
-                            volume,
-                            synapse_gt_seg_location,
-                            volume,
-                            gt_synapse_neuron_location)
-                    gt_synapse_neuron_task.set_requirement(gt_neuron_task)
-                    gt_synapse_neuron_task.set_requirement(synapse_gt_seg_task)
-                    synapse_neuron_connection_tasks[zi, yi, xi] = \
-                        gt_synapse_neuron_task
                     #
                     # Match GT synapses against detected synapses
                     #
@@ -1396,14 +1376,14 @@ class PipelineTaskMixin:
         #
         synapse_neuron_connections = [
             task.output().path 
-            for task in synapse_neuron_connection_tasks.flatten()]
+            for task in self.synapse_connectivity_tasks.flatten()]
         synapse_gt_location = os.path.join(
-            self.temp_dirs[0],"synapse-gt-neuron-connections.json")
+            self.temp_dirs[0],"gt-synapse-neuron-connections.pkl")
         synapse_gt_task = SynapseGtTask(
             synapse_neuron_connection_locations=synapse_neuron_connections,
             output_location=synapse_gt_location)
         map(synapse_gt_task.set_requirement, 
-            synapse_neuron_connection_tasks.flatten())
+            self.synapse_connectivity_tasks.flatten())
         #
         # Create the statistics task
         #
@@ -1412,11 +1392,11 @@ class PipelineTaskMixin:
         statistics_task_location = "synapse-statistics.json"
         synapse_match_tasks = d_gt_synapse_tasks.flatten()
         detected_synapse_connection_tasks = \
-            synapse_neuron_connection_tasks.flatten()
+            self.synapse_connectivity_tasks.flatten()
         gt_neuron_map_tasks = d_gt_neuron_tasks.flatten()
         self.synapse_statistics_task = self.factory.gen_synapse_statistics_task(
             locs_of(synapse_match_tasks),
-            locs_of(synapse_neuron_connection_tasks.flatten()),
+            locs_of(self.synapse_connectivity_tasks.flatten()),
             neuron_map=self.all_connected_components_task.output().path,
             gt_neuron_maps=locs_of(gt_neuron_map_tasks),
             gt_synapse_connections=synapse_gt_location,
@@ -1427,7 +1407,7 @@ class PipelineTaskMixin:
         map(self.synapse_statistics_task.set_requirement, 
             synapse_match_tasks)
         map(self.synapse_statistics_task.set_requirement,
-            synapse_neuron_connection_tasks)
+            self.synapse_connectivity_tasks.flatten())
         map(self.synapse_statistics_task.set_requirement,
             gt_neuron_map_tasks)
         

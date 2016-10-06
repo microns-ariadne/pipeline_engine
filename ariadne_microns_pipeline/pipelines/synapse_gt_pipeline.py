@@ -1,5 +1,6 @@
 '''Generate the synapse connectivity ground truth'''
 
+import cPickle
 import json
 import luigi
 import numpy as np
@@ -20,8 +21,8 @@ SYN_DATASET = "synapses"
 SYN_SEG_DATASET = "synapse-segmentation"
 ANALYSIS_FILE = "analysis.json"
 
-'''The documentation for the JSON output'''
-JSON_DOC = '''
+'''The documentation for the pickled output'''
+PICKLE_DOC = '''
         synapse_map: a dictionary of vectors. The key to the dictionary is
                      the volume of the subblock analyzed and the value
                      of the dictionary is a vector of the global synapse
@@ -274,7 +275,7 @@ class SynapseGtPipelineRunMixin:
         
         The final analysis has these components
         
-        ''' + JSON_DOC
+        ''' + PICKLE_DOC
         # ------------------------------------
         #
         #      Graph computation
@@ -319,7 +320,8 @@ class SynapseGtPipelineRunMixin:
         #
         # Write it out
         #
-        json.dump(result, self.output().open("w"))
+        with self.output().open("w") as fd:
+            cPickle.dump(result, fd, cPickle.HIGHEST_PROTOCOL)
 
 class SynapseGtPipelineTask(SynapseGtPipelineTaskMixin,
                             SynapseGtPipelineRunMixin,
@@ -330,7 +332,7 @@ class SynapseGtPipelineTask(SynapseGtPipelineTaskMixin,
     This pipeline creates a json file in the destination that has the
     following structure:
     
-    '''+JSON_DOC
+    '''+PICKLE_DOC
     
     task_namespace = "ariadne_microns_pipeline"
 
@@ -361,6 +363,6 @@ class SynapseGtTask(SynapseGtTaskMixin,
     synapse to ground-truth neuron (from the ConnectedComponentsTask)
     and produces a JSON file  with the following structure:
     
-    ''' + JSON_DOC
+    ''' + PICKLE_DOC
     
     task_namespace = "ariadne_microns_pipeline"
