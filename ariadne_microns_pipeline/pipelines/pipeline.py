@@ -273,6 +273,14 @@ class PipelineTaskMixin:
         default=MatchMethod.overlap,
         description="Method for matching detected synapses against "
         "ground-truth synapses")
+    synapse_min_overlap_pct = luigi.FloatParameter(
+        default=25.0,
+        description="The minimum acceptable overlap between "
+            "ground-truth and detected synapses")
+    synapse_max_distance = luigi.FloatParameter(
+        default=100.,
+        description="The maximum allowed distance between centroids of "
+             "ground-truth and detected synapses")
 
     def get_dirs(self, x, y, z):
         '''Return a directory suited for storing a file with the given offset
@@ -1346,6 +1354,9 @@ class PipelineTaskMixin:
                         detected_location=synapse_seg_location,
                         output_location=synapse_match_location,
                         method=self.synapse_match_method)
+                    synapse_match_task.min_overlap_pct = \
+                        self.synapse_min_overlap_pct
+                    synapse_match_task.max_distance = self.synapse_max_distance
                     synapse_match_task.set_requirement(synapse_seg_task)
                     synapse_match_task.set_requirement(synapse_gt_seg_task)
                     if self.has_annotation_mask:
