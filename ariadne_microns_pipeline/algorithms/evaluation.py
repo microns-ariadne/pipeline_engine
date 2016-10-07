@@ -390,14 +390,6 @@ def match_synapses_by_overlap(gt, detected, min_overlap_pct):
     matrix.sum_duplicates()
     matrix = matrix.toarray()
     #
-    # Enforce minimum overlap
-    #
-    d_min_overlap = d_areas * min_overlap_pct / 100
-    gt_min_overlap = gt_ares * min_overlap_pct / 100
-    bad_gt, bad_d = np.where((matrix < gt_min_overlap[:, np.newaxis]) |
-                             (matrix < d_min_overlap[np.newaxis, :]))
-    matrix[bad_gt, bad_d] = np.inf
-    #
     # The score of each cell is the number of voxels in each cell minus
     # double the overlap - the amount of voxels covered in each map by
     # the overlap.
@@ -406,6 +398,14 @@ def match_synapses_by_overlap(gt, detected, min_overlap_pct):
         gt_areas[gt_map][:, np.newaxis] +\
         d_areas[d_map][np.newaxis, :] -\
         matrix
+    #
+    # Enforce minimum overlap
+    #
+    d_min_overlap = d_areas[d_map] * min_overlap_pct / 100
+    gt_min_overlap = gt_areas[gt_map] * min_overlap_pct / 100
+    bad_gt, bad_d = np.where((matrix < gt_min_overlap[:, np.newaxis]) |
+                             (matrix < d_min_overlap[np.newaxis, :]))
+    matrix[bad_gt, bad_d] = np.iinfo(matrix.dtype).max
     #
     # The alternative is that the thing matches nothing. We augment
     # the matrix with alternatives for each object, for instance:
