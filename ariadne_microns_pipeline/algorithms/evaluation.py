@@ -390,6 +390,14 @@ def match_synapses_by_overlap(gt, detected, min_overlap_pct):
     matrix.sum_duplicates()
     matrix = matrix.toarray()
     #
+    # Enforce minimum overlap
+    #
+    d_min_overlap = d_areas * min_overlap_pct / 100
+    gt_min_overlap = gt_ares * min_overlap_pct / 100
+    bad_gt, bad_d = np.where((matrix < gt_min_overlap[:, np.newaxis]) |
+                             (matrix < d_min_overlap[np.newaxis, :]))
+    matrix[bad_gt, bad_d] = np.inf
+    #
     # The score of each cell is the number of voxels in each cell minus
     # double the overlap - the amount of voxels covered in each map by
     # the overlap.
@@ -416,10 +424,8 @@ def match_synapses_by_overlap(gt, detected, min_overlap_pct):
     big_matrix[:n_gt, :n_d] = matrix
     big_matrix[n_gt:, :n_d] = np.inf
     big_matrix[:n_gt, n_d:] = np.inf
-    big_matrix[n_gt+np.arange(n_d), np.arange(n_d)] = \
-        (1.0 - float(min_overlap_pct) / 100) * d_areas[d_map]
-    big_matrix[np.arange(n_gt), n_d+np.arange(n_gt)] = \
-        (1.0 - float(min_overlap_pct) / 100) * gt_areas[gt_map]
+    big_matrix[n_gt+np.arange(n_d), np.arange(n_d)] = d_areas[d_map]
+    big_matrix[np.arange(n_gt), n_d+np.arange(n_gt)] = gt_areas[gt_map]
     #
     # Solve it
     #
