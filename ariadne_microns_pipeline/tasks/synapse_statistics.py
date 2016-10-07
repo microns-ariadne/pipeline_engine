@@ -102,7 +102,8 @@ class SynapseStatisticsRunMixin:
                 #
                 sm = np.array(synapse_map[volume])
                 d_labels = np.array(synapse_matches["detected_labels"])
-                to_keep = np.zeros(np.max(l_synapse)+1, bool)
+                to_keep = np.zeros(
+                    max(np.max(d_labels), np.max(l_synapse))+1, bool)
                 to_keep[d_labels] = True
                 mask = to_keep[l_synapse]
                 l_neuron = l_neuron[mask]
