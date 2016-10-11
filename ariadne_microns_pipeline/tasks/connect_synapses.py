@@ -96,43 +96,47 @@ class ConnectSynapsesRunMixin:
         nvoxels = neuron[mask]
         del synapse
         del neuron
-        #
-        # Make a matrix of counts of voxels in both synapses and neurons
-        # then extract synapse / neuron matches
-        #
-        matrix = coo_matrix((np.ones(len(nvoxels), int), (svoxels, nvoxels)))
-        matrix.sum_duplicates()
-        synapse_labels, neuron_labels = matrix.nonzero()
-        counts = matrix.tocsr()[synapse_labels, neuron_labels].getA1()
-        #
-        # Filter neurons with too little overlap
-        #
-        mask = counts >= self.min_contact
-        counts, neuron_labels, synapse_labels = [
-            _[mask] for _ in counts, neuron_labels, synapse_labels]
-        #
-        # Order by synapse label and -count to get the neurons with
-        # the highest count first
-        #
-        order = np.lexsort((-counts, synapse_labels))
-        counts, neuron_labels, synapse_labels = \
-            [_[order] for _ in counts, neuron_labels, synapse_labels]
-        first = np.hstack(
-            [[True], synapse_labels[:-1] != synapse_labels[1:], [True]])
-        idx = np.where(first)[0]
-        per_synapse_counts = idx[1:] - idx[:-1]
-        #
-        # Get rid of counts < 2
-        #
-        mask = per_synapse_counts >= 2
-        idx = idx[:-1][mask]
-        #
-        # pick out the first and second most overlapping neurons and
-        # their synapse.
-        #
-        neuron_1 = neuron_labels[idx]
-        synapses = synapse_labels[idx]
-        neuron_2 = neuron_labels[idx+1]
+        if len(nvoxels) > 0:
+            #
+            # Make a matrix of counts of voxels in both synapses and neurons
+            # then extract synapse / neuron matches
+            #
+            matrix = coo_matrix(
+                (np.ones(len(nvoxels), int), (svoxels, nvoxels)))
+            matrix.sum_duplicates()
+            synapse_labels, neuron_labels = matrix.nonzero()
+            counts = matrix.tocsr()[synapse_labels, neuron_labels].getA1()
+            #
+            # Filter neurons with too little overlap
+            #
+            mask = counts >= self.min_contact
+            counts, neuron_labels, synapse_labels = [
+                _[mask] for _ in counts, neuron_labels, synapse_labels]
+            #
+            # Order by synapse label and -count to get the neurons with
+            # the highest count first
+            #
+            order = np.lexsort((-counts, synapse_labels))
+            counts, neuron_labels, synapse_labels = \
+                [_[order] for _ in counts, neuron_labels, synapse_labels]
+            first = np.hstack(
+                [[True], synapse_labels[:-1] != synapse_labels[1:], [True]])
+            idx = np.where(first)[0]
+            per_synapse_counts = idx[1:] - idx[:-1]
+            #
+            # Get rid of counts < 2
+            #
+            mask = per_synapse_counts >= 2
+            idx = idx[:-1][mask]
+            #
+            # pick out the first and second most overlapping neurons and
+            # their synapse.
+            #
+            neuron_1 = neuron_labels[idx]
+            synapses = synapse_labels[idx]
+            neuron_2 = neuron_labels[idx+1]
+        else:
+            neuron_1 = neuron_2 = synapse = np.zeros(0, int)
         volume = dict(x=self.volume.x,
                       y=self.volume.y,
                       z=self.volume.z,
