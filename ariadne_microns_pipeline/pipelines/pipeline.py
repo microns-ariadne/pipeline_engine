@@ -1373,7 +1373,7 @@ class PipelineTaskMixin:
                     #
                     neuron_match_location = os.path.join(
                         self.get_dirs(x0, y0, z0)[0], "neuron-match.json")
-                    neuron_seg_task = self.segmentation_tasks[zi, yi, xi]
+                    neuron_seg_task = self.np_tasks[zi, yi, xi]
                     neuron_seg_location = \
                         neuron_seg_task.output().dataset_location
                     neuron_match_task=self.factory.gen_match_neurons_task(

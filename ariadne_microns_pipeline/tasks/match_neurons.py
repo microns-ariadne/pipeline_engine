@@ -40,32 +40,7 @@ class MatchNeuronsRunMixin:
         inputs = self.input()
         gt_tgt = inputs.next()
         d_tgt = inputs.next()
-        #
-        # Get flattened versions of the ground-truth and detected space.
-        # The pixel-pixel correlations are still maintained and we don't
-        # need the spatial info.
-        #
-        gt_flat = gt_tgt.imread().ravel()
-        d_flat = d_tgt.imread().ravel()
-        mask = ((gt_flat != 0) & (d_flat != 0))
-        gt_flat, d_flat = gt_flat[mask], d_flat[mask]
-        #
-        # Get # voxels per gt / d pair
-        #
-        matrix = coo_matrix((np.ones(gt_flat.shape, np.uint32),
-                             (d_flat, gt_flat)))
-        matrix.sum_duplicates()
-        l_d, l_gt = matrix.nonzero()
-        count = matrix.tocsr()[l_d, l_gt].A1
-        #
-        # Now we find the counts that match the max for their detected label. 
-        # Ties go to whomever.
-        #
-        max_per_d = matrix.max(axis=1).toarray().flatten()
-        best = (count == max_per_d[l_d])
-        where_best = np.zeros(matrix.shape[0], np.uint32)
-        where_best[l_d[best]] = l_gt[best]
-        where_best[max_per_d == 0] = 0
+
         result = {}
         result["volume"] = dict(x=self.volume.x,
                                 y=self.volume.y,
@@ -73,7 +48,37 @@ class MatchNeuronsRunMixin:
                                 width=self.volume.width,
                                 height=self.volume.height,
                                 depth=self.volume.depth)
-        result["gt"] = where_best.tolist()
+        #
+        # Get flattened versions of the ground-truth and detected space.
+        # The pixel-pixel correlations are still maintained and we don't
+        # need the spatial info.
+        #
+        gt_flat = gt_tgt.imread().ravel()
+        d_flat = d_tgt.imread().ravel()
+        d_max = np.max(d_flat)
+        mask = ((gt_flat != 0) & (d_flat != 0))
+        gt_flat, d_flat = gt_flat[mask], d_flat[mask]
+        if not np.any(mask):
+            result["gt"] = [ 0 ] * (d_max+1)
+        else:
+            #
+            # Get # voxels per gt / d pair
+            #
+            matrix = coo_matrix((np.ones(gt_flat.shape, np.uint32),
+                                 (d_flat, gt_flat)))
+            matrix.sum_duplicates()
+            l_d, l_gt = matrix.nonzero()
+            count = matrix.tocsr()[l_d, l_gt].A1
+            #
+            # Now we find the counts that match the max for their detected label. 
+            # Ties go to whomever.
+            #
+            max_per_d = matrix.max(axis=1).toarray().flatten()
+            best = (count == max_per_d[l_d])
+            where_best = np.zeros(d_max+1, np.uint32)
+            where_best[l_d[best]] = l_gt[best]
+            where_best[max_per_d == 0] = 0
+            result["gt"] = where_best.tolist()
         with self.output().open("w") as fd:
             json.dump(result, fd)
 
