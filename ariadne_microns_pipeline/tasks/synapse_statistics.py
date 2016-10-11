@@ -88,6 +88,8 @@ class SynapseStatisticsRunMixin:
                 # synapse connects two neurons
                 #
                 l_synapse = np.hstack([d_synapse_connections["synapse"]] * 2)
+                if len(l_synapse) == 0:
+                    continue
                 l_neuron = np.hstack([
                     d_synapse_connections["neuron_1"],
                     d_synapse_connections["neuron_2"]])
