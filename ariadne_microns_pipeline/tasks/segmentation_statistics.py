@@ -107,7 +107,7 @@ class SegmentationReportTask(RequiresMixin, RunMixin, luigi.Task):
             lambda _:_ not in ('x', 'y', 'z', 'width', 'height', 'depth'),
             dataframe.columns))
         ax = figure.add_subplot(1, 1, 1)
-        ax.boxplot([dataframe[c] for c in columns],
+        ax.boxplot([dataframe[c][~ np.isnan(dataframe[c])] for c in columns],
                    labels = columns)
         ax.set_yticks(np.linspace(.5, 1.0, 11))
         ax.set_xlim(.5, len(columns)+1)
