@@ -31,6 +31,8 @@ class PipelineRunReportMixin:
         else:
             result = self.output().exists()
             if result:
+                if not hasattr(rh_logger.logger, "logger"):
+                    rh_logger.logger.start_process("Luigi", "Starting logging")
                 rh_logger.logger.report_event(
                     "Pipeline report file %s exists" % 
                     self.pipeline_report_location)
