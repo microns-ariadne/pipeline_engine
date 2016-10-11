@@ -136,7 +136,7 @@ class ConnectSynapsesRunMixin:
             synapses = synapse_labels[idx]
             neuron_2 = neuron_labels[idx+1]
         else:
-            neuron_1 = neuron_2 = synapse = np.zeros(0, int)
+            neuron_1 = neuron_2 = synapses = np.zeros(0, int)
         volume = dict(x=self.volume.x,
                       y=self.volume.y,
                       z=self.volume.z,
