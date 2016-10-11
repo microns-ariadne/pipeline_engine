@@ -301,14 +301,15 @@ class SynapseGtPipelineRunMixin:
                                       depth=d_neuron["depth"]))
             connections = np.array(d["connections"])
             synapse_local_labels = np.array(d_synapse["labels"])
-            sm = np.zeros(synapse_local_labels.max()+1, int)
-            sm[synapse_local_labels] = \
-                offset + np.arange(len(synapse_local_labels))
-            synapse_map[volume] = sm.tolist()
-            neurite.append(connections[:, 0].tolist())
-            synapse.append(sm[connections[:, 1]].tolist())
-            overlap.append(d["counts"])
-            offset += len(synapse_local_labels)
+            if len(connections) > 0 and len(synapse_local_labels) > 0:
+                sm = np.zeros(synapse_local_labels.max()+1, int)
+                sm[synapse_local_labels] = \
+                    offset + np.arange(len(synapse_local_labels))
+                synapse_map[volume] = sm.tolist()
+                neurite.append(connections[:, 0].tolist())
+                synapse.append(sm[connections[:, 1]].tolist())
+                overlap.append(d["counts"])
+                offset += len(synapse_local_labels)
         #
         # Put together the dictionary
         #
