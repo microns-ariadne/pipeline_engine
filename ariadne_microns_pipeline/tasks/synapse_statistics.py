@@ -51,7 +51,8 @@ class SynapseStatisticsRunMixin:
         #
         # Create all synapse-neuron-synapse triplets in the ground-truth
         #
-        gt_synapse_connections = cPickle.load(gt_synapse_connection_tgt.open("r"))
+        gt_synapse_connections = cPickle.load(
+            gt_synapse_connection_tgt.open("r"))
         synapse_map = dict([
             (k, np.array(v))
             for k, v in gt_synapse_connections["synapse_map"].items()])
@@ -71,7 +72,9 @@ class SynapseStatisticsRunMixin:
         s1_d = []
         s2_d = []
         n_d = []
-        bad_synapses = 0
+        tp_synapses = 0
+        fp_synapses = 0
+        fn_synapses = 0
         neuron_map_dict = json.load(neuron_map_tgt.open("r"),
                                     object_hook=to_hashable)
         neuron_map = dict(neuron_map_dict["volumes"])
@@ -98,6 +101,8 @@ class SynapseStatisticsRunMixin:
                 # map of gt synapses to detected
                 #
                 gt_per_detected = np.array(synapse_matches["gt_per_detected"])
+                detected_per_gt = np.array(synapse_matches["detected_per_gt"])
+                fn_synapses += np.sum(detected_per_gt == 0)
                 #
                 # Get rid of synapse/neuron pairs that were outside of
                 # the annotated volume
@@ -106,6 +111,8 @@ class SynapseStatisticsRunMixin:
                 d_labels = np.array(synapse_matches["detected_labels"])
                 if len(d_labels) == 0:
                     continue
+                tp_synapses += np.sum(gt_per_detected[d_labels] != 0)
+                fp_synapses += np.sum(gt_per_detected[d_labels] == 0)
                 to_keep = np.zeros(
                     max(np.max(d_labels)+1, np.max(l_synapse))+1, bool)
                 to_keep[d_labels] = True
@@ -132,6 +139,11 @@ class SynapseStatisticsRunMixin:
                 # Get the triples
                 #
                 s1_t, s2_t, n_t = self.get_triplets(g_synapse, g_neuron)
+                #
+                # Remove false positive detection <-> false positive detection
+                #
+                mask = (s1_t != 0) | (s2_t != 0)
+                s1_t, s2_t, n_t = s1_t[mask], s2_t[mask], n_t[mask]
                 s1_d.append(s1_t)
                 s2_d.append(s2_t)
                 n_d.append(n_t)
@@ -174,7 +186,12 @@ class SynapseStatisticsRunMixin:
             recall=recall,
             n_true_positives=n_true_positives,
             n_false_positives=n_false_positives,
-            n_false_negatives=n_false_negatives)
+            n_false_negatives=n_false_negatives,
+            n_true_positive_synapses=tp_synapses,
+            n_false_positive_synapses=fp_synapses,
+            n_false_negative_synapses=fn_synapses,
+            synapse_precision=float(tp_synapses) / (tp_synapses + fp_synapses),
+            synapse_recall=float(tp_synapses) / (tp_synapses + fn_synapses))
         with self.output().open("w") as fd:
             json.dump(result, fd)
     
