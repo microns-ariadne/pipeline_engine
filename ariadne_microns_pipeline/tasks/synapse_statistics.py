@@ -102,7 +102,7 @@ class SynapseStatisticsRunMixin:
                 #
                 gt_per_detected = np.array(synapse_matches["gt_per_detected"])
                 detected_per_gt = np.array(synapse_matches["detected_per_gt"])
-                fn_synapses += np.sum(detected_per_gt == 0)
+                fn_synapses += np.sum(detected_per_gt[1:] == 0)
                 #
                 # Get rid of synapse/neuron pairs that were outside of
                 # the annotated volume
