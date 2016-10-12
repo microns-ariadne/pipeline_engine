@@ -46,13 +46,15 @@ class SegmentationStatisticsRunMixin:
         gt_labels = gt_volume.imread()
         d = segmentation_metrics(gt_labels, test_labels, per_object=True)
         rand = d["Rand"]
+        F_Info = d["F_Info"]
         vi = d["VI"]
         d = dict(rand=rand["F-score"],
                  rand_split=rand["split"],
                  rand_merge=rand["merge"],
-                 vi=vi["F-score"],
-                 vi_split=vi["split"],
-                 vi_merge=vi["merge"],
+                 vi=vi,
+                 F_info=F_Info["F-score"],
+                 F_info_split=F_Info["split"],
+                 F_info_merge=F_Info["merge"],
                  per_object = d["per_object"],
                  x=self.volume.x,
                  y=self.volume.y,

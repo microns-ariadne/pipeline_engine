@@ -46,7 +46,7 @@ def Rand(pair, gt, pred, alpha):
     return np.sum(pair ** 2) / (alpha * np.sum(gt ** 2) +
                                 (1.0 - alpha) * np.sum(pred ** 2))
 
-def VI(pair, gt, pred, alpha):
+def f_info(pair, gt, pred, alpha):
     ''' Parameterized VI score
 
     Arguments are pairwise fractions, ground truth fractions, and prediction
@@ -62,6 +62,12 @@ def VI(pair, gt, pred, alpha):
     mutual_information = gt_entropy + pred_entropy - pair_entropy
 
     return mutual_information / ((1.0 - alpha) * gt_entropy + alpha * pred_entropy)
+
+def vi(pair, gt, pred):
+    pair_entropy = - np.sum(pair * np.log(pair))
+    gt_entropy = - np.sum(gt * np.log(gt))
+    pred_entropy = - np.sum(pred * np.log(pred))
+    return pair_entropy - gt_entropy - pred_entropy
 
 def segmentation_metrics(ground_truth, prediction, seq=False, per_object=False):
     '''Computes adjusted FRand and VI between ground_truth and prediction.
@@ -113,8 +119,9 @@ def segmentation_metrics(ground_truth, prediction, seq=False, per_object=False):
     alphas = {'F-score': 0.5, 'split': 0.0, 'merge': 1.0}
 
     Rand_scores = {k: Rand(frac_pairwise, frac_gt, frac_pred, v) for k, v in alphas.items()}
-    VI_scores = {k: VI(frac_pairwise, frac_gt, frac_pred, v) for k, v in alphas.items()}
-    result = {'Rand': Rand_scores, 'VI': VI_scores}
+    finfo_scores = {k: f_info(frac_pairwise, frac_gt, frac_pred, v) for k, v in alphas.items()}
+    vi_score = vi(frac_pairwise, frac_gt, frac_pred)
+    result = {'Rand': Rand_scores, 'F_Info': finfo_scores, 'VI': vi_score}
     if per_object:
         #
         # Compute summary statistics per object
