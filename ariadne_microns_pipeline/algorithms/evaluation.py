@@ -67,7 +67,7 @@ def vi(pair, gt, pred):
     pair_entropy = - np.sum(pair * np.log(pair))
     gt_entropy = - np.sum(gt * np.log(gt))
     pred_entropy = - np.sum(pred * np.log(pred))
-    return pair_entropy - gt_entropy - pred_entropy
+    return 2*pair_entropy - gt_entropy - pred_entropy
 
 def segmentation_metrics(ground_truth, prediction, seq=False, per_object=False):
     '''Computes adjusted FRand and VI between ground_truth and prediction.
