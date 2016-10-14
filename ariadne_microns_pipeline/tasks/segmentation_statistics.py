@@ -106,12 +106,13 @@ class SegmentationReportTask(RequiresMixin, RunMixin, luigi.Task):
         figure = matplotlib.figure.Figure()
         figure.set_size_inches(6, 6)
         columns = sorted(filter(
-            lambda _:_ not in ('x', 'y', 'z', 'width', 'height', 'depth'),
+            lambda _:_ not in ('x', 'y', 'z', 'width', 'height', 'depth', 'vi'),
             dataframe.columns))
-        ax = figure.add_subplot(1, 1, 1)
-        ax.boxplot([dataframe[c][~ np.isnan(dataframe[c])] for c in columns],
-                   labels = columns)
-        ax.set_yticks(np.linspace(.5, 1.0, 11))
+        vi = dataframe['vi']
+        ax = figure.add_axes((0.05, 0.1, 0.65, 0.80))
+        ax.boxplot([dataframe[c][~ np.isnan(dataframe[c])] for c in columns])
+        ax.set_xticklabels(columns, rotation=15)
+        ax.set_yticks(np.linspace(0, 1.0, 11))
         ax.set_xlim(.5, len(columns)+1)
         for i, mean in enumerate([dataframe[c].mean() for c in columns]):
             ann = ax.annotate("%.2f" % mean, 
@@ -120,8 +121,19 @@ class SegmentationReportTask(RequiresMixin, RunMixin, luigi.Task):
                         bbox=dict(boxstyle="round", fc="white", ec="gray"),
                         arrowprops=dict(arrowstyle="->", color="gray"))
             matplotlib.pyplot.setp(ann, fontsize=6)
-        matplotlib.pyplot.setp(ax.get_xmajorticklabels(), fontsize=8)
-        matplotlib.pyplot.setp(ax.get_ymajorticklabels(), fontsize=6)
-        ax.set_title("Segmentation accuracy")
+        vi_ax = figure.add_axes((0.75, 0.1, 0.20, 0.80))
+        vi_ax.boxplot(vi[~np.isnan(vi)], labels=['VI (nats)'])
+        ann = vi_ax.annotate(
+            "%.2f" % vi.mean(),
+            xy=(1, vi.mean()),
+            xytext=(1.2, vi.mean()+.1),
+            bbox=dict(boxstyle="round", fc="white", ec="gray"),
+            arrowprops=dict(arrowstyle="->", color="gray"))
+        matplotlib.pyplot.setp(ann, fontsize=6)
+        for a in ax, vi_ax:
+            matplotlib.pyplot.setp(a.get_xmajorticklabels(), fontsize=8)
+            matplotlib.pyplot.setp(a.get_ymajorticklabels(), fontsize=6)
+        figure.text(.5, .98, "Segmentation accuracy", ha='center', va='top',
+                size='x-large')
         canvas = FigureCanvasPdf(figure)
         figure.savefig(self.pdf_location)

@@ -37,6 +37,26 @@ class Volume(object):
         """One past the last plane of the volume"""
         return self.z + self.depth
     
+    def to_dictionary(self):
+        '''Get the dictionary representation of the volume
+        
+        Note: given a volume, v, you can reconstruct it by doing
+        Volume(**v.to_dictionary())
+        '''
+        return dict(x=self.x, y=self.y, z=self.z, 
+                    width=self.width, height=self.height, depth=self.depth)
+    
+    def contains(self, x, y, z):
+        '''Return True if the volume contains the given point
+        
+        :param x: the x coordinate of the point
+        :param y: the y coordinate of the point
+        :param z: the z coordinate of the point
+        '''
+        return x >= self.x and x < self.x1 and\
+               y >= self.y and y < self.y1 and\
+               z >= self.z and z < self.z1
+    
     def __repr__(self):
         return "Volume: x=%d:%d, y=%d:%d, z=%d:%d" % (
             self.x, self.x1, self.y, self.y1, self.z, self.z1)
@@ -67,8 +87,7 @@ class VolumeParameter(luigi.Parameter):
                  width=x.width,
                  height=x.height,
                  depth=x.depth)
-        return json.dumps(d)
-
+        return json.dumps(d)    
 
 class DatasetLocation(object):
     '''A dataset location (see DatasetLocationParameter)'''

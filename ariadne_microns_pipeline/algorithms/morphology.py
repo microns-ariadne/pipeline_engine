@@ -1,6 +1,18 @@
 '''Morphological operations'''
 
-from scipy.ndimage import grey_dilation, grey_erosion
+import numpy as np
+from scipy.ndimage import grey_dilation, grey_erosion, distance_transform_edt
+
+'''A 3d structuring element connecting only left/right top/bottom up/down'''
+SIX_CONNECTED = np.array([[[False, False, False],
+                           [False, True, False],
+                           [False, False, False]],
+                          [[False, True, False],
+                           [True, True, True],
+                           [False, True, False]],
+                          [[False, False, False],
+                           [False, True, False],
+                           [False, False, False]]])
 
 def erode_segmentation(segmentation, strel, in_place=False):
     '''Erode a segmentation using a structuring element

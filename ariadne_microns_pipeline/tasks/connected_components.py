@@ -124,14 +124,19 @@ class ConnectedComponentsRunMixin:
                            height=volume.height,
                            depth=volume.depth)
         #
-        # TODO: get the # of components more cheaply than looking at every voxel
+        # Compute the areas and find the labels with associated voxels
         #
-        unique = np.where(np.bincount(volume1.imread().ravel()))[0]
+        areas = np.bincount(volume1.imread().ravel())
+        unique = np.where(areas)[0]
         unique = unique[unique != 0]
+        areas = areas[unique]
         d["1"]["labels"] = unique.tolist()
-        unique = np.where(np.bincount(volume2.imread().ravel()))[0]
+        d["1"]["areas"] = areas.tolist()
+        areas = np.bincount(volume2.imread().ravel())
+        unique = np.where(areas)[0]
         unique = unique[unique != 0]
         d["2"]["labels"] = unique.tolist()
+        d["2"]["areas"] = areas.tolist()
         with self.output().open("w") as fd:
             json.dump(d, fd)
 
@@ -189,8 +194,11 @@ class AllConnectedComponentsRunMixin:
             c = np.array(d["connections"])
             l1 = d["1"]["labels"]
             l2 = d["2"]["labels"]
-            del d["1"]["labels"]
-            del d["2"]["labels"]
+            for k1 in "1", "2":
+                for k2 in "labels", "areas":
+                    if k2 in d[k1]:
+                        del d[k1][k2]
+            d["pathname"] = input_target.path
             k1 = to_hashable(d["1"])
             k2 = to_hashable(d["2"])
             for k, l in (k1, l1), (k2, l2):

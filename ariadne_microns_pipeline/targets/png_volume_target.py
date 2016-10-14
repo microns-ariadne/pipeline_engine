@@ -131,4 +131,23 @@ class PngVolumeTarget(VolumeTarget):
     
     def finish_volume(self):
         self.imwrite(self.__volume)
+    
+    @staticmethod
+    def from_done_file(path, pattern):
+        '''Create a PngVolumeTarget from its .done file
+        
+        :param path: path to .done file
+        :param pattern: the pattern for naming files, e.g. 
+        {x:09d}_{y:09d}_{z:09d}
+        '''
+        d = json.load(open(path, "r"))
+        roots = list(set([os.path.dirname(os.path.dirname(filename))
+                          for filename in d["filenames"]]))
+        dataset_name = os.path.split(os.path.dirname(d["filenames"][0]))[1]
+        depth, height, width = d["dimensions"]
+        x = d["x"]
+        y = d["y"]
+        z = d["z"]
+        return PngVolumeTarget(roots, dataset_name, pattern, x, y, z,
+                               width, height, depth)
         
