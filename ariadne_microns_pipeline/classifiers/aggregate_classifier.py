@@ -20,7 +20,9 @@ class AggregateClassifier(AbstractPixelClassifier):
         > from ariadne_microns_pipeline.classifiers.aggregate_classifier \
                import AggregateClassifier
         > import cPickle
-        > my_classifier = AggregateClassifier(["foo.pkl", "bar.pkl"])
+        > my_classifier = AggregateClassifier(
+             ["foo.pkl", "bar.pkl"],
+             [dict(foo_in="foo_out"), dict(bar_in="bar_out")])
         > cPickle.dump(my_classifier, open("agg.pkl", "w"))
     '''
     

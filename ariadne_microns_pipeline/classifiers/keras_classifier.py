@@ -9,7 +9,7 @@ import hashlib
 import numpy as np
 import Queue
 import os
-from scipy.ndimage import gaussian_filter
+from scipy.ndimage import gaussian_filter, zoom
 from skimage.exposure import equalize_adapthist
 import skimage
 import re
@@ -40,7 +40,8 @@ class KerasClassifier(AbstractPixelClassifier):
 
     def __init__(self, model_path, weights_path, 
                  xypad_size, zpad_size, block_size,
-                 normalize_method):
+                 normalize_method=NormalizeMethod.EQUALIZE_ADAPTHIST,
+                 downsample_factor=1.0):
         '''Initialize from a model and weights
         
         :param model_path: path to JSON model file suitable for 
@@ -52,6 +53,8 @@ class KerasClassifier(AbstractPixelClassifier):
         :param normalize_method: the method to use when normalizing intensity.
               one of NormalizeMethod.EQUALIZE_ADAPTHIST or
               NormalizeMethod.RESCALE
+        :param downsample_factor: Downsample the image by this scaling factor
+              before classifying, then upsample by the same factor afterwards.
         '''
         self.xypad_size = xypad_size
         self.zpad_size = zpad_size
@@ -60,6 +63,7 @@ class KerasClassifier(AbstractPixelClassifier):
         self.weights_path = weights_path
         self.model_loaded = False
         self.normalize_method = normalize_method
+        self.downsample_factor = downsample_factor
 
     @classmethod
     def __bind_cuda(cls):
@@ -131,7 +135,8 @@ class KerasClassifier(AbstractPixelClassifier):
                     block_size=self.block_size,
                     model_path=self.model_path,
                     weights_path=self.weights_path,
-                    normalize_method=self.normalize_method.name)
+                    normalize_method=self.normalize_method.name,
+                    downsample_factor=self.downsample_factor)
     
     def __setstate__(self, state):
         '''Restore the state from the pickle'''
@@ -145,6 +150,10 @@ class KerasClassifier(AbstractPixelClassifier):
             self.normalize_method = NormalizeMethod[state["normalize_method"]]
         else:
             self.normalize_method = NormalizeMethod.EQUALIZE_ADAPTHIST
+        if "downsample_factor" in state:
+            self.downsample_factor = state["downsample_factor"]
+        else:
+            self.downsample_factor = 1.0
     
     def get_class_names(self):
         return ["membrane"]
@@ -172,6 +181,11 @@ class KerasClassifier(AbstractPixelClassifier):
         # thread runs prediction, even if it's in the middle.
         #
         t0_total = time.time()
+        self.image_shape = np.array(image.shape)
+        self.out_image = np.zeros((image.shape[0] - 2 * self.get_z_pad(),
+                                   image.shape[1] - 2 * self.get_y_pad(),
+                                   image.shape[2] - 2 * self.get_x_pad()),
+                                  np.uint8)
         self.exception = None
         self.pred_queue = Queue.Queue()
         self.out_queue = Queue.Queue()
@@ -190,8 +204,38 @@ class KerasClassifier(AbstractPixelClassifier):
                              time.time() - t0_total)
         return dict(membrane=self.out_image)
         
+    def downsample_and_pad_image(self, image):
+        '''Downsample the image according to the downsampling factor and pad it
+        
+        The image must be padded to at least the block size.
+        
+        :param image: the image at the original resolution
+        
+        '''
+        if self.downsample_factor == 1 and \
+           image.shape[1] >= self.block_size[1] and \
+           image.shape[2] >= self.block_size[2]:
+            return image
+        image_out = []
+        for plane in image:
+            plane = zoom(plane, 1.0 / self.downsample_factor)
+            if plane.shape[0] < self.block_size[1] or \
+               plane.shape[1] < self.block_size[2]:
+                xs = max(plane.shape[1], self.block_size[2])
+                ys = max(plane.shape[0], self.block_size[1])
+                tmp = np.zeros((ys, xs), plane.dtype)
+                tmp[:plane.shape[0], :plane.shape[1]] = plane
+                plane = tmp
+            image_out.append(plane)
+        return np.array(image_out)
+    
     def preprocessor(self, image):
         '''The preprocessor thread: run normalization and make blocks'''
+        #
+        # Downsample the image as a first step. All coordinates are then in
+        # the downsampled size.
+        #
+        image = self.downsample_and_pad_image(image)
         #
         # Coordinates:
         #
@@ -220,7 +264,6 @@ class KerasClassifier(AbstractPixelClassifier):
         x1 = image.shape[2] - self.get_x_pad()
         n_x = 1 + int((x1-x0 - 1) / output_block_size[2])
         xs = np.linspace(x0, x1, n_x+1).astype(int)
-        self.out_image = np.zeros((z1-z0, y1 - y0, x1 - x0), np.uint8)
         t0 = time.time()
         norm_img = [
             self.normalize_image(image[zi])
@@ -302,6 +345,20 @@ class KerasClassifier(AbstractPixelClassifier):
                 logger.report_metric("keras_block_classification_time",
                                      delta)
                 pred.shape = (z1b - z0b, y1b - y0b, x1b - x0b)
+                np.save("/home/leek/temp/foo.npy", pred)
+                if self.downsample_factor != 1:
+                    pred = np.array([zoom(plane, self.downsample_factor)
+                                     for plane in pred])
+                    y0b, y1b, x0b, x1b = \
+                        [int(_ * self.downsample_factor)
+                         for _ in y0b, y1b, x0b, x1b]
+                # Fix padding
+                if x1b > self.image_shape[2]:
+                    x1b = self.image_shape[2]
+                    pred = pred[:, :, :x1b - x0b]
+                if y1b > self.image_shape[1]:
+                    y1b = self.image_shape[1]
+                    pred = pred[:, :y1b - y0b, :]
                 self.out_image[z0b:z1b, y0b:y1b, x0b:x1b] = \
                     (pred * 255).astype(np.uint8)
         except:
