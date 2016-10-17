@@ -345,7 +345,6 @@ class KerasClassifier(AbstractPixelClassifier):
                 logger.report_metric("keras_block_classification_time",
                                      delta)
                 pred.shape = (z1b - z0b, y1b - y0b, x1b - x0b)
-                np.save("/home/leek/temp/foo.npy", pred)
                 if self.downsample_factor != 1:
                     pred = np.array([zoom(plane, self.downsample_factor)
                                      for plane in pred])
