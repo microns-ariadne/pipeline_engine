@@ -45,6 +45,10 @@ class ConnectSynapsesRunMixin:
         default=25,
         description="Minimum acceptable overlap between neurite and synapse "
                     "border.")
+    wants_edge_contact = luigi.BooleanParameter(
+        description="If true, only count pixels along the edge of the "
+        "synapse, otherwise consider overlap between the whole synapse "
+        "and neurons")
     
     def ariadne_run(self):
         #
@@ -72,21 +76,26 @@ class ConnectSynapsesRunMixin:
                          self.xy_dilation * 2 + 1), bool)
         grey_dilation(synapse, footprint=strel, output=synapse,
                       mode='constant', cval=0)
-        #
-        # Remove the interior (connected to self on 6 sides)
-        #
-        strel = np.array([[[False, False, False],
-                           [False, True, False],
-                           [False, False, False]],
-                          [[False, True, False],
-                           [True, True, True],
-                           [False, True, False]],
-                          [[False, False, False],
-                           [False, True, False],
-                           [False, False, False]]])
-        mask = \
-            grey_dilation(synapse, footprint=strel, mode='constant', cval=0) !=\
-            grey_erosion(synapse, footprint=strel, mode='constant', cval=255)
+        if self.wants_edge_contact:
+            #
+            # Remove the interior (connected to self on 6 sides)
+            #
+            strel = np.array([[[False, False, False],
+                               [False, True, False],
+                               [False, False, False]],
+                              [[False, True, False],
+                               [True, True, True],
+                               [False, True, False]],
+                              [[False, False, False],
+                               [False, True, False],
+                               [False, False, False]]])
+            mask = \
+                grey_dilation(
+                    synapse, footprint=strel, mode='constant', cval=0) !=\
+                grey_erosion(
+                    synapse, footprint=strel, mode='constant', cval=255)
+        else:
+            mask = True
         #
         # Extract only the overlapping pixels from the neurons and synapses
         #
