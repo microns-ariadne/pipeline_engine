@@ -167,8 +167,18 @@ class SynapseStatisticsRunMixin:
         # Compile the results 
         #
         true_positives = d_matrix[s1_gt, s2_gt].A1 != 0
+        tp_doublets = np.column_stack((s1_gt[true_positives],
+                                       s2_gt[true_positives]))
+        tp_doublets = tp_doublets[tp_doublets[:, 0] < tp_doublets[:, 1]]
         false_negatives = ~true_positives
+        fn_doublets = np.column_stack((s1_gt[false_negatives],
+                                       s2_gt[false_negatives]))
+        fn_doublets = fn_doublets[fn_doublets[:, 0] < fn_doublets[:, 1]]
         false_positives = gt_matrix[s1_d, s2_d].A1 == 0
+        fp_doublets = np.column_stack((s1_d[false_positives],
+                                       s2_d[false_positives]))
+        fp_doublets = fp_doublets[(fp_doublets[:, 0] < fp_doublets[:, 1]) &
+                                  (fp_doublets[:, 0] != 0)]
         n_true_positives = np.sum(true_positives)
         n_false_negatives = len(true_positives) - n_true_positives
         n_false_positives = np.sum(false_positives)
@@ -191,7 +201,10 @@ class SynapseStatisticsRunMixin:
             n_false_positive_synapses=fp_synapses,
             n_false_negative_synapses=fn_synapses,
             synapse_precision=float(tp_synapses) / (tp_synapses + fp_synapses),
-            synapse_recall=float(tp_synapses) / (tp_synapses + fn_synapses))
+            synapse_recall=float(tp_synapses) / (tp_synapses + fn_synapses),
+            true_positive_labels=[_.tolist() for _ in tp_doublets],
+            false_positive_labels=[_.tolist() for _ in fp_doublets],
+            false_negative_labels=[_.tolist() for _ in fn_doublets])
         with self.output().open("w") as fd:
             json.dump(result, fd)
     
@@ -229,7 +242,8 @@ class SynapseStatisticsRunMixin:
         #
         # The unique neurons:
         #
-        uneurons = neurons[first[counts > 1]]
+        first = first[counts > 1]
+        uneurons = neurons[idx[counts > 1]]
         counts = counts[counts > 1]
         #
         # Create indices into above table
