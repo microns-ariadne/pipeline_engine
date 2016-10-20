@@ -25,6 +25,7 @@ from .neuroproof import NeuroproofTask
 from .nplearn import NeuroproofLearnTask
 from .segment import SegmentTask, SegmentCC2DTask, UnsegmentTask
 from .skeletonize import SkeletonizeTask
+from .stitch_segmentation import StitchSegmentationTask
 from .synapse_statistics import SynapseStatisticsTask
 from .visualize import VisualizeTask, PipelineVisualizeTask
 
@@ -36,4 +37,4 @@ all = [AllConnectedComponentsTask, BlockTask, ClassifyTask,
        NeuroproofTask, NeuroproofLearnTask, 
        SegmentTask, SegmentCC2DTask, UnsegmentTask,
        VisualizeTask, VolumeRelabelingTask, PipelineVisualizeTask, 
-       SkeletonizeTask, SynapseStatisticsTask]
+       SkeletonizeTask, StitchSegmentationTask, SynapseStatisticsTask]

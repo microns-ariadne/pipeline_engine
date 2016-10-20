@@ -164,7 +164,7 @@ class HDF5FileTarget(luigi.File):
     
     def exists(self):
         '''Return True if all subtargets exist'''
-        for dataset_path in dataset_paths:
+        for dataset_path in self.dataset_paths:
             if not self.get_subtarget(dataset_path).exists():
                 return False
         return True
