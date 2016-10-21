@@ -1396,24 +1396,16 @@ class PipelineTaskMixin:
                         location2=synapse_gt_seg_task.output().dataset_location,
                         overlap_volume=volume,
                         output_location=gt_sn_location)
+                    gt_sn_task.min_overlap_percent = 0.0
                     gt_neuron_synapse_tasks[zi, yi, xi] = gt_sn_task
         #
-        # Compile the global synapse / neuron connection map
+        # Create the statistics task
+        #
+        # Find the subtasks
         #
         gt_synapse_neuron_connections = [
             task.output().path 
             for task in gt_neuron_synapse_tasks.flatten()]
-        
-        synapse_gt_location = os.path.join(
-            self.temp_dirs[0],"gt-synapse-neuron-connections.pkl")
-        synapse_gt_task = SynapseGtTask(
-            synapse_neuron_connection_locations=gt_synapse_neuron_connections,
-            output_location=synapse_gt_location)
-        map(synapse_gt_task.set_requirement, 
-            gt_neuron_synapse_tasks.flatten())
-        #
-        # Create the statistics task
-        #
         synapse_neuron_connections = [
             task.output().path 
             for task in self.synapse_connectivity_tasks.flatten()]
@@ -1424,16 +1416,24 @@ class PipelineTaskMixin:
         detected_synapse_connection_tasks = \
             self.synapse_connectivity_tasks.flatten()
         gt_neuron_map_tasks = d_gt_neuron_tasks.flatten()
+        #
+        # Create the synapse statistics task
+        #
         self.synapse_statistics_task = self.factory.gen_synapse_statistics_task(
             locs_of(synapse_match_tasks),
             locs_of(self.synapse_connectivity_tasks.flatten()),
             neuron_map=self.all_connected_components_task.output().path,
             gt_neuron_maps=locs_of(gt_neuron_map_tasks),
-            gt_synapse_connections=synapse_gt_location,
+            gt_synapse_connections=locs_of(gt_synapse_neuron_connections),
             output_location=self.synapse_statistics_path)
+        #
+        # Attach the task's dependent tasks
+        #
         self.synapse_statistics_task.set_requirement(
             self.all_connected_components_task)
         self.synapse_statistics_task.set_requirement(synapse_gt_task)
+        map(self.synapse_statistics_task.set_requirement,
+            gt_neuron_synapse_tasks.flatten())
         map(self.synapse_statistics_task.set_requirement, 
             synapse_match_tasks)
         map(self.synapse_statistics_task.set_requirement,

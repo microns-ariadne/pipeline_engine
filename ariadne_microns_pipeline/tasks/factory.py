@@ -362,8 +362,7 @@ class AMTaskFactory(object):
         gt_neuron_maps, gt_synapse_connections, output_location):
         '''Calculate precision/recall on synapse-synapse connections
         
-        :param synapse_matches: .json file produced by SynapseGtTask
-                                containing global synapse/neuron connections
+        :param synapse_matches: .json files containing gt - detected matches
         :param detected_synapse_connections: sequence of .json files
              containing connections between detected synapses and neurons
         :param neuron_map: .json file containing output of 
@@ -371,7 +370,8 @@ class AMTaskFactory(object):
             to global neuron label
         :param gt_neuron_maps: .json files mstching the local labels of
             detected neurons to those of ground-truth neurons
-        
+        :param gt_synapse_connections: .json files containing connections
+        between gt synapses and neurons
         '''
         return SynapseStatisticsTask(
             synapse_matches=synapse_matches,

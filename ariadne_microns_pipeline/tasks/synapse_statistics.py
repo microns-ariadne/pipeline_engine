@@ -4,6 +4,7 @@ import cPickle
 import json
 import luigi
 import numpy as np
+import rh_logger
 from scipy.sparse import coo_matrix
 
 from .utilities import RunMixin, RequiresMixin, SingleThreadedMixin
@@ -22,21 +23,27 @@ class SynapseStatisticsTaskMixin:
     gt_neuron_maps = luigi.ListParameter(
         description="The .json file that maps detected neuron labels to "
                     "ground-truth neuron labels")
-    gt_synapse_connections = luigi.Parameter(
-        description="The .pkl file that records synapse-neuron connections "
-                    "in the ground-truth.")
+    gt_synapse_connections = luigi.ListParameter(
+        description="The .json files containing connections between ground "
+        "truth synapses and neurites")
     output_location = luigi.Parameter(
         description="The location for the confusion map")
 
     def input(self):
         yield luigi.LocalTarget(self.neuron_map)
         yield luigi.LocalTarget(self.gt_synapse_connections)
-        for synapse_match, neuron_match, detected_connection in zip(
-            self.synapse_matches, self.gt_neuron_maps,
-            self.detected_synapse_connections):
+        for synapse_match, \
+            neuron_match, \
+            detected_connection, \
+            gt_connection in zip(
+                self.synapse_matches, 
+                self.gt_neuron_maps,
+                self.detected_synapse_connections, 
+                self.gt_synapse_connections):
             yield luigi.LocalTarget(synapse_match)
             yield luigi.LocalTarget(neuron_match)
             yield luigi.LocalTarget(detected_connection)
+            yield luigi.LocalTarget(gt_connection)
     
     def output(self):
         return luigi.LocalTarget(self.output_location)
@@ -48,23 +55,10 @@ class SynapseStatisticsRunMixin:
         inputs = self.input()
         neuron_map_tgt = inputs.next()
         gt_synapse_connection_tgt = inputs.next()
+        
         #
         # Create all synapse-neuron-synapse triplets in the ground-truth
         #
-        gt_synapse_connections = cPickle.load(
-            gt_synapse_connection_tgt.open("r"))
-        synapse_map = dict([
-            (k, np.array(v))
-            for k, v in gt_synapse_connections["synapse_map"].items()])
-        synapses = np.array(gt_synapse_connections["synapse"])
-        neurons = np.array(gt_synapse_connections["neuron"])
-        s1_gt, s2_gt, n_gt = self.get_triplets(synapses, neurons)
-        #
-        # Make a table of all synapse pairs
-        #
-        pair_tbl = coo_matrix((np.ones(len(s1_gt)*2, np.uint8),
-                               (np.hstack((s1_gt, s2_gt)),
-                                np.hstack((s2_gt, s1_gt))))).tocsr()
         #
         # Get the detected synapses, mapping synapses to their gt
         # and neurons to their global labeling
@@ -72,12 +66,17 @@ class SynapseStatisticsRunMixin:
         s1_d = []
         s2_d = []
         n_d = []
+        s_gt = []
+        n_gt = []
+        gt_labels = []
         tp_synapses = 0
         fp_synapses = 0
         fn_synapses = 0
         neuron_map_dict = json.load(neuron_map_tgt.open("r"),
                                     object_hook=to_hashable)
         neuron_map = dict(neuron_map_dict["volumes"])
+        synapse_offset = 1
+        synapse_map = []
         try:
             while True:
                 synapse_matches = json.load(inputs.next().open("r"),
@@ -86,6 +85,15 @@ class SynapseStatisticsRunMixin:
                                            object_hook=to_hashable)
                 d_synapse_connections = json.load(inputs.next().open("r"),
                                                   object_hook = to_hashable)
+                gt_synapse_connections = json.load(inputs.next().open("r"),
+                                                   object_hook = to_hashable)
+                #
+                # The ground-truth synapse/neuron connections
+                #
+                gt_neuron = np.hstack([
+                    gt_synapse_connections["neuron_1"],
+                    gt_synapse_connections["neuron_2"]])
+                gt_synapse = np.hstack([gt_synapse_connections["synapse"]]*2)
                 #
                 # The local label #s of the synapses. Doubled because each
                 # synapse connects two neurons
@@ -102,12 +110,22 @@ class SynapseStatisticsRunMixin:
                 #
                 gt_per_detected = np.array(synapse_matches["gt_per_detected"])
                 detected_per_gt = np.array(synapse_matches["detected_per_gt"])
-                fn_synapses += np.sum(detected_per_gt[1:] == 0)
+                gtl = np.array(synapse_matches["gt_labels"])
+                max_synapse = max(np.max(gt_synapse), len(detected_per_gt))
+                global_synapse_labels = np.zeros(max_synapse + 1, int)
+                global_synapse_labels[gtl] = \
+                    np.arange(len(gtl)) + synapse_offset
+                synapse_offset += len(gtl)
+                synapse_map.append((
+                    dict(x=volume["x"], y=volume["y"], z=volume["z"],
+                         width=volume["width"], height=volume["height"], 
+                         depth=volume["depth"]), 
+                    zip(global_synapse_labels, gtl)))
                 #
-                # Get rid of synapse/neuron pairs that were outside of
-                # the annotated volume
+                # # of false synapses are those without correspondences
+                # in the ground truth labels
                 #
-                sm = np.array(synapse_map[volume])
+                fn_synapses += np.sum(detected_per_gt[gtl] == 0)
                 d_labels = np.array(synapse_matches["detected_labels"])
                 if len(d_labels) == 0:
                     continue
@@ -134,7 +152,7 @@ class SynapseStatisticsRunMixin:
                 # so anything that pairs with a false positive synapse will
                 # not be found in the true rendering of matching pairs.
                 #
-                g_synapse = sm[gt_per_detected[l_synapse]]
+                g_synapse = global_synapse_labels[gt_per_detected[l_synapse]]
                 #
                 # Get the triples
                 #
@@ -147,26 +165,42 @@ class SynapseStatisticsRunMixin:
                 s1_d.append(s1_t)
                 s2_d.append(s2_t)
                 n_d.append(n_t)
+                #
+                # Now do similar for gt_connections
+                #
+                gt_synapse = global_synapse_labels[gt_synapse]
+                mask = gt_synapse != 0
+                gt_synapse, gt_neuron = gt_synapse[mask], gt_neuron[mask]
+                s_gt.append(gt_synapse)
+                n_gt.append(gt_neuron)
+                
         except StopIteration:
             pass
+        s_gt, n_gt = np.hstack(s_gt), np.hstack(n_gt)
+        s1_d = np.hstack(s1_d)
+        s2_d = np.hstack(s2_d)
         #
         # Make the detected matrix
         #
-        s1_d = np.hstack(s1_d)
-        s2_d = np.hstack(s2_d)
-        max_label = np.max([np.max(_) for _ in s1_d, s2_d, s1_gt, s2_gt])
         d_matrix = coo_matrix((np.ones(len(s1_d)*2),
                                (np.hstack((s1_d, s2_d)),
                                 np.hstack((s2_d, s1_d)))),
-                              shape=(max_label+1, max_label+1)).tocsr()
+                              shape=(synapse_offset, synapse_offset)).tocsr()
+        #
+        # Make the gt matrix
+        #
+        s1_gt, s2_gt, n_gt = self.get_triplets(s_gt, n_gt)
         gt_matrix = coo_matrix((np.ones(len(s1_gt)*2),
                                 (np.hstack((s1_gt, s2_gt)),
                                  np.hstack((s2_gt, s1_gt)))),
-                               shape=(max_label+1, max_label+1)).tocsr()
+                               shape=(synapse_offset, synapse_offset)).tocsr()
         #
         # Compile the results 
         #
-        true_positives = d_matrix[s1_gt, s2_gt].A1 != 0
+        if len(s1_gt) == 0:
+            true_positives = np.zeros(0, bool)
+        else:
+            true_positives = (d_matrix[s1_gt, s2_gt] != 0).A1
         tp_doublets = np.column_stack((s1_gt[true_positives],
                                        s2_gt[true_positives]))
         tp_doublets = tp_doublets[tp_doublets[:, 0] < tp_doublets[:, 1]]
@@ -174,7 +208,10 @@ class SynapseStatisticsRunMixin:
         fn_doublets = np.column_stack((s1_gt[false_negatives],
                                        s2_gt[false_negatives]))
         fn_doublets = fn_doublets[fn_doublets[:, 0] < fn_doublets[:, 1]]
-        false_positives = gt_matrix[s1_d, s2_d].A1 == 0
+        if len(s1_d) == 0:
+            false_positives = np.zeros(0, bool)
+        else:
+            false_positives = gt_matrix[s1_d, s2_d].A1 == 0
         fp_doublets = np.column_stack((s1_d[false_positives],
                                        s2_d[false_positives]))
         fp_doublets = fp_doublets[(fp_doublets[:, 0] < fp_doublets[:, 1]) &
@@ -183,14 +220,24 @@ class SynapseStatisticsRunMixin:
         n_false_negatives = len(true_positives) - n_true_positives
         n_false_positives = np.sum(false_positives)
         precision = \
-            float(n_true_positives) / (n_true_positives + n_false_positives)
+            float(n_true_positives) / \
+            (n_true_positives + n_false_positives + np.finfo(float).eps)
         recall = \
-            float(n_true_positives) / (n_true_positives + n_false_negatives)
+            float(n_true_positives) / \
+            (n_true_positives + n_false_negatives + np.finfo(float).eps)
         #
         # False negatives to add to pairs
         #
         s1_gt_fn = s1_gt[false_negatives]
         s2_gt_fn = s2_gt[false_negatives]
+        #
+        # Synapse stats
+        #
+        synapse_precision =\
+            float(tp_synapses) / \
+            (tp_synapses + fp_synapses + np.finfo(float).eps)
+        synapse_recall = float(tp_synapses) /\
+            (tp_synapses + fn_synapses + np.finfo(float).eps)
         result = dict(
             precision=precision,
             recall=recall,
@@ -200,14 +247,15 @@ class SynapseStatisticsRunMixin:
             n_true_positive_synapses=tp_synapses,
             n_false_positive_synapses=fp_synapses,
             n_false_negative_synapses=fn_synapses,
-            synapse_precision=float(tp_synapses) / (tp_synapses + fp_synapses),
-            synapse_recall=float(tp_synapses) / (tp_synapses + fn_synapses),
+            synapse_precision=synapse_precision,
+            synapse_recall=synapse_recall,
             true_positive_labels=[_.tolist() for _ in tp_doublets],
             false_positive_labels=[_.tolist() for _ in fp_doublets],
-            false_negative_labels=[_.tolist() for _ in fn_doublets])
+            false_negative_labels=[_.tolist() for _ in fn_doublets],
+            synapse_map=synapse_map)
         with self.output().open("w") as fd:
             json.dump(result, fd)
-    
+        
     def get_triplets(self, synapses, neurons):
         '''Get synapse, neuron, synapse triplets'''
         #
@@ -242,7 +290,7 @@ class SynapseStatisticsRunMixin:
         #
         # The unique neurons:
         #
-        first = first[counts > 1]
+        first = first[:-1][counts > 1]
         uneurons = neurons[idx[counts > 1]]
         counts = counts[counts > 1]
         #

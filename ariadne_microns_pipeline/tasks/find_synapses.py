@@ -68,18 +68,21 @@ class FindSynapsesRunMixin:
     min_slice = luigi.IntParameter(
         default=3,
         description="Minimum acceptable size of a synapse in the Z direction")
+    erode_with_neurons = luigi.BoolParameter(
+        description="Exclude areas within neurons")
     
     def ariadne_run(self):
         volume, neuron_segmentation = \
             [ _.imread() for _ in self.input()]
-        #
-        # Exclude the innards of the neuron from consideration
-        #
-        strel = np.ones((self.erosion_z * 2 + 1,
-                         self.erosion_xy * 2 + 1,
-                         self.erosion_xy * 2 + 1), bool)
-        erode_segmentation(neuron_segmentation, strel, in_place=True)
-        volume[neuron_segmentation != 0] = 0
+        if self.erode_with_neurons:
+            #
+            # Exclude the innards of the neuron from consideration
+            #
+            strel = np.ones((self.erosion_z * 2 + 1,
+                             self.erosion_xy * 2 + 1,
+                             self.erosion_xy * 2 + 1), bool)
+            erode_segmentation(neuron_segmentation, strel, in_place=True)
+            volume[neuron_segmentation != 0] = 0
         #
         # Perform the segmentation on the synapse probability map
         #

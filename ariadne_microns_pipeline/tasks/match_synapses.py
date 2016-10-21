@@ -88,9 +88,14 @@ class MatchSynapsesRunMixin:
             mask_tgt = inputs.next()
             mask = mask_tgt.imread()
             d[mask == 0] = 0
+            gt[mask == 0] = 0
         d_hist = np.bincount(d.flatten())
         d_hist[0] = 0
-        d_labels = np.where(d_hist)[0]
+        d_labels = np.where(d_hist > 0)[0]
+        
+        gt_hist = np.bincount(gt.flatten())
+        gt_hist[0] = 0
+        gt_labels = np.where(gt_hist > 0)[0]
             
         if self.match_method == MatchMethod.overlap:
             matching_d, matching_gt = match_synapses_by_overlap(
@@ -108,6 +113,7 @@ class MatchSynapsesRunMixin:
             json.dump(dict(
                 volume=volume,
                 detected_labels=d_labels.tolist(),
+                gt_labels=gt_labels.tolist(),
                 detected_per_gt=matching_d.tolist(),
                 gt_per_detected=matching_gt.tolist()), fd)
 
