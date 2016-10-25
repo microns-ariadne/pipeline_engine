@@ -281,6 +281,21 @@ class PipelineTaskMixin:
         default=100.,
         description="The maximum allowed distance between centroids of "
              "ground-truth and detected synapses")
+    gt_neuron_synapse_xy_dilation = luigi.IntParameter(
+        default=6,
+        description="The number of pixels of dilation to apply to the synapses "
+                    "in the ground-truth dataset in the x and y directions "
+                    "before matching to neurons")
+    gt_neuron_synapse_z_dilation = luigi.IntParameter(
+        default=0,
+        description="The number of pixels of dilation to apply to the synapses "
+                    "in the ground-truth dataset in the z direction "
+                    "before matching to neurons")
+    gt_neuron_synapse_min_contact = luigi.IntParameter(
+        default=0,
+        description="The minimum amount of contact between a ground-truth "
+                    "neuron and syapse before they can be considered "
+                    "to be touching.")
 
     def get_dirs(self, x, y, z):
         '''Return a directory suited for storing a file with the given offset
@@ -328,14 +343,41 @@ class PipelineTaskMixin:
     def compute_extents(self):
         '''Compute various block boundaries and padding
         
-        self.nn_{x,y,z}_pad - amount of padding for pixel classifier
+        This routine computes the extents as follows:
         
-        self.{x, y, z}{0, 1} - the start and end extents in the x, y & z dirs
+        * Blocks are always the stated block size (unless the block size is
+          less than the entire volume).
+        
+        * For classification, blocks are extended by the classifier padding
+          when fetching image data. It's assumed that there is valid image
+          data of at least the padding size on every side of the volume.
+          Classifier blocks must be at least the block size but can be
+          larger.
+        
+        * A reblocking is done after the classification. These blocks have
+          at least the required amount of Neuroproof overlap padding with
+          adjacent blocks. The block size is maintained which may result
+          in an excess of padding - this assumes that more context for
+          Neuroproof is a good thing and border regions are a bad thing.
+        
+        self.{x,y,z}{0,1} - the start and end coordinates of the volume to be
+                            analyzed. This might be smaller than the requested
+                            volume if the Butterfly volume is smaller than
+                            the requested volume.
+        self.nn_{x,y,z}_pad - amount of padding for pixel classifier ("nn"
+                              stands for Neural Network).
+        
+        self.cl_{x, y, z}{s,e} - the start and end extents in the x, y & z dirs
+                                 for the classifier blocks, before padding.
+        
+        self.cl_padded_{x, y, z} - the start and end extents in the x, y & z
+                                   directions for the classifier blocks
+                                   after padding.
 
-        self.n_{x, y, z} - the number of blocks in the x, y and z dirs
+        self.ncl_{x, y, z} - the number of blocks in the x, y and z dirs
+                             for the classifiers.
 
-        self.{x, y, z}s - the starts of each block (+1 at the end so that
-        self.xs[n], self.xs[n+1] are the start and ends of block n)
+        self.{x, y, z}{s,e} - the starts and ends of each block
         '''
         butterfly = ButterflyChannelTarget(
             self.experiment, self.sample, self.dataset, self.channel, 
@@ -361,26 +403,50 @@ class PipelineTaskMixin:
         self.useable_height = self.y1 - self.y0
         self.useable_depth = self.z1 - self.z0
         #
-        # Compute equi-sized blocks (as much as possible)
+        # Compute exact block sizes for the classifier w/o overlap
         #
-        self.n_x = int((self.useable_width-1) / self.block_width) + 1
-        self.n_y = int((self.useable_height-1) / self.block_height) + 1
-        self.n_z = int((self.useable_depth-1) / self.block_depth) + 1
-        self.xs = np.linspace(self.x0, self.x1, self.n_x + 1).astype(int)
-        self.ys = np.linspace(self.y0, self.y1, self.n_y + 1).astype(int)
-        self.zs = np.linspace(self.z0, self.z1, self.n_z + 1).astype(int)
+        self.ncl_x = int((self.useable_width-1) / self.block_width) + 1
+        self.ncl_y = int((self.useable_height-1) / self.block_height) + 1
+        self.ncl_z = int((self.useable_depth-1) / self.block_depth) + 1
+        self.cl_xs = self.x0 + self.block_width * np.arange(self.ncl_x)
+        self.cl_xe = self.cl_xs + self.block_width
+        self.cl_ys = self.y0 + self.block_height * np.arange(self.ncl_y)
+        self.cl_ye = self.cl_ys + self.block_width
+        self.cl_zs = self.z0 + self.block_depth * np.arange(self.ncl_z)
+        self.cl_ze = self.cl_zs + self.block_depth
+        #
+        # Compute # of blocks for segmentation and beyond. We need at least
+        # the Neuroproof padding between n-1 blocks.
+        #
+        self.n_x = int((self.useable_width - self.block_width - 1) /
+                       (self.block_width - self.np_x_pad)) + 2
+        self.n_y = int((self.useable_height - self.block_height - 1) /
+                       (self.block_height - self.np_y_pad)) + 2
+        self.n_z = int((self.useable_depth - self.block_depth - 1) /
+                       (self.block_depth - self.np_z_pad)) + 2
+        self.xs = np.linspace(self.x0, self.x1, self.n_x, endpoint = False)\
+            .astype(int)
+        self.xe = self.xs + self.block_width
+        self.ys = np.linspace(self.y0, self.y1, self.n_y, endpoint = False)\
+            .astype(int)
+        self.ye = self.ys + self.block_height
+        self.zs = np.linspace(self.z0, self.z1, self.n_z, endpoint=False)\
+            .astype(int)
+        self.ze = self.zs + self.block_depth
 
     def generate_butterfly_tasks(self):
         '''Get volumes padded for CNN'''
-        self.butterfly_tasks = np.zeros((self.n_z, self.n_y, self.n_x), object)
-        for zi in range(self.n_z):
-            z0, z1 = self.zs[zi] - self.nn_z_pad, self.zs[zi+1] + self.nn_z_pad
-            for yi in range(self.n_y):
-                y0 = self.ys[yi] - self.nn_y_pad
-                y1 = self.ys[yi+1] + self.nn_y_pad
-                for xi in range(self.n_x):
-                    x0 = self.xs[xi] - self.nn_x_pad
-                    x1 = self.xs[xi+1] + self.nn_x_pad
+        self.butterfly_tasks = \
+            np.zeros((self.ncl_z, self.ncl_y, self.ncl_x), object)
+        for zi in range(self.ncl_z):
+            z0 = self.cl_zs[zi] - self.nn_z_pad
+            z1 = self.cl_ze[zi] + self.nn_z_pad
+            for yi in range(self.ncl_y):
+                y0 = self.cl_ys[yi] - self.nn_y_pad
+                y1 = self.cl_ye[yi] + self.nn_y_pad
+                for xi in range(self.ncl_x):
+                    x0 = self.cl_xs[xi] - self.nn_x_pad
+                    x1 = self.cl_xe[xi] + self.nn_x_pad
                     volume = Volume(x0, y0, z0, x1-x0, y1-y0, z1-z0)
                     location =self.get_dataset_location(volume, IMG_DATASET)
                     self.butterfly_tasks[zi, yi, xi] =\
@@ -398,27 +464,29 @@ class PipelineTaskMixin:
         
         Take each butterfly task and run a pixel classifier on its output.
         '''
-        self.classifier_tasks = np.zeros((self.n_z, self.n_y, self.n_x), object)
+        self.classifier_tasks = \
+            np.zeros((self.ncl_z, self.ncl_y, self.ncl_x), object)
         self.synapse_classifier_tasks = np.zeros(
-            (self.n_z, self.n_y, self.n_x), object)
+            (self.ncl_z, self.ncl_y, self.ncl_x), object)
         self.additional_classifier_tasks = dict(
-            [(k, np.zeros((self.n_z, self.n_y, self.n_x), object))
+            [(k, np.zeros((self.ncl_z, self.ncl_y, self.ncl_x), object))
              for k in self.additional_neuroproof_channels])
         datasets={self.membrane_class_name: MEMBRANE_DATASET,
                   self.synapse_class_name: SYNAPSE_DATASET}
         for channel in self.additional_neuroproof_channels:
             if channel != SYNAPSE_DATASET:
                 datasets[channel] = channel
-        for zi in range(self.n_z):
-            for yi in range(self.n_y):
-                for xi in range(self.n_x):
+        for zi in range(self.ncl_z):
+            for yi in range(self.ncl_y):
+                for xi in range(self.ncl_x):
                     btask = self.butterfly_tasks[zi, yi, xi]
                     input_target = btask.output()
                     img_location = DatasetLocation(
                         input_target.paths,
                         input_target.dataset_path,
                         input_target.pattern)
-                    paths = self.get_dirs(self.xs[xi], self.ys[yi], self.zs[zi])
+                    paths = self.get_dirs(
+                        self.cl_xs[xi], self.cl_ys[yi], self.cl_zs[zi])
                     ctask = self.factory.gen_classify_task(
                         paths=paths,
                         datasets=datasets,
@@ -451,7 +519,88 @@ class PipelineTaskMixin:
                             dataset_name=name)
                         self.additional_classifier_tasks[name][zi, yi, xi] = \
                             shim_task
+     
+    def generate_block_tasks(self):
+        '''Generate tasks that reblock classifications for segmentation'''
+        self.old_classifier_tasks = self.classifier_tasks
+        self.old_synapse_classifier_tasks = self.synapse_classifier_tasks
+        self.old_additional_classifier_tasks = self.additional_classifier_tasks
+        self.classifier_tasks = np.zeros((self.n_x, self.n_y, self.n_z), object)
+        self.synapse_classifier_tasks = \
+            np.zeros((self.n_x, self.n_y, self.n_z), object)
+        self.additional_classifier_tasks = {}
+        for name in self.additional_neuroproof_channels:
+            if name == SYNAPSE_DATASET:
+                self.additional_classifier_tasks[name] =\
+                    self.synapse_classifier_tasks
+            else:
+                self.additional_classifier_tasks[name] = \
+                    np.zeros((self.n_x, self.n_y, self.n_z), object)
+        for zi in range(self.n_z):
+            zs = self.zs[zi]
+            ze = self.ze[zi]
+            cl_zidx = [idx for idx in range(self.ncl_z)
+                       if self.cl_zs[idx] < ze and self.cl_ze[idx] > zs]
+            for yi in range(self.n_y):
+                ys = self.ys[yi]
+                ye = self.ye[yi]
+                cl_yidx = [idx for idx in range(self.ncl_y)
+                           if self.cl_ys[idx] < ye and self.cl_ye[idx] > ys]
+                for xi in range(self.n_x):
+                    xs = self.xs[xi]
+                    xe = self.xe[xi]
+                    cl_xidx = [idx for idx in range(self.ncl_x)
+                               if self.cl_xs[idx] < xe and self.cl_xe[idx] > xs]
+                    self.generate_block_task(
+                        xi, yi, zi, xs, xe, ys, ye, zs, ze, 
+                        cl_xidx, cl_yidx, cl_zidx)
     
+    def generate_block_task(self, xi, yi, zi, xs, xe, ys, ye, zs, ze, 
+                            cl_xidx, cl_yidx, cl_zidx):
+        '''Generate the tasks for one x/y/z
+        
+        xi, yi, zi: indices of the block
+        xs, xe, ys, ye, zs, ze: starts and ends of the block
+        cl_xidx, cl_yidx, cl_zidx: indices of the overlapping input blocks
+        '''
+        pairs = [
+            (self.old_classifier_tasks, 
+             self.classifier_tasks, 
+             MEMBRANE_DATASET),
+            (self.old_synapse_classifier_tasks, 
+             self.synapse_classifier_tasks,
+             SYNAPSE_DATASET)]
+        for name in self.additional_neuroproof_channels:
+            if name == SYNAPSE_DATASET:
+                continue
+            pairs.append((self.old_additional_classifier_tasks[name],
+                          self.additional_classifier_tasks[name],
+                          name))
+        volume = Volume(xs, ys, zs, xe-xs, ye-ys, ze-zs)
+        for old, new, name in pairs:
+            location = self.get_dataset_location(volume, name)
+            inputs = []
+            tasks = []
+            for zz in cl_zidx:
+                for yy in cl_yidx:
+                    for xx in cl_xidx:
+                        task = old[zz, yy, xx]
+                        tasks.append(task)
+                        tgt = task.output()
+                        inputs.append(dict(volume=tgt.volume,
+                                           location=tgt.dataset_location))
+            if len(inputs) == 1 and volume == inputs[0]["volume"]:
+                # A direct block copy - this generally happens on
+                # xi = yi = zi = 0.
+                # Just carry the old task forward.
+                #
+                task = old[cl_zidx[0], cl_yidx[0], cl_xidx[0]]
+            else:
+                task = self.factory.gen_block_task(volume, location, inputs)
+                for itask in tasks:
+                    task.set_requirement(itask)
+            new[zi, yi, xi] = task
+
     def generate_border_mask_tasks(self):
         '''Create a border mask for each block'''
         self.border_mask_tasks = \
@@ -484,8 +633,8 @@ class PipelineTaskMixin:
             for yi in range(self.n_y):
                 for xi in range(self.n_x):
                     ctask = self.classifier_tasks[zi, yi, xi]
-                    volume = ctask.volume
                     prob_target = ctask.output()
+                    volume = prob_target.volume
                     prob_location = DatasetLocation(
                         prob_target.paths,
                         prob_target.dataset_path,
@@ -570,247 +719,12 @@ class PipelineTaskMixin:
                     rtask.set_requirement(wtask)
                     self.resegmentation_tasks[zi, yi, xi] = rtask
     
-    def generate_border_tasks(self):
-        '''Create border cutouts between adjacent blocks
-        
-        Create both watershed and membrane probability blocks
-        '''
-        self.generate_z_border_tasks()
-        self.generate_y_border_tasks()
-        self.generate_x_border_tasks()
-    
-    def generate_border_task(self, a, b, out_volume, dataset_name):
-        '''Generate a border task between two input tasks
-        
-        :param a: the first input task
-        :param b: the second input task
-        :param out_volume: the cutout volume
-        :param dataset_name: the name of the dataset to be generated
-        '''
-        out_location = self.get_dataset_location(out_volume, dataset_name)
-        inputs = []
-        for ds in a.output(), b.output():
-            volume = Volume(ds.x, ds.y, ds.z, ds.width, ds.height, ds.depth)
-            location = DatasetLocation(ds.paths, ds.dataset_path, ds.pattern)
-            inputs.append(dict(volume=volume, location=location))
-        btask = self.factory.gen_block_task(
-            output_location=out_location,
-            output_volume=out_volume,
-            inputs=inputs)
-        btask.set_requirement(a)
-        btask.set_requirement(b)
-        return btask
-    
-    def generate_x_border_task(self, left, right, dataset_name):
-        '''Generate a border task linking z-neighbors
-        
-        :param left: the task that generates the volume to the left
-        :param right: the task that generates the volume to the right
-        :param dataset_name: the name for the output dataset
-        :returns: a block task whose output is a cutout of the border
-        region between the two.
-        '''
-        ds_left = left.output()
-        ds_right = right.output()
-        x = ds_left.x + ds_left.width - self.np_x_pad
-        width = self.np_x_pad * 2
-        out_volume = Volume(
-           x, ds_left.y, ds_left.z,
-           width, ds_left.height, ds_left.depth)
-        return self.generate_border_task(
-            left, right, out_volume, dataset_name)
-    
-    def generate_y_border_task(self, top, bottom, dataset_name):
-        '''Generate a border task linking y-neighbors
-        
-        :param top: the task that generates the upper volume
-        :param bottoom: the task that generates the lower volume
-        :param dataset_name: the name for the output dataset
-        :returns: a block task whose output is a cutout of the border
-        region between the two.
-        '''
-        ds_top = top.output()
-        ds_bottom = bottom.output()
-        y = ds_top.y + ds_top.height - self.np_y_pad
-        height = self.np_y_pad * 2
-        out_volume = Volume(
-           ds_top.x, y, ds_top.z,
-           ds_top.width, height, ds_top.depth)
-        return self.generate_border_task(
-            top, bottom, out_volume, dataset_name)
-
-    def generate_z_border_task(self, above, below, dataset_name):
-        '''Generate a border task linking z-neighbors
-        
-        :param above: the task that generates the upper volume
-        :param below: the task that generates the lower volume
-        :param dataset_name: the name for the output dataset
-        :returns: a block task whose output is a cutout of the border
-        region between the two.
-        '''
-        ds_above = above.output()
-        ds_below = below.output()
-        z = ds_above.z + ds_above.depth - self.np_z_pad
-        depth = self.np_z_pad * 2
-        out_volume = Volume(
-           ds_above.x, ds_above.y, z,
-           ds_above.width, ds_above.height, depth)
-        return self.generate_border_task(
-            above, below, out_volume, dataset_name)
-
-    def generate_x_border_tasks(self):
-        '''Create border cutouts between blocks left and right'''
-        self.x_seg_borders = \
-            np.zeros((self.n_z, self.n_y, self.n_x-1), object)
-        self.x_prob_borders = \
-            np.zeros((self.n_z, self.n_y, self.n_x-1), object)
-        self.x_additional_borders = \
-            dict([(k, np.zeros((self.n_z, self.n_y, self.n_x-1), object))
-                  for k in self.additional_neuroproof_channels])
-        #
-        # The task sets are composed of the input task arrays
-        # the output border task arrays and the dataset name of
-        # the input tasks
-        #
-        task_sets = [(self.classifier_tasks,
-                      self.x_prob_borders,
-                      MEMBRANE_DATASET),
-                     (self.segmentation_tasks,
-                      self.x_seg_borders,
-                      SEG_DATASET)]
-        if SYNAPSE_DATASET in self.additional_neuroproof_channels:
-            task_sets.append((
-                self.synapse_classifier_tasks,
-                self.x_additional_borders[SYNAPSE_DATASET],
-                SYNAPSE_DATASET))
-        for i, channel in enumerate(self.additional_neuroproof_channels):
-            if channel != SYNAPSE_DATASET:
-                task_sets.append((
-                   self.additional_classifier_tasks[channel],
-                   self.x_additional_borders[channel],
-                   channel))
-        
-        for zi in range(self.n_z):
-            for yi in range(self.n_y):
-                for xleft in range(self.n_x-1):
-                    xright = xleft+1
-                    for tasks_in, tasks_out, in_dataset_name in task_sets:
-                    
-                        task_left = tasks_in[zi, yi, xleft]
-                        task_right = tasks_in[zi, yi, xright]
-                        out_dataset_name = BORDER_DATASET_PATTERN.format(
-                            parent=in_dataset_name, direction="x")
-                        tasks_out[zi, yi, xleft] = \
-                            self.generate_x_border_task(
-                                task_left, task_right,
-                                out_dataset_name)
-
-    def generate_y_border_tasks(self):
-        '''Create border cutouts between blocks on top and below'''
-        self.y_seg_borders = \
-            np.zeros((self.n_z, self.n_y-1, self.n_x), object)
-        self.y_prob_borders = \
-            np.zeros((self.n_z, self.n_y-1, self.n_x), object)
-        self.y_additional_borders = \
-            dict([(k, np.zeros((self.n_z, self.n_y-1, self.n_x), object))
-                  for k in self.additional_neuroproof_channels])
-        #
-        # The task sets are composed of the input task arrays
-        # the output border task arrays and the dataset name of
-        # the input tasks
-        #
-        task_sets = [(self.classifier_tasks,
-                      self.y_prob_borders,
-                      MEMBRANE_DATASET),
-                     (self.segmentation_tasks,
-                      self.y_seg_borders,
-                      SEG_DATASET)]
-        if SYNAPSE_DATASET in self.additional_neuroproof_channels:
-            task_sets.append((
-                self.synapse_classifier_tasks,
-                self.y_additional_borders[SYNAPSE_DATASET],
-                SYNAPSE_DATASET))
-        for i, channel in enumerate(self.additional_neuroproof_channels):
-            if channel != SYNAPSE_DATASET:
-                task_sets.append((
-                   self.additional_classifier_tasks[channel],
-                   self.y_additional_borders[channel],
-                   channel))
-        
-        for zi in range(self.n_z):
-            for ytop in range(self.n_y-1):
-                ybottom = ytop+1
-                for xi in range(self.n_x):
-                    for tasks_in, tasks_out, in_dataset_name in task_sets:
-                    
-                        task_top = tasks_in[zi, ytop, xi]
-                        task_bottom = tasks_in[zi, ybottom, xi]
-                        out_dataset_name = BORDER_DATASET_PATTERN.format(
-                            parent=in_dataset_name, direction="y")
-                        tasks_out[zi, ytop, xi] = \
-                            self.generate_y_border_task(
-                                task_top, task_bottom,
-                                out_dataset_name)
-
-    def generate_z_border_tasks(self):
-        '''Create border cutouts between blocks above and below'''
-        self.z_seg_borders = \
-            np.zeros((self.n_z-1, self.n_y, self.n_x), object)
-        self.z_prob_borders = \
-            np.zeros((self.n_z-1, self.n_y, self.n_x), object)
-        self.z_additional_borders = \
-            dict([(k, np.zeros((self.n_z-1, self.n_y, self.n_x), object))
-                  for k in self.additional_neuroproof_channels])
-        #
-        # The task sets are composed of the input task arrays
-        # the output border task arrays and the dataset name of
-        # the input tasks
-        #
-        task_sets = [(self.classifier_tasks,
-                      self.z_prob_borders,
-                      MEMBRANE_DATASET),
-                     (self.segmentation_tasks,
-                      self.z_seg_borders,
-                      SEG_DATASET)]
-        if SYNAPSE_DATASET in self.additional_neuroproof_channels:
-            task_sets.append((
-                self.synapse_classifier_tasks,
-                self.z_additional_borders[SYNAPSE_DATASET],
-                SYNAPSE_DATASET))
-        for i, channel in enumerate(self.additional_neuroproof_channels):
-            if channel != SYNAPSE_DATASET:
-                task_sets.append((
-                   self.additional_classifier_tasks[channel],
-                   self.z_additional_borders[channel],
-                   channel))
-        
-        for zabove in range(self.n_z-1):
-            zbelow = zabove + 1
-            for yi in range(self.n_y):
-                for xi in range(self.n_x):
-                    for tasks_in, tasks_out, in_dataset_name in task_sets:
-                    
-                        task_above = tasks_in[zabove, yi, xi]
-                        task_below = tasks_in[zbelow, yi, xi]
-                        out_dataset_name = BORDER_DATASET_PATTERN.format(
-                            parent=in_dataset_name, direction="z")
-                        tasks_out[zabove, yi, xi] = \
-                            self.generate_z_border_task(
-                                task_above, task_below,
-                                out_dataset_name)
-                        
     def generate_neuroproof_tasks(self):
         '''Generate all tasks involved in Neuroproofing a segmentation
         
         We Neuroproof the blocks and the x, y and z borders between blocks
         '''
         self.np_tasks = np.zeros((self.n_z, self.n_y, self.n_x), object)
-        self.np_x_border_tasks = \
-            np.zeros((self.n_z, self.n_y, self.n_x-1), object)
-        self.np_y_border_tasks = \
-            np.zeros((self.n_z, self.n_y-1, self.n_x), object)
-        self.np_z_border_tasks = \
-            np.zeros((self.n_z-1, self.n_y, self.n_x), object)
         #
         # The task sets are composed of
         # classifier tasks
@@ -818,37 +732,16 @@ class PipelineTaskMixin:
         # segmentation tasks
         # output tasks
         # output dataset name
-        # is_border: True if neuroproofing a border, False if neuroproofing
-        #            a block
         # 
         task_sets = (
             (self.classifier_tasks,
              self.additional_classifier_tasks,
              self.segmentation_tasks,
              self.np_tasks,
-             NP_DATASET,
-             False),
-            (self.x_prob_borders,
-             self.x_additional_borders,
-             self.x_seg_borders,
-             self.np_x_border_tasks,
-             BORDER_DATASET_PATTERN.format(parent=NP_DATASET, direction="x"),
-             True),
-            (self.y_prob_borders,
-             self.y_additional_borders,
-             self.y_seg_borders,
-             self.np_y_border_tasks,
-             BORDER_DATASET_PATTERN.format(parent=NP_DATASET, direction="y"),
-             True),
-            (self.z_prob_borders,
-             self.z_additional_borders,
-             self.z_seg_borders,
-             self.np_z_border_tasks,
-             BORDER_DATASET_PATTERN.format(parent=NP_DATASET, direction="z"),
-             True)
+             NP_DATASET),
         )
         for classifier_tasks, additional_classifier_tasks, seg_tasks, np_tasks, \
-            dataset_name, is_border in task_sets:
+            dataset_name in task_sets:
 
             for zi in range(classifier_tasks.shape[0]):
                 for yi in range(classifier_tasks.shape[1]):
@@ -893,13 +786,13 @@ class PipelineTaskMixin:
                 np.zeros((self.n_z, self.n_y, self.n_x), object)
         for zi in range(self.n_z):
             z0 = self.zs[zi]
-            z1 = self.zs[zi+1]
+            z1 = self.ze[zi]
             for yi in range(self.n_y):
                 y0 = self.ys[yi]
-                y1 = self.ys[yi+1]
+                y1 = self.ye[yi]
                 for xi in range(self.n_x):
                     x0 = self.xs[xi]
-                    x1 = self.xs[xi+1]
+                    x1 = self.xe[xi]
                     volume=Volume(x0, y0, z0, x1-x0, y1-y0, z1-z0)
                     self.generate_gt_cutout(volume, yi, xi, zi)
 
@@ -950,13 +843,13 @@ class PipelineTaskMixin:
                                        object)
         for zi in range(self.n_z):
             z0 = self.zs[zi] + self.np_z_pad
-            z1 = self.zs[zi+1] - self.np_z_pad
+            z1 = self.ze[zi] - self.np_z_pad
             for yi in range(self.n_y):
                 y0 = self.ys[yi] + self.np_y_pad
-                y1 = self.ys[yi+1] - self.np_y_pad
+                y1 = self.ye[yi] - self.np_y_pad
                 for xi in range(self.n_x):
                     x0 = self.xs[xi] + self.np_x_pad
-                    x1 = self.xs[xi+1] - self.np_x_pad
+                    x1 = self.xe[xi] - self.np_x_pad
                     volume=Volume(x0, y0, z0, x1-x0, y1-y0, z1-z0)
                     #
                     # Reblock the segmentation prediction
@@ -1087,144 +980,119 @@ class PipelineTaskMixin:
         
         '''
         self.x_connectivity_graph_tasks = np.zeros(
-            (self.n_z, self.n_y, self.n_x-1, 2), object)
+            (self.n_z, self.n_y, self.n_x-1), object)
         for zi in range(self.n_z):
             for yi in range(self.n_y):
                 for xi in range(self.n_x-1):
-                    border_task = self.np_x_border_tasks[zi, yi, xi]
-                    border_volume = border_task.volume
                     left_task = self.np_tasks[zi, yi, xi]
+                    left_tgt = left_task.output()
                     right_task = self.np_tasks[zi, yi, xi+1]
+                    right_tgt = right_task.output()
                     #
-                    # The left task overlap is 1/2 of the padding away
-                    # from its right edge and 1/2 of the padding (= 1/4 of
-                    # the width) from the left edge of the border block
+                    # The overlap is at the average of the x end of the
+                    # left block and the x start of the right block
                     #
-                    overlap_volume1 = Volume(
-                        border_volume.x + self.np_x_pad / 2,
-                        border_volume.y,
-                        border_volume.z,
+                    x = int(
+                        (left_tgt.volume.x + left_tgt.volume.width + 
+                         right_tgt.volume.x) / 2)
+                    overlap_volume = Volume(
+                        x,
+                        left_tgt.volume.y,
+                        left_tgt.volume.z,
                         1, 
-                        border_volume.height,
-                        border_volume.depth)
-                    #
-                    # The right task overlap is 1/2 of the padding away
-                    # from its left edge and 1/2 of the padding (= 3/4 of
-                    # the width) from the right edge of the border block
-                    #
-                    overlap_volume2 = Volume(
-                        self.xs[xi+1] + self.np_x_pad / 2,
-                        border_volume.y,
-                        border_volume.z,
-                        1, 
-                        border_volume.height, 
-                        border_volume.depth)
-                    for idx, np_task, volume, direction in (
-                        (0, left_task, overlap_volume1, "x-"),
-                        (1, right_task, overlap_volume2, "x+")):
-                        filename = CONNECTED_COMPONENTS_PATTERN.format(
-                            direction=direction)
-                        output_location = os.path.join(
-                            np_task.output_seg_location.roots[0], filename)
-                        task = self.factory.gen_connected_components_task(
-                            volume1=np_task.volume,
-                            location1=np_task.output_seg_location,
-                            volume2=border_volume,
-                            location2=border_task.output_seg_location,
-                            overlap_volume=volume,
-                            output_location=output_location)
-                        task.set_requirement(np_task)
-                        task.set_requirement(border_task)
-                        self.x_connectivity_graph_tasks[zi, yi, xi, idx] = task
+                        left_tgt.volume.height,
+                        left_tgt.volume.depth)
+                    filename = CONNECTED_COMPONENTS_PATTERN.format(
+                        direction="x")
+                    output_location = os.path.join(
+                            left_tgt.dataset_location.roots[0], filename)
+                    task = self.factory.gen_connected_components_task(
+                        volume1=left_tgt.volume,
+                        location1=left_tgt.dataset_location,
+                        volume2=right_tgt.volume,
+                        location2=right_tgt.dataset_location,
+                        overlap_volume=overlap_volume,
+                        output_location=output_location)
+                    task.set_requirement(left_task)
+                    task.set_requirement(right_task)
+                    self.x_connectivity_graph_tasks[zi, yi, xi] = task
                                         
     def generate_y_connectivity_graph_tasks(self):
         '''Generate connected components tasks to link blocks in y direction
         
         '''
         self.y_connectivity_graph_tasks = np.zeros(
-            (self.n_z, self.n_y-1, self.n_x, 2), object)
+            (self.n_z, self.n_y-1, self.n_x), object)
         for zi in range(self.n_z):
             for yi in range(self.n_y - 1):
                 for xi in range(self.n_x):
-                    border_task = self.np_y_border_tasks[zi, yi, xi]
-                    border_volume = border_task.volume
                     left_task = self.np_tasks[zi, yi, xi]
+                    left_tgt = left_task.output()
                     right_task = self.np_tasks[zi, yi+1, xi]
-                    overlap_volume1 = Volume(
-                        border_volume.x,
-                        border_volume.y + self.np_y_pad / 2,
-                        border_volume.z,
-                        border_volume.width, 
+                    right_tgt = right_task.output()
+                    y = int(
+                        (left_tgt.volume.y + left_tgt.volume.height + 
+                         right_tgt.volume.y) / 2)
+                    overlap_volume = Volume(
+                        left_tgt.volume.x,
+                        y,
+                        left_tgt.volume.z,
+                        left_tgt.volume.width, 
                         1, 
-                        border_volume.depth)
-                    overlap_volume2 = Volume(
-                        border_volume.x,
-                        self.ys[yi+1] + self.np_y_pad / 2,
-                        border_volume.z,
-                        border_volume.width, 
-                        1, 
-                        border_volume.depth)
-                    for idx, np_task, volume, direction in (
-                        (0, left_task, overlap_volume1, "y-"),
-                        (1, right_task, overlap_volume2, "y+")):
-                        filename = CONNECTED_COMPONENTS_PATTERN.format(
-                            direction=direction)
-                        output_location = os.path.join(
-                            np_task.output_seg_location.roots[0], filename)
-                        task = self.factory.gen_connected_components_task(
-                            volume1=np_task.volume,
-                            location1=np_task.output_seg_location,
-                            volume2=border_volume,
-                            location2=border_task.output_seg_location,
-                            overlap_volume=volume,
-                            output_location=output_location)
-                        task.set_requirement(np_task)
-                        task.set_requirement(border_task)
-                        self.y_connectivity_graph_tasks[zi, yi, xi, idx] = task
+                        left_tgt.volume.depth)
+                    filename = CONNECTED_COMPONENTS_PATTERN.format(
+                            direction="y")
+                    output_location = os.path.join(
+                        left_tgt.dataset_location.roots[0], filename)
+                    task = self.factory.gen_connected_components_task(
+                        volume1=left_tgt.volume,
+                        location1=left_tgt.dataset_location,
+                        volume2=right_tgt.volume,
+                        location2=right_tgt.dataset_location,
+                        overlap_volume=overlap_volume,
+                        output_location=output_location)
+                    task.set_requirement(left_task)
+                    task.set_requirement(right_task)
+                    self.y_connectivity_graph_tasks[zi, yi, xi] = task
                                         
     def generate_z_connectivity_graph_tasks(self):
         '''Generate connected components tasks to link blocks in z direction
         
         '''
         self.z_connectivity_graph_tasks = np.zeros(
-            (self.n_z-1, self.n_y, self.n_x, 2), object)
+            (self.n_z-1, self.n_y, self.n_x), object)
         for zi in range(self.n_z-1):
             for yi in range(self.n_y):
                 for xi in range(self.n_x):
-                    border_task = self.np_z_border_tasks[zi, yi, xi]
-                    border_volume = border_task.volume
                     left_task = self.np_tasks[zi, yi, xi]
+                    left_tgt = left_task.output()
                     right_task = self.np_tasks[zi+1, yi, xi]
-                    overlap_volume1 = Volume(
-                        border_task.volume.x,
-                        border_task.volume.y,
-                        border_task.volume.z + self.np_z_pad / 2,
-                        border_task.volume.width, 
-                        border_task.volume.height, 1)
-                    overlap_volume2 = Volume(
-                        border_task.volume.x,
-                        border_task.volume.y,
-                        self.zs[zi+1] + self.np_z_pad / 2,
-                        border_task.volume.width, 
-                        border_task.volume.height, 1)
-                    for idx, np_task, volume, direction in (
-                        (0, left_task, overlap_volume1, "z-"),
-                        (1, right_task, overlap_volume2, "z+")):
-                        filename = CONNECTED_COMPONENTS_PATTERN.format(
-                            direction=direction)
-                        output_location = os.path.join(
-                            np_task.output_seg_location.roots[0], filename)
-                        task = self.factory.gen_connected_components_task(
-                            volume1=np_task.volume,
-                            location1=np_task.output_seg_location,
-                            volume2=border_volume,
-                            location2=border_task.output_seg_location,
-                            overlap_volume=volume,
-                            output_location=output_location)
-                        task.set_requirement(np_task)
-                        task.set_requirement(border_task)
-                        self.z_connectivity_graph_tasks[zi, yi, xi, idx] = task
-    
+                    right_tgt = right_task.output()
+                    z = int(
+                        (left_tgt.volume.z + left_tgt.volume.depth + 
+                         right_tgt.volume.z) / 2)
+                    overlap_volume = Volume(
+                        left_tgt.volume.x,
+                        left_tgt.volume.y,
+                        z,
+                        left_tgt.volume.width, 
+                        left_tgt.volume.height, 
+                        1)
+                    filename = CONNECTED_COMPONENTS_PATTERN.format(
+                            direction="z")
+                    output_location = os.path.join(
+                        left_tgt.dataset_location.roots[0], filename)
+                    task = self.factory.gen_connected_components_task(
+                        volume1=left_tgt.volume,
+                        location1=left_tgt.dataset_location,
+                        volume2=right_tgt.volume,
+                        location2=right_tgt.dataset_location,
+                        overlap_volume=overlap_volume,
+                        output_location=output_location)
+                    task.set_requirement(left_task)
+                    task.set_requirement(right_task)
+                    self.z_connectivity_graph_tasks[zi, yi, xi] = task    
+                    
     def generate_synapse_segmentation_tasks(self):
         '''Generate connected-components and filter tasks for synapses
         
@@ -1315,13 +1183,13 @@ class PipelineTaskMixin:
             (self.n_z, self.n_y, self.n_x), object)
         for zi in range(self.n_z):
             z0 = self.zs[zi]
-            z1 = self.zs[zi+1]
+            z1 = self.ze[zi]
             for yi in range(self.n_y):
                 y0 = self.ys[yi]
-                y1 = self.ys[yi+1]
+                y1 = self.ye[yi]
                 for xi in range(self.n_x):
                     x0 = self.xs[xi]
-                    x1 = self.xs[xi+1]
+                    x1 = self.xe[xi]
                     volume=Volume(x0, y0, z0, x1-x0, y1-y0, z1-z0)
                     synapse_gt_task = self.gt_synapse_tasks[zi, yi, xi]
                     synapse_gt_location = \
@@ -1389,26 +1257,22 @@ class PipelineTaskMixin:
                     #
                     gt_sn_location = os.path.join(
                         self.get_dirs(x0, y0, z0)[0], "gt_synapse_neuron.json")
-                    gt_sn_task = self.factory.gen_connected_components_task(
-                        volume1=volume,
-                        location1=gt_neuron_task.output().dataset_location,
-                        volume2=volume,
-                        location2=synapse_gt_seg_task.output().dataset_location,
-                        overlap_volume=volume,
+                    gt_sn_task = self.factory.gen_connect_synapses_task(
+                        volume=volume,
+                        neuron_location=gt_neuron_task.output()\
+                                                      .dataset_location,
+                        synapse_location=synapse_gt_seg_task.output()\
+                                                            .dataset_location,
+                        xy_dilation=self.gt_neuron_synapse_xy_dilation,
+                        z_dilation=self.gt_neuron_synapse_z_dilation,
+                        min_contact=self.gt_neuron_synapse_min_contact,
                         output_location=gt_sn_location)
-                    gt_sn_task.min_overlap_percent = 0.0
+                    gt_sn_task.set_requirement(gt_neuron_task)
+                    gt_sn_task.set_requirement(synapse_gt_seg_task)
                     gt_neuron_synapse_tasks[zi, yi, xi] = gt_sn_task
         #
         # Create the statistics task
         #
-        # Find the subtasks
-        #
-        gt_synapse_neuron_connections = [
-            task.output().path 
-            for task in gt_neuron_synapse_tasks.flatten()]
-        synapse_neuron_connections = [
-            task.output().path 
-            for task in self.synapse_connectivity_tasks.flatten()]
         def locs_of(tasks):
             return [task.output().path for task in tasks]
         statistics_task_location = "synapse-statistics.json"
@@ -1424,7 +1288,7 @@ class PipelineTaskMixin:
             locs_of(self.synapse_connectivity_tasks.flatten()),
             neuron_map=self.all_connected_components_task.output().path,
             gt_neuron_maps=locs_of(gt_neuron_map_tasks),
-            gt_synapse_connections=locs_of(gt_synapse_neuron_connections),
+            gt_synapse_connections=locs_of(gt_neuron_synapse_tasks.flatten()),
             output_location=self.synapse_statistics_path)
         #
         # Attach the task's dependent tasks
@@ -1476,28 +1340,29 @@ class PipelineTaskMixin:
                 rh_logger.logger.report_event("Making classifier tasks")
                 self.generate_classifier_tasks()
                 #
-                # Step 3: make the border masks
+                # Step 3: reblock the classification results for overlapped
+                #         segmentation
+                #
+                rh_logger.logger.report_event("Making block tasks")
+                self.generate_block_tasks()
+                #
+                # Step 4: make the border masks
                 #
                 rh_logger.logger.report_event("Making border mask tasks")
                 self.generate_border_mask_tasks()
                 if self.method != SeedsMethodEnum.ConnectedComponents:
                     #
-                    # Step 4: find the seeds for the watershed
+                    # Step 5: find the seeds for the watershed
                     #
                     rh_logger.logger.report_event("Making watershed seed tasks")
                     self.generate_seed_tasks()
                 #
-                # Step 5: run watershed
+                # Step 6: run watershed
                 #
                 rh_logger.logger.report_event("Making watershed tasks")
                 self.generate_watershed_tasks()
                 if self.wants_resegmentation:
                     self.generate_resegmentation_tasks()
-                #
-                # Step 6: create all the border blocks
-                #
-                rh_logger.logger.report_event("Making border reblocking tasks")
-                self.generate_border_tasks()
                 #
                 # Step 7: run Neuroproof on the blocks and border blocks
                 #

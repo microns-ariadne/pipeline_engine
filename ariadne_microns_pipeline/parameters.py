@@ -61,6 +61,12 @@ class Volume(object):
         return "Volume: x=%d:%d, y=%d:%d, z=%d:%d" % (
             self.x, self.x1, self.y, self.y1, self.z, self.z1)
     
+    def __eq__(self, other):
+        if isinstance(other, Volume):
+            return self.x == other.x and self.y == other.y and \
+                   self.z == other.z and self.width == other.width  and \
+                   self.height == other.height and self.depth == other.depth
+        return False
 
 class VolumeParameter(luigi.Parameter):
     '''Describes a volume.
