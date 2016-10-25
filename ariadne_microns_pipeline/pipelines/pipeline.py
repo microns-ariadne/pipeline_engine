@@ -525,9 +525,9 @@ class PipelineTaskMixin:
         self.old_classifier_tasks = self.classifier_tasks
         self.old_synapse_classifier_tasks = self.synapse_classifier_tasks
         self.old_additional_classifier_tasks = self.additional_classifier_tasks
-        self.classifier_tasks = np.zeros((self.n_x, self.n_y, self.n_z), object)
+        self.classifier_tasks = np.zeros((self.n_z, self.n_y, self.n_x), object)
         self.synapse_classifier_tasks = \
-            np.zeros((self.n_x, self.n_y, self.n_z), object)
+            np.zeros((self.n_z, self.n_y, self.n_x), object)
         self.additional_classifier_tasks = {}
         for name in self.additional_neuroproof_channels:
             if name == SYNAPSE_DATASET:
@@ -535,7 +535,7 @@ class PipelineTaskMixin:
                     self.synapse_classifier_tasks
             else:
                 self.additional_classifier_tasks[name] = \
-                    np.zeros((self.n_x, self.n_y, self.n_z), object)
+                    np.zeros((self.n_z, self.n_y, self.n_x), object)
         for zi in range(self.n_z):
             zs = self.zs[zi]
             ze = self.ze[zi]
