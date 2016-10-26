@@ -448,7 +448,7 @@ class PipelineTaskMixin:
         self.y_grid = np.hstack(([self.y0], 
                                  (self.ys[1:] + self.ye[:-1]) / 2,
                                  [self.y1])).astype(int)
-        self.x_grid = np.hstack(([self.z0], 
+        self.z_grid = np.hstack(([self.z0], 
                                  (self.zs[1:] + self.ze[:-1]) / 2,
                                  [self.z1])).astype(int)
 
@@ -929,11 +929,11 @@ class PipelineTaskMixin:
                         stask.set_requirement(
                             self.all_connected_components_task)
                         self.statistics_tasks[zi, yi, xi] = stask
-                        json_paths.append(output_target.path)
+                        json_paths.append(stask.output().path)
             self.statistics_csv_task = self.factory.gen_json_to_csv_task(
                 json_paths=json_paths,
                 output_path = self.statistics_csv_path,
-                excluded_keys=["per_object"])
+                excluded_keys=["per_object", "pairs"])
             pdf_path = os.path.splitext(self.statistics_csv_path)[0] + ".pdf"
             self.statistics_report_task = \
                 self.factory.gen_segmentation_report_task(
@@ -941,6 +941,7 @@ class PipelineTaskMixin:
                     pdf_path)
             for stask in self.statistics_tasks.flatten():
                 self.statistics_report_task.set_requirement(stask)
+                self.statistics_csv_task.set_requirement(stask)
             self.statistics_report_task.set_requirement(
                 self.statistics_csv_task)
         else:
