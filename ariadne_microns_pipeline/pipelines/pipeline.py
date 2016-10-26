@@ -442,15 +442,15 @@ class PipelineTaskMixin:
         # The intermediate blocks start and end midway between the overlap
         # between.
         #
-        self.x_grid = np.hstack([self.x0], 
-                                (self.xs[1:] + self.xe[:-1]) / 2,
-                                [self.x1]).astype(int)
-        self.y_grid = np.hstack([self.y0], 
-                                (self.ys[1:] + self.ye[:-1]) / 2,
-                                [self.y1]).astype(int)
-        self.x_grid = np.hstack([self.z0], 
-                                (self.zs[1:] + self.ze[:-1]) / 2,
-                                [self.z1]).astype(int)
+        self.x_grid = np.hstack(([self.x0], 
+                                 (self.xs[1:] + self.xe[:-1]) / 2,
+                                 [self.x1])).astype(int)
+        self.y_grid = np.hstack(([self.y0], 
+                                 (self.ys[1:] + self.ye[:-1]) / 2,
+                                 [self.y1])).astype(int)
+        self.x_grid = np.hstack(([self.z0], 
+                                 (self.zs[1:] + self.ze[:-1]) / 2,
+                                 [self.z1])).astype(int)
 
     def generate_butterfly_tasks(self):
         '''Get volumes padded for CNN'''
