@@ -156,7 +156,7 @@ class SegmentationReportTask(RequiresMixin, RunMixin, luigi.Task):
         description="The path to the .pdf report")
     
     def input(self):
-        for statistics_location in statistics_locations:
+        for statistics_location in self.statistics_locations:
             yield luigi.LocalTarget(statistics_location)
     
     def output(self):
@@ -181,7 +181,8 @@ class SegmentationReportTask(RequiresMixin, RunMixin, luigi.Task):
             gt.append(data["pairs"]["gt"])
             detected.append(data["pairs"]["detected"])
             counts.append(data["pairs"]["counts"])
-
+        for key in d:
+            d[key] = np.array(d[key])
         #
         # Rollup the statistics
         #
@@ -189,20 +190,31 @@ class SegmentationReportTask(RequiresMixin, RunMixin, luigi.Task):
                              (np.hstack(gt), np.hstack(detected))))
         matrix.sum_duplicates()
         gt, detected = matrix.nonzero()
-        counts = matrix.tocsr()[gt, detected]
+        counts = matrix.tocsr()[gt, detected].A1
         gt_counts = np.bincount(gt, counts)
         gt_counts = gt_counts[gt_counts > 0]
         detected_counts = np.bincount(detected, counts)
         detected_counts = detected_counts[detected_counts > 0]
-        tot_vi = vi(counts, gt_counts, detected_counts)
-        tot_rand = Rand(counts, gt_counts, detected_counts, .5)
-        tot_f_info = f_info(counts, gt_counts, detected_counts, .5)
-        
+        frac_counts = counts.astype(float) / counts.sum()
+        frac_gt = gt_counts.astype(float) / gt_counts.sum()
+        frac_detected = detected_counts.astype(float) / detected_counts.sum()
+        tot_vi = vi(frac_counts, frac_gt, frac_detected)
+        tot_vi_split = vi(frac_counts, frac_gt, frac_detected, 0)
+        tot_vi_merge = vi(frac_counts, frac_gt, frac_detected, 1)
+        tot_rand = Rand(frac_counts, frac_gt, frac_detected, .5)
+        tot_rand_split = Rand(frac_counts, frac_gt, frac_detected, 0)
+        tot_rand_merge = Rand(frac_counts, frac_gt, frac_detected, 1)
+        tot_f_info = f_info(frac_counts, frac_gt, frac_detected, .5)
+        tot_f_info_split = f_info(frac_counts, frac_gt, frac_detected, 0)
+        tot_f_info_merge = f_info(frac_counts, frac_gt, frac_detected, 1)
+        #
+        # Draw it
+        #
         figure = matplotlib.figure.Figure()
         figure.set_size_inches(8, 11)
         columns = filter(lambda _:_ != "vi", sorted(d.keys()))
         vi_data = d['vi']
-        ax = figure.add_axes((0.05, 0.1, 0.65, 0.60))
+        ax = figure.add_axes((0.05, 0.1, 0.65, 0.70))
         ax.boxplot([d[c][~ np.isnan(d[c])] for c in columns])
         ax.set_xticklabels(columns, rotation=15)
         ax.set_yticks(np.linspace(0, 1.0, 11))
@@ -214,10 +226,10 @@ class SegmentationReportTask(RequiresMixin, RunMixin, luigi.Task):
                         bbox=dict(boxstyle="round", fc="white", ec="gray"),
                         arrowprops=dict(arrowstyle="->", color="gray"))
             matplotlib.pyplot.setp(ann, fontsize=6)
-        vi_ax = figure.add_axes((0.75, 0.1, 0.20, 0.80))
+        vi_ax = figure.add_axes((0.75, 0.1, 0.20, 0.70))
         vi_ax.boxplot(vi_data[~np.isnan(vi_data)], labels=['VI (nats)'])
         ann = vi_ax.annotate(
-            "%.2f" % vi.mean(),
+            "%.2f" % vi_data.mean(),
             xy=(1, vi_data.mean()),
             xytext=(1.2, vi_data.mean()+.1),
             bbox=dict(boxstyle="round", fc="white", ec="gray"),
@@ -226,10 +238,14 @@ class SegmentationReportTask(RequiresMixin, RunMixin, luigi.Task):
         for a in ax, vi_ax:
             matplotlib.pyplot.setp(a.get_xmajorticklabels(), fontsize=8)
             matplotlib.pyplot.setp(a.get_ymajorticklabels(), fontsize=6)
-        figure.text(.5, .95, "Segmentation accuracy", ha='center', va='top',
-                size='x-large')
-        totals = "VI=%.2f, Rand=%.2f, F info=%.2f" % \
-            (tot_vi, tot_rand, tot_f_info)
-        figure.text(.5, .75, totals, ha='center', va='bottom', size='large')
+            totals = "Total /split / merge VI=%.2f / %.2f / %.2f\n" %\
+                (tot_vi, tot_vi_split, tot_vi_merge)
+            totals += "Rand=%.2f / %.2f / %.2f\n" % \
+                (tot_rand, tot_rand_split, tot_rand_merge)
+            totals += "F info=%.2f / %.2f / %.2f" % \
+                (tot_f_info, tot_f_info_split, tot_f_info_merge)
+        figure.text(.5, .90, "Segmentation accuracy\n"+totals,
+                    ha='center', va='top',
+                    size='x-large')
         canvas = FigureCanvasPdf(figure)
         figure.savefig(self.pdf_location)
