@@ -107,12 +107,12 @@ def segmentation_metrics(ground_truth, prediction, seq=False, per_object=False):
         counter_pred.add_values_32(pred)
 
     # fetch counts
-    frac_pairwise = counter_pairwise.get_counts()[1]
+    tot_pairwise = counter_pairwise.get_counts()[1]
     frac_gt = counter_gt.get_counts()[1]
     frac_pred = counter_pred.get_counts()[1]
 
     # normalize to probabilities
-    frac_pairwise = frac_pairwise.astype(np.double) / frac_pairwise.sum()
+    frac_pairwise = tot_pairwise.astype(np.double) / tot_pairwise.sum()
     frac_gt = frac_gt.astype(np.double) / frac_gt.sum()
     frac_pred = frac_pred.astype(np.double) / frac_pred.sum()
 
@@ -121,7 +121,8 @@ def segmentation_metrics(ground_truth, prediction, seq=False, per_object=False):
     Rand_scores = {k: Rand(frac_pairwise, frac_gt, frac_pred, v) for k, v in alphas.items()}
     finfo_scores = {k: f_info(frac_pairwise, frac_gt, frac_pred, v) for k, v in alphas.items()}
     vi_score = vi(frac_pairwise, frac_gt, frac_pred)
-    result = {'Rand': Rand_scores, 'F_Info': finfo_scores, 'VI': vi_score}
+    result = {'Rand': Rand_scores, 'F_Info': finfo_scores, 'VI': vi_score,
+              "tot_pairwise":counter_pairwise.get_counts_pair32()}
     if per_object:
         #
         # Compute summary statistics per object

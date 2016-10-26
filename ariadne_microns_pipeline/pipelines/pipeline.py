@@ -378,6 +378,10 @@ class PipelineTaskMixin:
                              for the classifiers.
 
         self.{x, y, z}{s,e} - the starts and ends of each block
+        
+        self.{x,y,z}_grid - the grid for the valid sections of each block.
+                            For instance, block xi's valid region, considering
+                            overlap is self.x_grid[xi] to self.x_grid[xi+1]
         '''
         butterfly = ButterflyChannelTarget(
             self.experiment, self.sample, self.dataset, self.channel, 
@@ -433,6 +437,20 @@ class PipelineTaskMixin:
         self.zs = np.linspace(self.z0, self.z1, self.n_z, endpoint=False)\
             .astype(int)
         self.ze = self.zs + self.block_depth
+        #
+        # The first and last valid blocks start and end at the extents.
+        # The intermediate blocks start and end midway between the overlap
+        # between.
+        #
+        self.x_grid = np.hstack([self.x0], 
+                                (self.xs[1:] + self.xe[:-1]) / 2,
+                                [self.x1]).astype(int)
+        self.y_grid = np.hstack([self.y0], 
+                                (self.ys[1:] + self.ye[:-1]) / 2,
+                                [self.y1]).astype(int)
+        self.x_grid = np.hstack([self.z0], 
+                                (self.zs[1:] + self.ze[:-1]) / 2,
+                                [self.z1]).astype(int)
 
     def generate_butterfly_tasks(self):
         '''Get volumes padded for CNN'''
@@ -880,39 +898,49 @@ class PipelineTaskMixin:
         if self.wants_neuron_statistics:
             self.statistics_tasks = np.zeros((self.n_z, self.n_y, self.n_x),
                                              object)
-            self.generate_pred_cutouts()
             json_paths = []
+            acc_file = self.all_connected_components_task.output().path
             for zi in range(self.n_z):
+                z0 = self.z_grid[zi]
+                z1 = self.z_grid[zi+1]
                 for yi in range(self.n_y):
+                    y0 = self.y_grid[yi]
+                    y1 = self.y_grid[yi+1]
                     for xi in range(self.n_x):
-                        ptask = self.pred_block_tasks[zi, yi, xi]
-                        gttask = self.gt_block_tasks[zi, yi, xi]
+                        x0 = self.x_grid[xi]
+                        x1 = self.x_grid[xi+1]
+                        volume = Volume(x0, y0, z0, x1-x0, y1-y0, z1-z0)
+                        ptask = self.np_tasks[zi, yi, xi]
+                        gttask = self.gt_tasks[zi, yi, xi]
                         output_location = os.path.join(
                             self.get_dirs(
                                 self.xs[xi], self.ys[yi], self.zs[zi])[0],
                             "segmentation_statistics.json")
                         stask = self.factory.gen_segmentation_statistics_task(
-                            volume=ptask.output_volume, 
+                            volume=volume, 
                             gt_seg_location=gttask.output().dataset_location,
-                            pred_seg_location=ptask.output_location,
+                            gt_seg_volume=gttask.output().volume,
+                            pred_seg_location=ptask.output().dataset_location,
+                            pred_seg_volume=ptask.output().volume,
+                            connectivity=acc_file,
                             output_location=output_location)
                         stask.set_requirement(ptask)
                         stask.set_requirement(gttask)
+                        stask.set_requirement(
+                            self.all_connected_components_task)
                         self.statistics_tasks[zi, yi, xi] = stask
-                        output_target = stask.output()
-                        output_target.is_tmp=True
                         json_paths.append(output_target.path)
             self.statistics_csv_task = self.factory.gen_json_to_csv_task(
                 json_paths=json_paths,
                 output_path = self.statistics_csv_path,
                 excluded_keys=["per_object"])
-            for stask in self.statistics_tasks.flatten():
-                self.statistics_csv_task.set_requirement(stask)
             pdf_path = os.path.splitext(self.statistics_csv_path)[0] + ".pdf"
             self.statistics_report_task = \
                 self.factory.gen_segmentation_report_task(
                     self.statistics_csv_task.output().path,
                     pdf_path)
+            for stask in self.statistics_tasks.flatten():
+                self.statistics_report_task.set_requirement(stask)
             self.statistics_report_task.set_requirement(
                 self.statistics_csv_task)
         else:
@@ -992,9 +1020,7 @@ class PipelineTaskMixin:
                     # The overlap is at the average of the x end of the
                     # left block and the x start of the right block
                     #
-                    x = int(
-                        (left_tgt.volume.x + left_tgt.volume.width + 
-                         right_tgt.volume.x) / 2)
+                    x = self.x_grid[xi+1]
                     overlap_volume = Volume(
                         x,
                         left_tgt.volume.y,
@@ -1030,9 +1056,7 @@ class PipelineTaskMixin:
                     left_tgt = left_task.output()
                     right_task = self.np_tasks[zi, yi+1, xi]
                     right_tgt = right_task.output()
-                    y = int(
-                        (left_tgt.volume.y + left_tgt.volume.height + 
-                         right_tgt.volume.y) / 2)
+                    y = self.y_grid[yi+1]
                     overlap_volume = Volume(
                         left_tgt.volume.x,
                         y,
@@ -1068,9 +1092,7 @@ class PipelineTaskMixin:
                     left_tgt = left_task.output()
                     right_task = self.np_tasks[zi+1, yi, xi]
                     right_tgt = right_task.output()
-                    z = int(
-                        (left_tgt.volume.z + left_tgt.volume.depth + 
-                         right_tgt.volume.z) / 2)
+                    z = self.z_grid[zi+1]
                     overlap_volume = Volume(
                         left_tgt.volume.x,
                         left_tgt.volume.y,
