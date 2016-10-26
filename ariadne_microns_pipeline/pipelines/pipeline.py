@@ -937,7 +937,7 @@ class PipelineTaskMixin:
             pdf_path = os.path.splitext(self.statistics_csv_path)[0] + ".pdf"
             self.statistics_report_task = \
                 self.factory.gen_segmentation_report_task(
-                    self.statistics_csv_task.output().path,
+                    json_paths,
                     pdf_path)
             for stask in self.statistics_tasks.flatten():
                 self.statistics_report_task.set_requirement(stask)
