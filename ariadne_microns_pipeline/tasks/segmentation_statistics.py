@@ -92,7 +92,9 @@ class SegmentationStatisticsRunMixin:
         d = dict(rand=rand["F-score"],
                  rand_split=rand["split"],
                  rand_merge=rand["merge"],
-                 vi=vi,
+                 vi=vi["F-score"],
+                 vi_split=vi["split"],
+                 vi_merge=vi["merge"],
                  F_info=F_Info["F-score"],
                  F_info_split=F_Info["split"],
                  F_info_merge=F_Info["merge"],
@@ -214,7 +216,9 @@ class SegmentationReportTask(RequiresMixin, RunMixin, luigi.Task):
         figure.set_size_inches(8, 11)
         columns = filter(lambda _:_ != "vi", sorted(d.keys()))
         vi_data = d['vi']
-        ax = figure.add_axes((0.05, 0.1, 0.65, 0.70))
+        vis_data = d['vi_split']
+        vim_data = d['vi_merge']
+        ax = figure.add_axes((0.05, 0.1, 0.55, 0.70))
         ax.boxplot([d[c][~ np.isnan(d[c])] for c in columns])
         ax.set_xticklabels(columns, rotation=15)
         ax.set_yticks(np.linspace(0, 1.0, 11))
@@ -226,14 +230,16 @@ class SegmentationReportTask(RequiresMixin, RunMixin, luigi.Task):
                         bbox=dict(boxstyle="round", fc="white", ec="gray"),
                         arrowprops=dict(arrowstyle="->", color="gray"))
             matplotlib.pyplot.setp(ann, fontsize=6)
-        vi_ax = figure.add_axes((0.75, 0.1, 0.20, 0.70))
-        vi_ax.boxplot(vi_data[~np.isnan(vi_data)], labels=['VI (nats)'])
-        ann = vi_ax.annotate(
-            "%.2f" % vi_data.mean(),
-            xy=(1, vi_data.mean()),
-            xytext=(1.2, vi_data.mean()+.1),
-            bbox=dict(boxstyle="round", fc="white", ec="gray"),
-            arrowprops=dict(arrowstyle="->", color="gray"))
+        vi_ax = figure.add_axes((0.75, 0.1, 0.30, 0.70))
+        vi_ax.boxplot([_[~np.isnan(_)] for _ in vi_data, vim_data, vis_data],
+                      labels=['VI\n(nats)', 'Merge', 'Split'])
+        for i, data in enumerate([vi_data, vim_data, vis_data]):
+            ann = vi_ax.annotate(
+                "%.2f" % data.mean(),
+                xy=(i+1, data.mean()),
+                xytext=(i+1.2, data.mean()+.1),
+                bbox=dict(boxstyle="round", fc="white", ec="gray"),
+                arrowprops=dict(arrowstyle="->", color="gray"))
         matplotlib.pyplot.setp(ann, fontsize=6)
         for a in ax, vi_ax:
             matplotlib.pyplot.setp(a.get_xmajorticklabels(), fontsize=8)

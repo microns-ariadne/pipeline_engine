@@ -122,8 +122,9 @@ def segmentation_metrics(ground_truth, prediction, seq=False, per_object=False):
 
     Rand_scores = {k: Rand(frac_pairwise, frac_gt, frac_pred, v) for k, v in alphas.items()}
     finfo_scores = {k: f_info(frac_pairwise, frac_gt, frac_pred, v) for k, v in alphas.items()}
-    vi_score = vi(frac_pairwise, frac_gt, frac_pred)
-    result = {'Rand': Rand_scores, 'F_Info': finfo_scores, 'VI': vi_score,
+    vi_scores = {k: vi(frac_pairwise, frac_gt, frac_pred, v)
+                 for k, v in alphas.items() }
+    result = {'Rand': Rand_scores, 'F_Info': finfo_scores, 'VI': vi_scores,
               "tot_pairwise":counter_pairwise.get_counts_pair32()}
     if per_object:
         #
