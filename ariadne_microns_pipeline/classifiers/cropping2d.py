@@ -55,7 +55,10 @@ class Cropping2D(Layer):
 
         return x[:, :, width_crop_left:width+width_crop_left, height_crop_top:height+height_crop_top]
         """
-        return x[:, :, self.cropping[0][0]:-self.cropping[0][1], self.cropping[1][0]:-self.cropping[1][1]]
+        if self.dim_ordering == 'th':
+            return x[:, :, self.cropping[0][0]:-self.cropping[0][1], self.cropping[1][0]:-self.cropping[1][1]]
+        else:
+            return x[:, self.cropping[0][0]:-self.cropping[0][1], self.cropping[1][0]:-self.cropping[1][1], :]
 
     def get_config(self):
         config = {'cropping': self.cropping}
