@@ -386,6 +386,7 @@ def match_synapses_by_overlap(gt, detected, min_overlap_pct):
     # for detected...
     #
     d_areas = np.bincount(detected.flatten())
+    d_areas[0] = 0
     d_map = np.where(d_areas > 0)[0]
     d_r_map = np.zeros(len(d_areas), int)
     n_d = len(d_map)
@@ -401,6 +402,14 @@ def match_synapses_by_overlap(gt, detected, min_overlap_pct):
     matrix.sum_duplicates()
     matrix = matrix.toarray()
     #
+    # Enforce minimum overlap
+    #
+    d_min_overlap = d_areas[d_map] * min_overlap_pct / 100
+    gt_min_overlap = gt_areas[gt_map] * min_overlap_pct / 100
+    bad_gt, bad_d = np.where((matrix < gt_min_overlap[:, np.newaxis]) |
+                             (matrix < d_min_overlap[np.newaxis, :]))
+    matrix[bad_gt, bad_d] = 0
+    #
     # The score of each cell is the number of voxels in each cell minus
     # double the overlap - the amount of voxels covered in each map by
     # the overlap.
@@ -409,14 +418,6 @@ def match_synapses_by_overlap(gt, detected, min_overlap_pct):
         gt_areas[gt_map][:, np.newaxis] +\
         d_areas[d_map][np.newaxis, :] -\
         matrix
-    #
-    # Enforce minimum overlap
-    #
-    d_min_overlap = d_areas[d_map] * min_overlap_pct / 100
-    gt_min_overlap = gt_areas[gt_map] * min_overlap_pct / 100
-    bad_gt, bad_d = np.where((matrix < gt_min_overlap[:, np.newaxis]) |
-                             (matrix < d_min_overlap[np.newaxis, :]))
-    matrix[bad_gt, bad_d] = np.iinfo(matrix.dtype).max
     #
     # The alternative is that the thing matches nothing. We augment
     # the matrix with alternatives for each object, for instance:
@@ -431,12 +432,23 @@ def match_synapses_by_overlap(gt, detected, min_overlap_pct):
     # x is the area of the thing * (1 - min_pct_overlap)
     # y is the area of both things - 2x overlap
     #
-    big_matrix = np.zeros((n_gt+n_d, n_gt+n_d), np.float32)
+    big_matrix = np.zeros((n_gt+n_d, n_gt+n_d), np.float64)
     big_matrix[:n_gt, :n_d] = matrix
     big_matrix[n_gt:, :n_d] = np.inf
     big_matrix[:n_gt, n_d:] = np.inf
     big_matrix[n_gt+np.arange(n_d), np.arange(n_d)] = d_areas[d_map]
     big_matrix[np.arange(n_gt), n_d+np.arange(n_gt)] = gt_areas[gt_map]
+    #
+    # There's a problem with hungarian.lap where it can't solve if all
+    # rows or columns has no members less than infinity. This would not be
+    # a problem except that hungarian's "infinity" is 100,000. Rescale to
+    # make every non-infinite element less than 100,000
+    #
+    hungarian_inf = 100000
+    mmax = np.max(big_matrix[~np.isinf(big_matrix)])
+    if mmax >= hungarian_inf:
+        big_matrix = big_matrix * .9 * hungarian_inf / mmax
+    #
     #
     # Solve it
     #
