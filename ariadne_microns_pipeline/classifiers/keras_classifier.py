@@ -41,7 +41,9 @@ class KerasClassifier(AbstractPixelClassifier):
     def __init__(self, model_path, weights_path, 
                  xypad_size, zpad_size, block_size,
                  normalize_method=NormalizeMethod.EQUALIZE_ADAPTHIST,
-                 downsample_factor=1.0):
+                 downsample_factor=1.0,
+                 xy_trim_size=0,
+                 z_trim_size=0):
         '''Initialize from a model and weights
         
         :param model_path: path to JSON model file suitable for 
@@ -55,6 +57,11 @@ class KerasClassifier(AbstractPixelClassifier):
               NormalizeMethod.RESCALE
         :param downsample_factor: Downsample the image by this scaling factor
               before classifying, then upsample by the same factor afterwards.
+        :param xy_trim_size: amount to trim from edge of segmentation in the X
+                            and Y direction. Trimming is done after
+                            classification and before upsampling.
+        :param z_trim_size: amount to trim from edge of segmentation in the Z
+                           direction
         '''
         self.xypad_size = xypad_size
         self.zpad_size = zpad_size
@@ -64,10 +71,16 @@ class KerasClassifier(AbstractPixelClassifier):
         self.model_loaded = False
         self.normalize_method = normalize_method
         self.downsample_factor = downsample_factor
+        self.xy_trim_size = xy_trim_size
+        self.z_trim_size = z_trim_size
 
     @classmethod
     def __bind_cuda(cls):
         if cls.has_bound_cuda:
+            return
+        import keras
+        if keras.backend.backend() != 'theano':
+            logger.report_event("Using Tensorflow")
             return
         t0 = time.time()
         #
@@ -106,26 +119,44 @@ class KerasClassifier(AbstractPixelClassifier):
             self.model_loaded = True
             return
         import keras
-        import theano
         import keras.backend as K
         from keras.optimizers import SGD
         from .cropping2d import Cropping2D
+        from .depth_to_space import DepthToSpace3D
+        
+        if keras.backend.backend() == 'tensorflow':
+            # monkey-patch tensorflow
+            import tensorflow
+            from tensorflow.python.ops import control_flow_ops
+            tensorflow.python.control_flow_ops = control_flow_ops
+        elif keras.backend.backend() == 'theano':
+            import theano
 
+        logger.report_event(
+            "Loading classifier model from %s" % self.model_path)
         model_json = open(self.model_path, "r").read()
         model = keras.models.model_from_json(
             model_json,
-            custom_objects={"Cropping2D":Cropping2D})
+            custom_objects={"Cropping2D":Cropping2D,
+                            "DepthToSpace3D":DepthToSpace3D})
+        logger.report_event(
+            "Loading weights from %s" % self.weights_path)
         model.load_weights(self.weights_path)
         sgd = SGD(lr=0.01, decay=0, momentum=0.0, nesterov=False)
-        model.compile(loss='categorical_crossentropy', optimizer=sgd)        
-        self.function = theano.function(
-            model.inputs,
-            model.outputs,
-            givens={K.learning_phase():np.uint8(0)},
-            allow_input_downcast=True,
-            on_unused_input='ignore')
+        logger.report_event("Compiling model")
+        model.compile(loss='categorical_crossentropy', optimizer=sgd)
+        if keras.backend.backend() == "theano":
+            self.function = theano.function(
+                model.inputs,
+                model.outputs,
+                givens={K.learning_phase():np.uint8(0)},
+                allow_input_downcast=True,
+                on_unused_input='ignore')
+        else:
+            self.function = model.predict
         self.models[key] = self.function
         self.model_loaded = True
+        logger.report_event("Model loaded")
         
     def __getstate__(self):
         '''Get the pickleable state of the model'''
@@ -136,7 +167,9 @@ class KerasClassifier(AbstractPixelClassifier):
                     model_path=self.model_path,
                     weights_path=self.weights_path,
                     normalize_method=self.normalize_method.name,
-                    downsample_factor=self.downsample_factor)
+                    downsample_factor=self.downsample_factor,
+                    xy_trim_size=self.xy_trim_size,
+                    z_trim_size=self.z_trim_size)
     
     def __setstate__(self, state):
         '''Restore the state from the pickle'''
@@ -151,21 +184,33 @@ class KerasClassifier(AbstractPixelClassifier):
         else:
             self.normalize_method = NormalizeMethod.EQUALIZE_ADAPTHIST
         if "downsample_factor" in state:
-            self.downsample_factor = state["downsample_factor"]
+            self.downsample_factor = int(state["downsample_factor"])
         else:
-            self.downsample_factor = 1.0
+            self.downsample_factor = 1
+        if "xy_trim_size" in state:
+            self.xy_trim_size = state["xy_trim_size"]
+        else:
+            self.xy_trim_size = 0
+        if "z_trim_size" in state:
+            self.z_trim_size = state["z_trim_size"]
     
     def get_class_names(self):
         return ["membrane"]
     
+    def get_x_pad_ds(self):
+        return self.xypad_size + self.xy_trim_size
+    
     def get_x_pad(self):
-        return self.xypad_size
+        return self.get_x_pad_ds() / self.downsample_factor
+    
+    def get_y_pad_ds(self):
+        return self.xypad_size + self.xy_trim_size
     
     def get_y_pad(self):
-        return self.xypad_size
+        return self.get_y_pad_ds() / self.downsample_factor
     
     def get_z_pad(self):
-        return self.zpad_size
+        return self.zpad_size + self.z_trim_size
     
     def run_via_ipc(self):
         return True
@@ -231,6 +276,7 @@ class KerasClassifier(AbstractPixelClassifier):
     
     def preprocessor(self, image):
         '''The preprocessor thread: run normalization and make blocks'''
+        import keras
         #
         # Downsample the image as a first step. All coordinates are then in
         # the downsampled size.
@@ -250,18 +296,18 @@ class KerasClassifier(AbstractPixelClassifier):
         #
         output_block_size = self.block_size - \
             np.array([self.get_z_pad()*2, 
-                      self.get_y_pad()*2, 
-                      self.get_x_pad()*2])
+                      self.get_y_pad_ds()*2, 
+                      self.get_x_pad_ds()*2])
         z0 = self.get_z_pad()
         z1 = image.shape[0] - self.get_z_pad()
         n_z = 1 + int((z1-z0 - 1) / output_block_size[0])
         zs = np.linspace(z0, z1, n_z+1).astype(int)
-        y0 = self.get_y_pad()
-        y1 = image.shape[1] - self.get_y_pad()
+        y0 = self.get_y_pad_ds()
+        y1 = image.shape[1] - self.get_y_pad_ds()
         n_y = 1 + int((y1-y0 - 1) / output_block_size[1])
         ys = np.linspace(y0, y1, n_y+1).astype(int)
-        x0 = self.get_x_pad()
-        x1 = image.shape[2] - self.get_x_pad()
+        x0 = self.get_x_pad_ds()
+        x1 = image.shape[2] - self.get_x_pad_ds()
         n_x = 1 + int((x1-x0 - 1) / output_block_size[2])
         xs = np.linspace(x0, x1, n_x+1).astype(int)
         t0 = time.time()
@@ -287,25 +333,33 @@ class KerasClassifier(AbstractPixelClassifier):
                     y0a = max(0, image.shape[1] - self.block_size[1])
                     y1a = image.shape[1]
                 else:
-                    y0a = ys[yi] - self.get_y_pad()
+                    y0a = ys[yi] - self.get_y_pad_ds()
                     y1a = y0a + self.block_size[1]
                 y0b = y0a
-                y1b = y1a - self.get_y_pad() * 2
+                y1b = y1a - self.get_y_pad_ds() * 2
                 for xi in range(n_x):
                     if xi == n_x-1:
                         x0a = max(0, image.shape[2] - self.block_size[2])
                         x1a = image.shape[2]
                     else:
-                        x0a = xs[xi] - self.get_x_pad()
+                        x0a = xs[xi] - self.get_x_pad_ds()
                         x1a = x0a + self.block_size[2]
                     x0b = x0a
-                    x1b = x1a - self.get_x_pad() * 2
+                    x1b = x1a - self.get_x_pad_ds() * 2
                     block = np.array([norm_img[z][y0a:y1a, x0a:x1a]
                                       for z in range(z0a, z1a)])
                     if block.shape[0] == 1:
-                        block.shape = [1, 1, block.shape[-2], block.shape[-1]]
+                        if keras.backend.backend() == 'theano':
+                            block.shape = \
+                                [1, 1, block.shape[-2], block.shape[-1]]
+                        else:
+                            block.shape = \
+                                [1, block.shape[-2], block.shape[-1], 1]
                     else:
-                        block.shape = [1, 1] + list(block.shape)
+                        if keras.backend.backend() == 'theano':
+                            block.shape = [1, 1] + list(block.shape)
+                        else:
+                            block.shape = [1] + list(block.shape) + [1]
                     self.pred_queue.put((block, x0b, x1b, y0b, y1b, z0b, z1b))
         self.pred_queue.put([None] * 7)
     
@@ -344,7 +398,12 @@ class KerasClassifier(AbstractPixelClassifier):
                     (x0b, x1b, y0b, y1b, z0b, z1b, delta))
                 logger.report_metric("keras_block_classification_time",
                                      delta)
-                pred.shape = (z1b - z0b, y1b - y0b, x1b - x0b)
+                pred.shape = (z1b - z0b + 2 * self.z_trim_size, 
+                              y1b - y0b + 2 * self.xy_trim_size,
+                              x1b - x0b + 2 * self.xy_trim_size)
+                pred = pred[self.z_trim_size:pred.shape[0] - self.z_trim_size,
+                            self.xy_trim_size:pred.shape[1] - self.xy_trim_size,
+                            self.xy_trim_size:pred.shape[2] - self.xy_trim_size]
                 if self.downsample_factor != 1:
                     pred = np.array([zoom(plane, self.downsample_factor)
                                      for plane in pred])
