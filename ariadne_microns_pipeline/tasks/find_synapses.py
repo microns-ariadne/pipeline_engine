@@ -72,12 +72,13 @@ class FindSynapsesRunMixin:
         description="Exclude areas within neurons")
     
     def ariadne_run(self):
-        volume, neuron_segmentation = \
-            [ _.imread() for _ in self.input()]
+        volume_tgt, neuron_segmentation_tgt = list(self.input())
+        volume = volume_tgt.imread()
         if self.erode_with_neurons:
             #
             # Exclude the innards of the neuron from consideration
             #
+            neuron_segmentation = neuron_segmentation_tgt.imread()
             strel = np.ones((self.erosion_z * 2 + 1,
                              self.erosion_xy * 2 + 1,
                              self.erosion_xy * 2 + 1), bool)
