@@ -3,6 +3,7 @@ import rh_logger
 from .utilities import PipelineRunReportMixin
 from ..tasks.factory import AMTaskFactory
 from ..tasks.classify import ClassifyShimTask
+from ..tasks.connected_components import JoiningMethod
 from ..tasks.find_seeds import SeedsMethodEnum, Dimensionality
 from ..tasks.match_synapses import MatchMethod
 from ..targets.classifier_target import PixelClassifierTarget
@@ -208,9 +209,6 @@ class PipelineTaskMixin:
         default="/dev/null",
         description="The location of the all-connected-components connectivity"
                     " .json file. Default = do not generate it.")
-    min_percent_connected = luigi.FloatParameter(
-         default=75.0,
-         description="Minimum overlap required to join segments across blocks")
     #
     # NB: minimum synapse area in AC3 was 561, median was ~5000
     #
@@ -296,6 +294,35 @@ class PipelineTaskMixin:
         description="The minimum amount of contact between a ground-truth "
                     "neuron and syapse before they can be considered "
                     "to be touching.")
+    #
+    # Parameters for block joining
+    #
+    joining_method = luigi.EnumParameter(
+        enum=JoiningMethod,
+        default=JoiningMethod.PAIRWISE_MULTIMATCH,
+        description="Algorithm to use to join neuroproofed segmentation blocks")
+    min_percent_connected = luigi.FloatParameter(
+        default=75.0,
+        description="Minimum overlap required to join segments across blocks")
+    partner_min_total_area_ratio = luigi.FloatParameter(
+        default=0.001)
+    max_poly_matches = luigi.IntParameter(
+        default=1)
+    dont_join_orphans = luigi.BoolParameter()
+    orphan_min_overlap_ratio = luigi.FloatParameter(
+        default=0.9)
+    orphan_min_total_area_ratio = luigi.FloatParameter(
+        default=0.001)
+    halo_size_xy = luigi.IntParameter(
+        default=5,
+        description="The number of pixels on either side of the origin to "
+                    "use as context when extracting the slice to be joined, "
+                    "joining slices in the x and y directions")
+    halo_size_z = luigi.IntParameter(
+        default=1,
+        description="The number of pixels on either side of the origin to "
+                    "use as context when extracting the slice to be joined, "
+                    "joining slices in the z direction")
 
     def get_dirs(self, x, y, z):
         '''Return a directory suited for storing a file with the given offset
@@ -993,7 +1020,14 @@ class PipelineTaskMixin:
         # Apply parameterizations common to x, y and z
         #
         for task in input_tasks:
+            task.joining_method = self.joining_method
             task.min_overlap_percent = self.min_percent_connected
+            task.partner_min_total_area_ration = \
+                self.partner_min_total_area_ratio
+            task.max_poly_matches = self.max_poly_matches
+            task.dont_join_orphans = self.dont_join_orphans
+            task.orphan_min_overlap_ratio = self.orphan_min_overlap_ratio
+            task.orphan_min_total_area_ratio = self.orphan_min_total_area_ratio
         #
         # Build the all-connected-components task
         #
@@ -1023,10 +1057,10 @@ class PipelineTaskMixin:
                     #
                     x = self.x_grid[xi+1]
                     overlap_volume = Volume(
-                        x,
+                        x-self.halo_size_xy,
                         left_tgt.volume.y,
                         left_tgt.volume.z,
-                        1, 
+                        self.halo_size_xy * 2 + 1, 
                         left_tgt.volume.height,
                         left_tgt.volume.depth)
                     filename = CONNECTED_COMPONENTS_PATTERN.format(
@@ -1060,10 +1094,10 @@ class PipelineTaskMixin:
                     y = self.y_grid[yi+1]
                     overlap_volume = Volume(
                         left_tgt.volume.x,
-                        y,
+                        y - self.halo_size_xy,
                         left_tgt.volume.z,
                         left_tgt.volume.width, 
-                        1, 
+                        self.halo_size_xy * 2 + 1, 
                         left_tgt.volume.depth)
                     filename = CONNECTED_COMPONENTS_PATTERN.format(
                             direction="y")
@@ -1097,10 +1131,10 @@ class PipelineTaskMixin:
                     overlap_volume = Volume(
                         left_tgt.volume.x,
                         left_tgt.volume.y,
-                        z,
+                        z - self.halo_size_z,
                         left_tgt.volume.width, 
                         left_tgt.volume.height, 
-                        1)
+                        self.halo_size_z * 2 + 1)
                     filename = CONNECTED_COMPONENTS_PATTERN.format(
                             direction="z")
                     output_location = os.path.join(

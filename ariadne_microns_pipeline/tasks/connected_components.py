@@ -1,9 +1,14 @@
 '''Tasks for finding connected components across blocks'''
 
+import copy
+import bisect
 import enum
+import fast64counter
 import json
+import logging
 import luigi
 import numpy as np
+import rh_logger
 from scipy.sparse import coo_matrix
 from scipy.sparse.csgraph import connected_components
 
@@ -17,6 +22,18 @@ from .utilities import to_hashable
 class LogicalOperation(enum.Enum):
     OR = 1
     AND = 2
+
+class Direction(enum.Enum):
+    X = 0
+    Y = 1
+    Z = 2
+
+class JoiningMethod(enum.Enum):
+    
+    '''Join blocks using a simple minimum overlap criterion'''
+    SIMPLE_OVERLAP = 1
+    '''Join blocks using the pairwise multimatch marriage algorithm'''
+    PAIRWISE_MULTIMATCH = 2
 
 class ConnectedComponentsTaskMixin:
     
@@ -56,6 +73,22 @@ class ConnectedComponentsRunMixin:
         description="Whether to join if either objects overlap the other "
                     "by the minimum amount (""OR"") or whether they both "
                     "have to overlap the other by the minimum amount (""AND"")")
+    #
+    # Parameters for the pairwise multimatch
+    #
+    joining_method = luigi.EnumParameter(
+        enum=JoiningMethod,
+        default=JoiningMethod.SIMPLE_OVERLAP,
+        description="Algorithm to use to join segmentations across blocks")
+    partner_min_total_area_ratio = luigi.FloatParameter(
+        default=0.001)
+    max_poly_matches = luigi.IntParameter(
+        default=1)
+    dont_join_orphans = luigi.BoolParameter()
+    orphan_min_overlap_ratio = luigi.FloatParameter(
+        default=0.9)
+    orphan_min_total_area_ratio = luigi.FloatParameter(
+        default=0.001)
     
     def ariadne_run(self):
         '''Look within the overlap volume to find the concordances
@@ -65,19 +98,48 @@ class ConnectedComponentsRunMixin:
         overlap volume.
         '''
         volume1, volume2 = list(self.input())
-        cutout1 = volume1.imread_part(self.overlap_volume.x,
-                                      self.overlap_volume.y,
-                                      self.overlap_volume.z,
-                                      self.overlap_volume.width,
-                                      self.overlap_volume.height,
-                                      self.overlap_volume.depth)
+        seg1, seg2 = [_.imread() for _ in  volume1, volume2]
+        cutout1 = seg1[
+            self.overlap_volume.z - volume1.z:self.overlap_volume.z1-volume1.z,
+            self.overlap_volume.y - volume1.z:self.overlap_volume.z1-volume1.y,
+            self.overlap_volume.x - volume1.z:self.overlap_volume.z1-volume1.x]
         
-        cutout2 = volume2.imread_part(self.overlap_volume.x,
-                                      self.overlap_volume.y,
-                                      self.overlap_volume.z,
-                                      self.overlap_volume.width,
-                                      self.overlap_volume.height,
-                                      self.overlap_volume.depth)
+        cutout2 = seg2[
+            self.overlap_volume.z - volume2.z:self.overlap_volume.z1-volume2.z,
+            self.overlap_volume.y - volume2.z:self.overlap_volume.z1-volume2.y,
+            self.overlap_volume.x - volume2.z:self.overlap_volume.z1-volume2.x]
+        if self.joining_method == JoiningMethod.PAIRWISE_MULTIMATCH:
+            connections, counts = self.pairwise_multimatch(cutout1, cutout2)
+        else:
+            connections, counts = self.overlap_match(cutout1, cutout2)
+        d = dict(connections=connections, counts=counts)
+        for volume, name in ((self.volume1, "1"),
+                             (self.volume2, "2"),
+                             (self.overlap_volume, "overlap")):
+            d[name] = dict(x=volume.x,
+                           y=volume.y,
+                           z=volume.z,
+                           width=volume.width,
+                           height=volume.height,
+                           depth=volume.depth)
+        #
+        # Compute the areas and find the labels with associated voxels
+        #
+        areas = np.bincount(seg1.ravel())
+        unique = np.where(areas)[0]
+        unique = unique[unique != 0]
+        areas = areas[unique]
+        d["1"]["labels"] = unique.tolist()
+        d["1"]["areas"] = areas.tolist()
+        areas = np.bincount(seg2.ravel())
+        unique = np.where(areas)[0]
+        unique = unique[unique != 0]
+        d["2"]["labels"] = unique.tolist()
+        d["2"]["areas"] = areas.tolist()
+        with self.output().open("w") as fd:
+            json.dump(d, fd)
+
+    def overlap_match(self, cutout1, cutout2):
         #
         # Order the two cutouts by first segmentation, then second.
         # Sort them using the order and then take only indices i where
@@ -113,33 +175,198 @@ class ConnectedComponentsRunMixin:
         else:
             as_list = []
             counts = np.zeros(0, int)
-        d = dict(connections=as_list, counts=counts.tolist())
-        for volume, name in ((self.volume1, "1"),
-                             (self.volume2, "2"),
-                             (self.overlap_volume, "overlap")):
-            d[name] = dict(x=volume.x,
-                           y=volume.y,
-                           z=volume.z,
-                           width=volume.width,
-                           height=volume.height,
-                           depth=volume.depth)
+        return as_list, counts.tolist()
+    
+    def pairwise_multimatch(self, cutout1, cutout2):
+        '''Match the segments in two cutouts using pairwise marriage
+        
+        :param cutout1: The area to examine for overlapping segmentation from
+                        the first volume.
+        :param cutout2: The area to examine for overlapping segmentation from
+                        the second volume.
+        
+        The code in this routine is adapted from Seymour Knowles-Barley's
+        pairwise_multimatch: https://github.com/Rhoana/rhoana/blob/29526687202921e7173b33ec909fcd6e5b9e18bf/PairwiseMatching/pairwise_multimatch.py
+        '''
+        total_area = np.float32(np.prod(cutout1.shape))
+        
+        counter = fast64counter.ValueCountInt64()
+        counter.add_values_pair32(cutout1.astype(np.int32).ravel(), 
+                                  cutout2.astype(np.int32).ravel())
+        overlap_labels1, overlap_labels2, overlap_areas = \
+            counter.get_counts_pair32()
+        
+        areacounter = fast64counter.ValueCountInt64()
+        areacounter.add_values(np.int64(cutout1.ravel()))
+        areacounter.add_values(np.int64(cutout2.ravel()))
+        areas = dict(zip(*areacounter.get_counts()))
+        # Merge with stable marrige matches best match = greatest overlap
+        to_merge = []
+        to_merge_overlap_areas = []
+    
+        m_preference = {}
+        w_preference = {}
+    
+        # Generate preference lists
+        for l1, l2, overlap_area in zip(
+            overlap_labels1, overlap_labels2, overlap_areas):
+    
+            total_area_ratio = overlap_area / total_area
+    
+            if l1 != 0 and l2 != 0 and\
+               total_area_ratio >= self.partner_min_total_area_ratio:
+                if l1 not in m_preference:
+                    m_preference[l1] = [(l2, overlap_area)]
+                else:
+                    m_preference[l1].append((l2, overlap_area))
+                if l2 not in w_preference:
+                    w_preference[l2] = [(l1, overlap_area)]
+                else:
+                    w_preference[l2].append((l1, overlap_area))
+    
+        def get_area(l1, l2):
+            return [_ for _ in m_preference[l1] if _[0] == l2][0][1]
+                    
+        # Sort preference lists
+        for mk in m_preference.keys():
+            m_preference[mk] = sorted(m_preference[mk], 
+                                      key=lambda x:x[1], reverse=True)
+    
+        for wk in w_preference.keys():
+            w_preference[wk] = sorted(w_preference[wk], 
+                                      key=lambda x:x[1], reverse=True)
+    
+        # Prep for proposals
+        mlist = sorted(m_preference.keys())
+        wlist = sorted(w_preference.keys())
+    
+        mfree = mlist[:] * self.max_poly_matches
+        engaged  = {}
+        mprefers2 = copy.deepcopy(m_preference)
+        wprefers2 = copy.deepcopy(w_preference)
+    
+        # Stable marriage loop
+        rh_logger.logger.report_event("Entering stable marriage loop")
+        while mfree:
+            m = mfree.pop(0)
+            mlist = mprefers2[m]
+            if mlist:
+                w = mlist.pop(0)[0]
+                fiance = engaged.get(w)
+                if not fiance:
+                    # She's free
+                    engaged[w] = [m]
+                    rh_logger.logger.report_event(
+                        "  {0} and {1} engaged".format(w, m),
+                    log_level=logging.DEBUG)
+                elif len(fiance) < self.max_poly_matches and m not in fiance:
+                    # Allow polygamy
+                    engaged[w].append(m)
+                    rh_logger.logger.report_event(
+                        "  {0} and {1} engaged".format(w, m),
+                    log_level=logging.DEBUG)
+                else:
+                    # m proposes w
+                    wlist = list(x[0] for x in wprefers2[w])
+                    dumped = False
+                    for current_match in fiance:
+                        if wlist.index(current_match) > wlist.index(m):
+                            # w prefers new m
+                            engaged[w].remove(current_match)
+                            engaged[w].append(m)
+                            dumped = True
+                            rh_logger.logger.report_event(
+                                "  {0} dumped {1} for {2}"
+                                .format(w, current_match, m),
+                                log_level=logging.DEBUG)
+                            if mprefers2[current_match]:
+                                # current_match has more w to try
+                                mfree.append(current_match)
+                            break
+                    if not dumped and mlist:
+                        # She is faithful to old fiance - look again
+                        mfree.append(m)
+    
+        # m_can_adopt = copy.deepcopy(overlap_labels1)
+        # w_can_adopt = copy.deepcopy(overlap_labels1)
+        m_partner = {}
+        w_partner = {}
+    
+        for l2 in engaged.keys():
+            for l1 in engaged[l2]:
+    
+                rh_logger.logger.report_event(
+                    "Merging segments {1} and {0}.".format(l1, l2),
+                    log_level=logging.DEBUG)
+                to_merge.append((l1, l2))
+                to_merge_overlap_areas.append(get_area(l1, l2))
+    
+                # Track partners
+                if l1 in m_partner:
+                    m_partner[l1].append(l2)
+                else:
+                    m_partner[l1] = [l2]
+                if l2 in w_partner:
+                    w_partner[l2].append(l1)
+                else:
+                    w_partner[l2] = [l1]
+    
+        # Join all orphans that fit overlap proportion critera (no limit)
+        if not self.dont_join_orphans:
+            for l1 in m_preference.keys():
+    
+                # ignore any labels with a match
+                # if l1 in m_partner.keys():
+                #     continue
+    
+                l2, overlap_area = m_preference[l1][0]
+    
+                # ignore if this pair is already matched
+                if l1 in m_partner.keys() and l2 in m_partner[l1]:
+                    continue
+    
+                overlap_ratio = overlap_area / np.float32(areas[l1])
+                total_area_ratio = overlap_area / total_area
+    
+                if overlap_ratio >= self.orphan_min_overlap_ratio and \
+                   total_area_ratio >= self.orphan_min_total_area_ratio:
+                    rh_logger.logger.report_event(
+                        "Merging orphan segment {0} to {1} ({2} voxel overlap = {3:0.2f}%)."
+                        .format(l1, l2, overlap_area, overlap_ratio * 100),
+                        log_level=logging.DEBUG)
+                    to_merge.append((l1, l2))
+                    to_merge_overlap_areas.append(get_area(l1, l2))
+    
+            for l2 in w_preference.keys():
+    
+                # ignore any labels with a match
+                # if l2 in w_partner.keys():
+                #     continue
+    
+                l1, overlap_area = w_preference[l2][0]
+    
+                # ignore if this pair is already matched
+                if l2 in w_partner.keys() and l1 in w_partner[l2]:
+                    continue
+    
+                overlap_ratio = overlap_area / np.float32(areas[l2])
+                total_area_ratio = overlap_area / total_area
+    
+                if overlap_ratio >= self.orphan_min_overlap_ratio and \
+                   total_area_ratio >= self.orphan_min_total_area_ratio:
+                    rh_logger.logger.report_event(
+                        "Merging orphan segment {0} to {1} ({2} voxel overlap = {3:0.2f}%)."
+                        .format(l2, l1, overlap_area, overlap_ratio * 100),
+                        log_level=logging.DEBUG)
+                    to_merge.append((l1, l2))
+                    to_merge_overlap_areas.append(get_area(l1,l2))
         #
-        # Compute the areas and find the labels with associated voxels
+        # Convert from np.uint32 or whatever to int to make JSON serializable
         #
-        areas = np.bincount(volume1.imread().ravel())
-        unique = np.where(areas)[0]
-        unique = unique[unique != 0]
-        areas = areas[unique]
-        d["1"]["labels"] = unique.tolist()
-        d["1"]["areas"] = areas.tolist()
-        areas = np.bincount(volume2.imread().ravel())
-        unique = np.where(areas)[0]
-        unique = unique[unique != 0]
-        d["2"]["labels"] = unique.tolist()
-        d["2"]["areas"] = areas.tolist()
-        with self.output().open("w") as fd:
-            json.dump(d, fd)
-
+        to_merge = [(int(a), int(b)) for a, b in to_merge]
+        to_merge_overlap_areas = map(int, to_merge_overlap_areas)
+        return to_merge, to_merge_overlap_areas
+        
 class ConnectedComponentsTask(ConnectedComponentsTaskMixin,
                               ConnectedComponentsRunMixin,
                               RequiresMixin, RunMixin,
