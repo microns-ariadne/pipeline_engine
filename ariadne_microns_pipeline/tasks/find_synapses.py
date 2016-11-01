@@ -8,6 +8,7 @@ from .utilities import RequiresMixin, RunMixin, SingleThreadedMixin
 from ..algorithms.segmentation import segment_vesicle_style
 from ..algorithms.morphology import erode_segmentation
 from ..parameters import VolumeParameter, DatasetLocationParameter
+from ..parameters import EMPTY_DATASET_LOCATION, is_empty_dataset_location
 from ..targets.factory import TargetFactory
 
 class FindSynapsesTaskMixin:
@@ -17,6 +18,7 @@ class FindSynapsesTaskMixin:
     input_location = DatasetLocationParameter(
         description="The location of the probability map")
     neuron_segmentation = DatasetLocationParameter(
+        default=EMPTY_DATASET_LOCATION,
         description="The location of the segmented neurons.")
     output_location = DatasetLocationParameter(
         description="The location for the segmentation")
@@ -25,9 +27,10 @@ class FindSynapsesTaskMixin:
         yield TargetFactory().get_volume_target(
             location=self.input_location,
             volume=self.volume)
-        yield TargetFactory().get_volume_target(
-            location=self.neuron_segmentation,
-            volume = self.volume)
+        if not is_empty_dataset_location(self.neuron_segmentation):
+            yield TargetFactory().get_volume_target(
+                location=self.neuron_segmentation,
+                volume = self.volume)
     
     def output(self):
         return TargetFactory().get_volume_target(
@@ -72,13 +75,13 @@ class FindSynapsesRunMixin:
         description="Exclude areas within neurons")
     
     def ariadne_run(self):
-        volume_tgt, neuron_segmentation_tgt = list(self.input())
-        volume = volume_tgt.imread()
+        inputs = self.input()
+        volume = inputs.next().imread()
         if self.erode_with_neurons:
             #
             # Exclude the innards of the neuron from consideration
             #
-            neuron_segmentation = neuron_segmentation_tgt.imread()
+            neuron_segmentation = inputs.next().imread()
             strel = np.ones((self.erosion_z * 2 + 1,
                              self.erosion_xy * 2 + 1,
                              self.erosion_xy * 2 + 1), bool)
