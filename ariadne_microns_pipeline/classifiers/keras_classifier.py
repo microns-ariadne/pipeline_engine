@@ -201,13 +201,13 @@ class KerasClassifier(AbstractPixelClassifier):
         return self.xypad_size + self.xy_trim_size
     
     def get_x_pad(self):
-        return self.get_x_pad_ds() / self.downsample_factor
+        return self.get_x_pad_ds() * self.downsample_factor
     
     def get_y_pad_ds(self):
         return self.xypad_size + self.xy_trim_size
     
     def get_y_pad(self):
-        return self.get_y_pad_ds() / self.downsample_factor
+        return self.get_y_pad_ds() * self.downsample_factor
     
     def get_z_pad(self):
         return self.zpad_size + self.z_trim_size
