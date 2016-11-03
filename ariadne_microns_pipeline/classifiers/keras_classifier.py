@@ -193,6 +193,8 @@ class KerasClassifier(AbstractPixelClassifier):
             self.xy_trim_size = 0
         if "z_trim_size" in state:
             self.z_trim_size = state["z_trim_size"]
+        else:
+            self.z_trim_size = 0
     
     def get_class_names(self):
         return ["membrane"]
