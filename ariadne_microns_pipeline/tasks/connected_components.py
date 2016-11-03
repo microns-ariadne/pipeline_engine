@@ -101,13 +101,13 @@ class ConnectedComponentsRunMixin:
         seg1, seg2 = [_.imread() for _ in  volume1, volume2]
         cutout1 = seg1[
             self.overlap_volume.z - volume1.z:self.overlap_volume.z1-volume1.z,
-            self.overlap_volume.y - volume1.z:self.overlap_volume.z1-volume1.y,
-            self.overlap_volume.x - volume1.z:self.overlap_volume.z1-volume1.x]
+            self.overlap_volume.y - volume1.y:self.overlap_volume.y1-volume1.y,
+            self.overlap_volume.x - volume1.x:self.overlap_volume.x1-volume1.x]
         
         cutout2 = seg2[
             self.overlap_volume.z - volume2.z:self.overlap_volume.z1-volume2.z,
-            self.overlap_volume.y - volume2.z:self.overlap_volume.z1-volume2.y,
-            self.overlap_volume.x - volume2.z:self.overlap_volume.z1-volume2.x]
+            self.overlap_volume.y - volume2.y:self.overlap_volume.y1-volume2.y,
+            self.overlap_volume.x - volume2.x:self.overlap_volume.x1-volume2.x]
         if self.joining_method == JoiningMethod.PAIRWISE_MULTIMATCH:
             connections, counts = self.pairwise_multimatch(cutout1, cutout2)
         else:
