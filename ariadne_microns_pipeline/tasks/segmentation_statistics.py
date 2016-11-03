@@ -11,7 +11,7 @@ import numpy as np
 from scipy.sparse import coo_matrix
 
 from ..algorithms.evaluation import segmentation_metrics, Rand, f_info
-from ..algorithms.vi import split_vi
+from ..algorithms.vi import split_vi, bits_to_nats
 from ..parameters import VolumeParameter, DatasetLocationParameter
 from ..targets.factory import TargetFactory
 from .connected_components import ConnectivityGraph
@@ -210,7 +210,7 @@ class SegmentationReportTask(RequiresMixin, RunMixin, luigi.Task):
         frac_counts = counts.astype(float) / counts.sum()
         frac_gt = gt_counts.astype(float) / gt_counts.sum()
         frac_detected = detected_counts.astype(float) / detected_counts.sum()
-        tot_vi_merge, tot_vi_split = split_vi(contingency_table)
+        tot_vi_merge, tot_vi_split = bits_to_nats(split_vi(contingency_table))
         tot_vi = tot_vi_merge + tot_vi_split
         tot_rand = Rand(frac_counts, frac_gt, frac_detected, .5)
         tot_rand_split = Rand(frac_counts, frac_gt, frac_detected, 0)

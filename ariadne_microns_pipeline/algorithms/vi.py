@@ -1252,3 +1252,14 @@ def vi_statistics(vi_table):
     """
     return np.mean(vi_table, axis=-1), sem(vi_table, axis=-1), \
         np.median(vi_table, axis=-1)
+
+def bits_to_nats(bits):
+    """Convert entropy-related measurements from bits to nats
+    
+    Entropy in nats is computed using the natural logarithm instead
+    of log2.
+    
+    :param bits: the value in bits
+    :returns: the value in nats
+    """
+    return bits * np.log(2)

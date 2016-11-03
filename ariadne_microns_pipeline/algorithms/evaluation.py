@@ -13,7 +13,7 @@ import glob
 import os
 import cPickle
 
-from .vi import split_vi
+from .vi import split_vi, bits_to_nats
 
 def thin_boundaries(im, mask):
     im = im.copy()
@@ -116,7 +116,7 @@ def segmentation_metrics(ground_truth, prediction, seq=False, per_object=False):
 
     Rand_scores = {k: Rand(frac_pairwise, frac_gt, frac_pred, v) for k, v in alphas.items()}
     finfo_scores = {k: f_info(frac_pairwise, frac_gt, frac_pred, v) for k, v in alphas.items()}
-    vi_merge, vi_split = split_vi(pred, gt)
+    vi_merge, vi_split = bits_to_nats(split_vi(pred, gt))
     vi = vi_merge + vi_split
     vi_scores = { "F-score": vi,
                   "split": vi_split,
