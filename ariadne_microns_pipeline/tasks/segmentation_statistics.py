@@ -10,7 +10,8 @@ from matplotlib.backends.backend_pdf import FigureCanvasPdf
 import numpy as np
 from scipy.sparse import coo_matrix
 
-from ..algorithms.evaluation import segmentation_metrics, vi, Rand, f_info
+from ..algorithms.evaluation import segmentation_metrics, Rand, f_info
+from ..algorithms.vi import split_vi
 from ..parameters import VolumeParameter, DatasetLocationParameter
 from ..targets.factory import TargetFactory
 from .connected_components import ConnectivityGraph
@@ -193,8 +194,15 @@ class SegmentationReportTask(RequiresMixin, RunMixin, luigi.Task):
         matrix = coo_matrix((np.hstack(counts),
                              (np.hstack(gt), np.hstack(detected))))
         matrix.sum_duplicates()
+        matrix = matrix.tocsr()
+        #
+        # The contingency table for the VI calculation is the fractional
+        # component of each gt /detected pair.
+        # The order for the vi code is [seg, gt], which is why we transpose
+        #
+        contingency_table = matrix.transpose() / matrix.sum()
         gt, detected = matrix.nonzero()
-        counts = matrix.tocsr()[gt, detected].A1
+        counts = matrix[gt, detected].A1
         gt_counts = np.bincount(gt, counts)
         gt_counts = gt_counts[gt_counts > 0]
         detected_counts = np.bincount(detected, counts)
@@ -202,9 +210,8 @@ class SegmentationReportTask(RequiresMixin, RunMixin, luigi.Task):
         frac_counts = counts.astype(float) / counts.sum()
         frac_gt = gt_counts.astype(float) / gt_counts.sum()
         frac_detected = detected_counts.astype(float) / detected_counts.sum()
-        tot_vi = vi(frac_counts, frac_gt, frac_detected)
-        tot_vi_split = vi(frac_counts, frac_gt, frac_detected, 0)
-        tot_vi_merge = vi(frac_counts, frac_gt, frac_detected, 1)
+        tot_vi_merge, tot_vi_split = split_vi(contingency_table)
+        tot_vi = tot_vi_merge + tot_vi_split
         tot_rand = Rand(frac_counts, frac_gt, frac_detected, .5)
         tot_rand_split = Rand(frac_counts, frac_gt, frac_detected, 0)
         tot_rand_merge = Rand(frac_counts, frac_gt, frac_detected, 1)

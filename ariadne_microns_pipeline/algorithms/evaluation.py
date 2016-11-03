@@ -13,6 +13,8 @@ import glob
 import os
 import cPickle
 
+from .vi import split_vi
+
 def thin_boundaries(im, mask):
     im = im.copy()
     assert (np.all(im >= 0)), "Label images must be non-negative"
@@ -62,14 +64,6 @@ def f_info(pair, gt, pred, alpha):
     mutual_information = gt_entropy + pred_entropy - pair_entropy
 
     return mutual_information / ((1.0 - alpha) * gt_entropy + alpha * pred_entropy)
-
-def vi(pair, gt, pred, alpha=.5):
-    pair_entropy = - np.sum(pair * np.log(pair))
-    gt_entropy = - np.sum(gt * np.log(gt))
-    pred_entropy = - np.sum(pred * np.log(pred))
-    return 2*(pair_entropy - 
-              (1.0 - alpha) * gt_entropy - 
-              alpha * pred_entropy)
 
 def segmentation_metrics(ground_truth, prediction, seq=False, per_object=False):
     '''Computes adjusted FRand and VI between ground_truth and prediction.
@@ -122,8 +116,12 @@ def segmentation_metrics(ground_truth, prediction, seq=False, per_object=False):
 
     Rand_scores = {k: Rand(frac_pairwise, frac_gt, frac_pred, v) for k, v in alphas.items()}
     finfo_scores = {k: f_info(frac_pairwise, frac_gt, frac_pred, v) for k, v in alphas.items()}
-    vi_scores = {k: vi(frac_pairwise, frac_gt, frac_pred, v)
-                 for k, v in alphas.items() }
+    vi_merge, vi_split = split_vi(pred, gt)
+    vi = vi_merge + vi_split
+    vi_scores = { "F-score": vi,
+                  "split": vi_split,
+                  "merge": vi_merge}
+    
     result = {'Rand': Rand_scores, 'F_Info': finfo_scores, 'VI': vi_scores,
               "tot_pairwise":counter_pairwise.get_counts_pair32()}
     if per_object:
