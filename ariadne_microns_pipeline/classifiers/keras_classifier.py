@@ -79,6 +79,7 @@ class KerasClassifier(AbstractPixelClassifier):
         if cls.has_bound_cuda:
             return
         import keras
+        import keras.backend
         if keras.backend.backend() != 'theano':
             logger.report_event("Using Tensorflow")
             return
