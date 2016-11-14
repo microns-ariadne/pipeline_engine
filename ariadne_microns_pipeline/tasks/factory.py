@@ -233,7 +233,8 @@ class AMTaskFactory(object):
             min_area=min_area)
     
     def gen_skeletonize_task(
-        self, volume, segmentation_location, skeleton_location):
+        self, volume, segmentation_location, skeleton_location,
+        xy_nm, z_nm, decimation_factor=0):
         '''Generate a skeletonize task
         
         The skeletonize task takes a segmentation and produces .swc files
@@ -243,11 +244,17 @@ class AMTaskFactory(object):
         :param segmentation_location: the location of the segmentation volume
         :param skeleton_location: the name of the directory that will hold
             the .swc files.
+        :param xy_nm: the size of a voxel in the x and y directions
+        :param z_nm: the size of a voxel in the z direction
+        :param decimation_factor: remove a skeleton leaf if it is less than
+            this factor of its parent's volume.
         '''
         return SkeletonizeTask(
             volume=volume,
             segmentation_location=segmentation_location,
-            skeleton_location=skeleton_location)
+            skeleton_location=skeleton_location,
+            xy_nm=xy_nm, z_nm=z_nm, 
+            decimation_factor=decimation_factor)
     
     def gen_find_synapses_task(
         self, volume, syn_location, neuron_segmentation, output_location,

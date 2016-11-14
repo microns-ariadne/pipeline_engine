@@ -3,9 +3,11 @@ python-dateutil>=2.2
 enum34>=1.0.0
 hungarian>=0.2.3
 mahotas
+microns_skeletonization
 numpy>=1.9.3
 h5py>=2.5.0
 pandas>=0.15.0
+rh_logger
 scipy>=0.14.0
 scikit-learn
 sqlalchemy

@@ -115,6 +115,12 @@ class PipelineTaskMixin:
         description="Location of Neuroproof classifier")
     volume = VolumeParameter(
         description="The volume to segment")
+    xy_nm = luigi.FloatParameter(
+        default=4.0,
+        description="The size of a voxel in the x and y directions")
+    z_nm = luigi.FloatParameter(
+        default=30.0,
+        description="The size of a voxel in the z direction")
     #########
     #
     # Optional parameters
@@ -195,6 +201,10 @@ class PipelineTaskMixin:
     wants_skeletonization = luigi.BoolParameter(
         description="Skeletonize the Neuroproof segmentation",
         default=False)
+    skeleton_decimation_factor = luigi.FloatParameter(
+        description="Remove skeleton leaves if they are less than this factor "
+        "of their parent's volume",
+        default=.5)
     wants_resegmentation = luigi.BoolParameter(
         description="Convert the 3D segmentation to 2D before Neuroproof",
         default=False)
@@ -995,7 +1005,10 @@ class PipelineTaskMixin:
                         stask = self.factory.gen_skeletonize_task(
                             volume=volume,
                             segmentation_location=seg_location,
-                            skeleton_location=skel_location)
+                            skeleton_location=skel_location,
+                            xy_nm=self.xy_nm,
+                            z_nm=self.z_nm,
+                            decimation_factor=self.skeleton_decimation_factor)
                         stask.set_requirement(ntask)
                         self.skeletonize_tasks[zi, yi, xi] = stask
     
