@@ -368,7 +368,7 @@ class KerasClassifier(AbstractPixelClassifier):
                             block.shape = \
                                 [1, block.shape[-2], block.shape[-1], 1]
                     else:
-                        if keras.KerasClassifier.__keras_backend() == 'theano':
+                        if KerasClassifier.__keras_backend() == 'theano':
                             block.shape = [1, 1] + list(block.shape)
                         else:
                             block.shape = [1] + list(block.shape) + [1]
