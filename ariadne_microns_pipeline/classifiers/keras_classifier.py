@@ -74,13 +74,22 @@ class KerasClassifier(AbstractPixelClassifier):
         self.xy_trim_size = xy_trim_size
         self.z_trim_size = z_trim_size
 
+    @staticmethod
+    def __keras_backend():
+        '''Return the Keras backend, irrespective of Keras version'''
+        try:
+            from keras.backend import backend
+            return backend()
+        except ImportError:
+            from keras.backend import _BACKEND
+            return _BACKEND
+        
     @classmethod
     def __bind_cuda(cls):
         if cls.has_bound_cuda:
             return
         import keras
-        import keras.backend
-        if keras.backend.backend() != 'theano':
+        if KerasClassifier.__keras_backend() != 'theano':
             logger.report_event("Using Tensorflow")
             return
         t0 = time.time()
@@ -125,12 +134,12 @@ class KerasClassifier(AbstractPixelClassifier):
         from .cropping2d import Cropping2D
         from .depth_to_space import DepthToSpace3D
         
-        if keras.backend.backend() == 'tensorflow':
+        if KerasClassifier.__keras_backend() == 'tensorflow':
             # monkey-patch tensorflow
             import tensorflow
             from tensorflow.python.ops import control_flow_ops
             tensorflow.python.control_flow_ops = control_flow_ops
-        elif keras.backend.backend() == 'theano':
+        elif KerasClassifier.__keras_backend() == 'theano':
             import theano
 
         logger.report_event(
@@ -146,7 +155,7 @@ class KerasClassifier(AbstractPixelClassifier):
         sgd = SGD(lr=0.01, decay=0, momentum=0.0, nesterov=False)
         logger.report_event("Compiling model")
         model.compile(loss='categorical_crossentropy', optimizer=sgd)
-        if keras.backend.backend() == "theano":
+        if KerasClassifier.__keras_backend() == "theano":
             self.function = theano.function(
                 model.inputs,
                 model.outputs,
@@ -352,14 +361,14 @@ class KerasClassifier(AbstractPixelClassifier):
                     block = np.array([norm_img[z][y0a:y1a, x0a:x1a]
                                       for z in range(z0a, z1a)])
                     if block.shape[0] == 1:
-                        if keras.backend.backend() == 'theano':
+                        if KerasClassifier.__keras_backend() == 'theano':
                             block.shape = \
                                 [1, 1, block.shape[-2], block.shape[-1]]
                         else:
                             block.shape = \
                                 [1, block.shape[-2], block.shape[-1], 1]
                     else:
-                        if keras.backend.backend() == 'theano':
+                        if keras.KerasClassifier.__keras_backend() == 'theano':
                             block.shape = [1, 1] + list(block.shape)
                         else:
                             block.shape = [1] + list(block.shape) + [1]
