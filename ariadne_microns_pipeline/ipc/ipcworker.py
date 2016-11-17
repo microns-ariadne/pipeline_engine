@@ -115,6 +115,8 @@ def main():
             worker.send(SP_HEARTBEAT)
             rh_logger.logger.report_event("lub")
             next_heartbeat = time.time() + args.heartbeat_interval
+    rh_logger.logger.end_process("Process lifetime exceeded", 
+                                 rh_logger.ExitCode.success)
 
 if __name__=="__main__":
     main()

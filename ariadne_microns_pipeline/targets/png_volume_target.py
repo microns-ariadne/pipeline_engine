@@ -3,6 +3,8 @@ import luigi
 import json
 import numpy as np
 import os
+import rh_logger
+import time
 
 from .utilities import shard
 from .volume_target import VolumeTarget
@@ -33,6 +35,7 @@ class PngVolumeTarget(VolumeTarget):
         be either uint8 or uint16. The coordinates are z, y, x and optionally
         color.
         '''
+        t0 = time.time()
         for path in self.paths:
             tgt_dir = os.path.join(path, self.dataset_path)
             if not os.path.exists(tgt_dir):
@@ -57,8 +60,11 @@ class PngVolumeTarget(VolumeTarget):
 
         with self.open(mode="w") as fd:
             json.dump(d, fd)
+        rh_logger.logger.report_metric("PngVolumeTarget.imwrite (sec)", 
+                                       time.time() - t0)
     
     def imread(self):
+        t0 = time.time()
         with self.open(mode="r") as fd:
             d = json.load(fd)
         volume = np.zeros((self.depth, self.height, self.width), d["dtype"])
@@ -71,6 +77,8 @@ class PngVolumeTarget(VolumeTarget):
                     img[:, :, 1] * 256 +\
                     img[:, :, 2] * 65536
             volume[i] = img
+        rh_logger.logger.report_metric("PngVolumeTarget.imread (sec)", 
+                                       time.time() - t0)
         return volume
     
     def create_volume(self, dtype, **kwargs):
