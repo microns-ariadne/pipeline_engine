@@ -209,6 +209,7 @@ $(TOOLS_PREFIX)/opencv-2.4/opencv-install: $(TOOLS_PREFIX)/sources/opencv-2.4.9.
 	    -O opencv-2.4.9/modules/gpu/src/nvidia/core/NCVPixelOperations.hpp &&\
 	mkdir -p build &&\
 	cd build &&\
+	PATH=$(TOOLS_PREFIX)/cilkplus/cilkplus-install/bin/gcc:$(PATH) \
 	cmake -DCMAKE_INSTALL_PREFIX=$@ \
 	      -DBUILD_SHARED_LIBS=ON \
 	      -DBUILD_STATIC_LIBS=OFF \
