@@ -75,6 +75,18 @@ class NeuroproofRunMixin:
         seg_volume = inputs.next()
         additional_maps = list(inputs)
         #
+        # Get the anticipated filenames and make sure the directories
+        # for them have been created.
+        #
+        output_target = self.output()
+        output = output_target.anticipate_filenames()
+        outdirs = set()
+        for filename in output:
+            outdirs.add(os.path.dirname(filename))
+        for directoryname in outdirs:
+            if not os.path.isdir(directoryname):
+                os.makedirs(directoryname)
+        #
         # neuroproof_graph_predict will take a .json file in place of a
         # prediction file. It has the following format:
         #
@@ -89,8 +101,6 @@ class NeuroproofRunMixin:
         probabilities = [tgt.get_filenames() for tgt in
                          [prob_volume] + additional_maps]
         watershed = seg_volume.get_filenames()
-        output_target = self.output()
-        output = output_target.anticipate_filenames()
         d = dict(probabilities=probabilities,
                  watershed=watershed,
                  output=output)
