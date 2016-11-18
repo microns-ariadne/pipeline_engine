@@ -40,12 +40,6 @@ class PngVolumeTarget(VolumeTarget):
             tgt_dir = os.path.join(path, self.dataset_path)
             if not os.path.exists(tgt_dir):
                 os.makedirs(tgt_dir)
-        d = dict(dimensions=volume.shape,
-                 dtype=volume.dtype.descr[0][1],
-                 x=self.x,
-                 y=self.y,
-                 z=self.z,
-                 filenames=[])
         for zidx in range(volume.shape[0]):
             filename = self.__get_filename(zidx + self.z)
             img = volume[zidx]
@@ -56,13 +50,43 @@ class PngVolumeTarget(VolumeTarget):
                     (img / 256) & 0xff,
                     (img / 65536) & 0xff)).astype(np.uint8)
             cv2.imwrite(filename, img)
-            d["filenames"].append(filename)
 
-        with self.open(mode="w") as fd:
-            json.dump(d, fd)
+        self.finish_imwrite(volume.dtype)
         rh_logger.logger.report_metric("PngVolumeTarget.imwrite (sec)", 
                                        time.time() - t0)
+
+    def anticipate_filenames(self):
+        '''Return the filenames that we anticipate writing'''
+        return [self.__get_filename(z) 
+                for z in range(self.z, self.z + self.depth)]
     
+    def finish_imwrite(self, dtype):
+        '''Fake writing a volume
+        
+        It's assumed that something else called anticipate_filenames to find
+        out how to write files, then it did it. We finish by writing the
+        json output file.
+        '''
+        d = dict(dimensions=[self.volume.depth, 
+                             self.volume.height, 
+                             self.volume.width],
+                 dtype=dtype.descr[0][1],
+                 x=self.x,
+                 y=self.y,
+                 z=self.z,
+                 filenames=self.anticipate_filenames())
+        with self.open(mode="w") as fd:
+            json.dump(d, fd)
+    
+    def get_filenames(self):
+        '''Get the filenames for the individual planes of the volume
+        
+        Reads the filenames from the .json file written by imwrite.
+        '''
+        with self.open(mode="r") as fd:
+            d = json.load(fd)
+            return d["filenames"]
+        
     def imread(self):
         t0 = time.time()
         with self.open(mode="r") as fd:

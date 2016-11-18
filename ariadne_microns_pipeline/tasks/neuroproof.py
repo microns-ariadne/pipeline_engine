@@ -6,6 +6,7 @@ the executable's location.
 
 from cv2 import imread, imwrite
 import h5py
+import json
 import luigi
 import numpy as np
 import os
@@ -74,39 +75,33 @@ class NeuroproofRunMixin:
         seg_volume = inputs.next()
         additional_maps = list(inputs)
         #
-        # Write out an HDF5 file with the probabilities. Write others
-        # as .png files.
+        # neuroproof_graph_predict will take a .json file in place of a
+        # prediction file. It has the following format:
         #
-        prob_ds = prob_volume.imread()
-        seg_ds = seg_volume.imread()
-        prob_tempdir = tempfile.mkdtemp()
-        input_seg_tempdir = tempfile.mkdtemp()
-        output_seg_tempdir = tempfile.mkdtemp()
-        output_seg_file = os.path.join(output_seg_tempdir, "neuroproof")
+        # { "probabilities": [
+        #      [ filenames of channel 0],
+        #      [ filenames of channel 1],
+        #      ...
+        #      [ filenames of channel N]]
+        #   "watershed": [ filenames of watershed ],
+        #   "output": [ filenames to write on output] }
+        #
+        probabilities = [tgt.get_filenames() for tgt in
+                         [prob_volume] + additional_maps]
+        watershed = seg_volume.get_filenames()
+        output_target = self.output()
+        output = output_target.anticipate_filenames()
+        d = dict(probabilities=probabilities,
+                 watershed=watershed,
+                 output=output)
+        fd, json_path = tempfile.mkstemp(".json")
+        f = os.fdopen(fd, "w")
+        json.dump(d, f)
+        f.close()
         try:
-            prob_volume = prob_ds.astype(np.float32) / 255.
-            prob_volume = [prob_volume, prob_volume]
-            for tgt in additional_maps:
-                prob_volume.append(tgt.imread().astype(np.float32) / 255.)
-            prob_volume = np.array(prob_volume)
-            prob_volume = prob_volume.transpose(3, 2, 1, 0)
-            
-            probs_path = os.path.join(prob_tempdir, "probs.h5")
-            with h5py.File(probs_path, "w") as fd:
-                fd.create_dataset("volume/predictions", data=prob_volume)
-            del prob_volume
-                
-            for z in range(seg_ds.shape[0]):
-                path = os.path.join(input_seg_tempdir, "%04d.png" % z)
-                plane = np.dstack((seg_ds[z] >> 16, 
-                                   (seg_ds[z] >> 8) & 0xff,
-                                   seg_ds[z] & 0xff)).astype(np.uint8)
-                imwrite(path, plane)
-            
             args = [self.neuroproof,
-                    "--output-file=%s" % output_seg_file,
-                    input_seg_tempdir,
-                    probs_path,
+                    json_path,
+                    json_path,
                     self.classifier_filename]
             #
             # Inject the custom LD_LIBRARY_PATH into the subprocess environment
@@ -124,36 +119,11 @@ class NeuroproofRunMixin:
             #
             subprocess.check_call(args, env=env, close_fds=True)
             #
-            # Read the result and write into the volume
+            # Finish the output volume
             #
-            output_volume = self.output()
-            np_files = sorted(filter(
-                lambda _:_.startswith("neuroproof") and _.endswith(".png"),
-                os.listdir(output_seg_tempdir)))
-            planes = []
-            unique = []
-            for z, filename in enumerate(np_files):
-                plane = imread(os.path.join(output_seg_tempdir, filename), 1)
-                plane = (
-                    plane[:, :, 0].astype(np.uint32) +
-                    (plane[:, :, 1].astype(np.uint32) << 8) +
-                    (plane[:, :, 2].astype(np.uint32) << 16))
-                unique.append(np.unique(plane.flatten()))
-                planes.append(plane)
-            #
-            # Rework the labels so they are consecutive
-            #
-            unique = np.unique(np.hstack(unique))
-            lmap = np.zeros(np.max(unique)+1, np.uint32)
-            lmap[unique] = np.arange(len(unique)) + 1
-            planes = np.array(map(lambda _:lmap[_], planes))
-            output_volume.imwrite(planes)
+            output_target.finish_imwrite(np.dtype(np.uint32))
         finally:
-            for path in prob_tempdir, input_seg_tempdir, output_seg_tempdir:
-                for filename in os.listdir(path):
-                    os.remove(os.path.join(path, filename))
-                os.rmdir(path)
-
+            os.remove(json_path)
 
 class NeuroproofTask(NeuroproofTaskMixin, NeuroproofRunMixin,
                      RequiresMixin, RunMixin, CILKCPUMixin, luigi.Task):

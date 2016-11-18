@@ -133,7 +133,7 @@ $(TOOLS_PREFIX)/sparsehash/sparsehash-install:
 	make &&\
 	make install
 
-all_sources: $(TOOLS_PREFIX)/sources/opencv-2.4.9.zip \
+all_sources: $(TOOLS_PREFIX)/sources/opencv-2.4.13.zip \
 	     $(TOOLS_PREFIX)/sources/autoconf-2.64.tar.gz \
 		$(CILKPLUS_PREFIX)/cilkplus-gcc\
 		$(TOOLS_PREFIX)/sources/boost-1.61.0.tar.gz\
@@ -142,8 +142,9 @@ all_sources: $(TOOLS_PREFIX)/sources/opencv-2.4.9.zip \
 $(TOOLS_PREFIX)/sources:
 	mkdir -p $@
 
-$(TOOLS_PREFIX)/sources/opencv-2.4.9.zip:
-	wget http://downloads.sourceforge.net/project/opencvlibrary/opencv-unix/2.4.9/opencv-2.4.9.zip -O $@
+$(TOOLS_PREFIX)/sources/opencv-2.4.13.zip:
+	wget https://github.com/opencv/opencv/archive/2.4.13.zip -O $@
+#	wget http://downloads.sourceforge.net/project/opencvlibrary/opencv-unix/2.4.9/opencv-2.4.9.zip -O $@
 
 $(TOOLS_PREFIX)/sources/autoconf-2.64.tar.gz:
 	wget http://ftp.gnu.org/gnu/autoconf/autoconf-2.64.tar.gz -O $@
@@ -201,19 +202,21 @@ $(TOOLS_PREFIX)/jsoncpp/jsoncpp-install: $(TOOLS_PREFIX)/sources/jsoncpp-1.7.3.t
 #
 # Need to patch modules/gpu/src/nvidia/core/NCVPixelOperations.hpp
 #
-$(TOOLS_PREFIX)/opencv-2.4/opencv-install: $(TOOLS_PREFIX)/sources/opencv-2.4.9.zip $(TOOLS_PREFIX)/cilkplus/cilkplus-install/bin/g++
+$(TOOLS_PREFIX)/opencv-2.4/opencv-install: $(TOOLS_PREFIX)/sources/opencv-2.4.13.zip $(TOOLS_PREFIX)/cilkplus/cilkplus-install/bin/g++
 	mkdir -p $(OPENCV_PREFIX) &&\
 	cd $(OPENCV_PREFIX) &&\
-	unzip $(TOOLS_PREFIX)/sources/opencv-2.4.9.zip &&\
+	unzip $(TOOLS_PREFIX)/sources/opencv-2.4.13.zip &&\
 	wget https://raw.githubusercontent.com/opencv/opencv/2.4.13/modules/gpu/src/nvidia/core/NCVPixelOperations.hpp \
-	    -O opencv-2.4.9/modules/gpu/src/nvidia/core/NCVPixelOperations.hpp &&\
+	    -O opencv-2.4.13/modules/gpu/src/nvidia/core/NCVPixelOperations.hpp &&\
 	mkdir -p build &&\
 	cd build &&\
 	PATH=$(TOOLS_PREFIX)/cilkplus/cilkplus-install/bin/gcc:$(PATH) \
+	LIBRARY_PATH=$(TOOLS_PREFIX)/cilkplus/cilkplus-install/lib64:$(LIBRARY_PATH) \
 	cmake -DCMAKE_INSTALL_PREFIX=$@ \
 	      -DBUILD_SHARED_LIBS=ON \
 	      -DBUILD_STATIC_LIBS=OFF \
 	      -DBUILD_OPENEXR=OFF \
+	      -DWITH_FFMPEG= OFF \
 	      "-DCMAKE_CXX_FLAGS=-std=c++11" \
 	      -DCMAKE_CXX_COMPILER=$(CILKPLUS_CXX_COMPILER) \
 	      -DCMAKE_C_COMPILER=$(CILKPLUS_C_COMPILER) \
@@ -225,7 +228,7 @@ $(TOOLS_PREFIX)/opencv-2.4/opencv-install: $(TOOLS_PREFIX)/sources/opencv-2.4.9.
 	      "-DCUDA_NVCC_FLAGS=-std=c++11 --expt-relaxed-constexpr" \
 	      -DCUDA_SDK_ROOT_DIR=$(CUDA_PREFIX) \
 	      -DWITH_OPENEXR=OFF \
-	      $(OPENCV_PREFIX)/opencv-2.4.9 &&\
+	      $(OPENCV_PREFIX)/opencv-2.4.13 &&\
 	make &&\
 	make install
 

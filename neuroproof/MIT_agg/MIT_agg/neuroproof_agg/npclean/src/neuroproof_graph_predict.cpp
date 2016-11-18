@@ -7,11 +7,16 @@
 
 #include "../BioPriors/StackAgglomAlgs.h"
 
-
 #include <boost/filesystem.hpp>
 #include <boost/algorithm/string/predicate.hpp>
 #include <boost/date_time/posix_time/posix_time.hpp>
 #include <iostream>
+#include <fstream>
+#include <json/value.h>
+#include <json/reader.h>
+#include <opencv2/core/core.hpp>
+#include <opencv2/highgui/highgui.hpp>
+
 
 #include <cilk/cilk.h>
 //#include <google/profiler.h>
@@ -162,6 +167,129 @@ void get_dir_files(
     
 }
 
+/*
+ * get_json_files - read in the probability volumes and watershed input files
+ *                  from a JSON document
+ *
+ * path - path to the JSON document
+ * prob_list - a vector of probability volumes in the order expected by the
+ *             classifier.
+ * ws_input_files - the .PNG files containing the planes of labels for the
+ *                  watershed.
+ *
+ * The format of the JSON file:
+ * { "probabilities": 
+ *      [ [ filenames for channel 0...], 
+ *        [ filenames for channel 1...],
+ *	 ...
+ *	 [ filenames for channel N...]],
+ *   "watershed": [ filenames for watershed...],
+ *   "output": [ filenames for the planes to be written ]}
+ *
+ */
+void get_json_files(std::string path, 
+                    std::vector<VolumeProbPtr> &prob_list,
+                    std::vector<std::string> &ws_input_files,
+		    std::vector<std::string> &output_files)
+{
+    Json::Reader reader;
+    Json::Value d;
+    
+    ifstream fin(path);
+    if (! fin) {
+	throw ErrMsg("Error: input file, \"" + path + "\" cannot be opened.");
+    }
+    if (! reader.parse(fin, d)) {
+	throw ErrMsg("Cannot parse \"" + path + "\" as json.");
+    }
+    fin.close();
+    /*
+     * Read the probabilities: a list of lists of file names
+     */
+    Json::Value probabilities = d["probabilities"];
+    for (int i=0; i < probabilities.size(); i++) {
+	Json::Value probability = probabilities[i];
+	std::vector<std::string> file_names;
+	for (int j=0; j < probability.size(); j++) {
+	    file_names.push_back(probability[j].asString());
+	}
+	std::vector<VolumeProbPtr> tmp = VolumeProb::create_volume_from_images(
+	    file_names);
+	prob_list.push_back(tmp[0]);
+	/*
+	 * The membrane probabilities appear as the first and second on the
+	 * list, hence the duplication of element 0 below.
+	 */
+	if (i == 0) {
+	    prob_list.push_back(tmp[0]);
+	}
+    }
+    /*
+     * Capture the filenames for the watershed stack.
+     */
+    Json::Value watershed = d["watershed"];
+    for (int i=0; i < watershed.size(); i++) {
+	ws_input_files.push_back(watershed[i].asString());
+    }
+    /*
+     * Capture the output files
+     */
+     Json::Value output = d["output"];
+     for (int i=0; i< output.size(); i++) {
+	 output_files.push_back(output[i].asString());
+    }
+}
+
+/*
+ * compress_labels
+ *
+ * Rebase the labels so that they are numbered consecutively from 1
+ */
+void compress_labels(VolumeLabelPtr labelvol,
+                     std::vector<Label_t> &mapping)
+{
+    std::vector<bool> has_label;
+    has_label.reserve(10000000);
+    for (VolumeLabelData::iterator it=labelvol->begin(); 
+	 it != labelvol->end(); it++) {
+	if (*it >= has_label.size()) {
+	    has_label.resize(*it + 1, false);
+	}
+	has_label[*it] = true;
+    }
+    mapping.resize(has_label.size(), 0);
+    int dest = 1;
+    for (int src=1; src < has_label.size(); src++) {
+      if (has_label[src] == true) {
+	mapping[src] = dest++;
+      }
+    }
+    std::cout << "Found " << dest << " labels" << std::endl;
+}
+
+/*
+ * write_labels - write a label volume to a series of .png files
+ */
+void write_labels(VolumeLabelPtr labelvol, 
+                  std::vector<std::string> filenames,
+		  std::vector<Label_t> mapping)
+{
+    vigra::BRGBImage image(labelvol->shape(0), labelvol->shape(1));
+    for (int i=0; i < labelvol->shape(2); i++) {
+	std::cout << "Writing " << filenames[i] << std::endl;
+	for (int x = 0; x < labelvol->shape(0); x++) {
+	    for (int y=0; y < labelvol->shape(1); y++) {
+		Label_t val = mapping[(*labelvol)(x, y, i)];
+		image(x, y)[2] = (vigra::UInt8)val;
+		image(x, y)[1] = val >> 8;
+		image(x, y)[0] = val >> 16;
+	    }
+	}
+	vigra::exportImage(vigra::srcImageRange(image), 
+	                   vigra::ImageExportInfo(filenames[i].c_str()));
+    }
+}
+
 void run_prediction(PredictOptions& options)
 {
     boost::posix_time::ptime start = boost::posix_time::microsec_clock::local_time();
@@ -169,36 +297,35 @@ void run_prediction(PredictOptions& options)
 
     std::vector<std::string> prob_input_files;
     std::vector<std::string> ws_input_files;
+    std::vector<std::string> output_files;
     
     printf("-- Read dirs\n");
     
     size_t ext_pos = options.prediction_filename.find_last_of('.');
     bool is_hdf5 = false;
+    bool is_json = false;
     if (ext_pos != string::npos) {
 	std:string ext = options.prediction_filename.substr(ext_pos);
 	is_hdf5 = ((ext == ".hdf5") || (ext == ".h5"));
+	is_json = (ext == ".json");
     }
     vector<VolumeProbPtr> prob_list;
-    if (is_hdf5) {
+    if (is_json) {
+	get_json_files(options.prediction_filename,
+		       prob_list,
+		       ws_input_files,
+		       output_files);
+    } else if (is_hdf5) {
 	prob_list = VolumeProb::create_volume_array(
 	    options.prediction_filename.c_str(), PRED_DATASET_NAME);
+        get_dir_files(options.watershed_filename, ws_input_files);
     } else {
 	get_dir_files(options.prediction_filename, prob_input_files);
+        get_dir_files(options.watershed_filename, ws_input_files);
 	prob_list = VolumeProb::create_volume_from_images(prob_input_files);
     }    
-    get_dir_files(options.watershed_filename, ws_input_files);
     VolumeLabelPtr initial_labels = cilk_spawn VolumeLabelData::create_volume_from_images_seg(ws_input_files);
     
-    //ProfilerStart("profile.data");
-
-    // create prediction array --- this is the probability map.
-    
-    // printf("-- Read probs H5 file - start\n");
-    //     vector<VolumeProbPtr> prob_list = cilk_spawn VolumeProb::create_volume_array_NEW(
-    //         options.prediction_filename.c_str(), PRED_DATASET_NAME);
-    //         
-    //     VolumeLabelPtr initial_labels = cilk_spawn return_volume_label_ptr(options); 
-    //     
     
     // create watershed volume from the oversegmentation file.
     EdgeClassifier* eclfr;
@@ -256,9 +383,6 @@ void run_prediction(PredictOptions& options)
     
     // stack.print_fm();
     
-    printf("-- remove_inclusions\n");
-    printf("-- remove_inclusions\n");
-    printf("-- remove_inclusions\n");
     printf("-- remove_inclusions\n");
     
     remove_inclusions(stack);
@@ -371,9 +495,17 @@ void run_prediction(PredictOptions& options)
         stack.set_synapse_exclusions(options.synapse_filename.c_str());
     }
         
-    start = boost::posix_time::microsec_clock::local_time();    
-    stack.serialize_stack(options.output_filename.c_str(),
-                options.graph_filename.c_str(), options.location_prob);
+    start = boost::posix_time::microsec_clock::local_time();
+    if (is_json) {
+	VolumeLabelPtr pLabels = stack.get_labelvol();
+	pLabels->rebase_labels();
+	std::vector<Label_t> mapping;
+	compress_labels(pLabels, mapping);
+	write_labels(pLabels, output_files, mapping);
+    } else {
+	stack.serialize_stack(options.output_filename.c_str(),
+	            options.graph_filename.c_str(), options.location_prob);
+    }
     now = boost::posix_time::microsec_clock::local_time();
     cout << endl << "---------------------- TIME TO SERIALIZE: " << (now - start).total_milliseconds() << " ms\n";
 

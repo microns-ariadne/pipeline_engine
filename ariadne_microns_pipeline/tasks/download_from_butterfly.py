@@ -66,3 +66,12 @@ class DownloadFromButterflyTask(DownloadFromButterflyRunMixin,
     '''A task for downloading butterfly planes into a volume'''
     
     task_namespace = "ariadne_microns_pipeline"
+    
+    def process_resources(self):
+        '''Report Butterfly's resource requirements
+        
+        Butterfly needs one "butterfly" resource
+        '''
+        resources = self.resources.copy()
+        resources["butterfly"] = 1
+        return resources

@@ -150,6 +150,9 @@ class PipelineTaskMixin:
         "of z-stacks. The value is the amount of padding"
         " on each of the blocks.",
         default=5)
+    np_cores = luigi.IntParameter(
+        description="The number of cores used by a Neuroproof process",
+        default=2)
     temp_dirs = luigi.ListParameter(
         description="The base location for intermediate files",
         default=(tempfile.gettempdir(),))
@@ -795,7 +798,7 @@ class PipelineTaskMixin:
              self.np_tasks,
              NP_DATASET),
         )
-        for classifier_tasks, additional_classifier_tasks, seg_tasks, np_tasks, \
+        for classifier_tasks, additional_clastask.sifier_tasks, seg_tasks, np_tasks, \
             dataset_name in task_sets:
 
             for zi in range(classifier_tasks.shape[0]):
@@ -819,6 +822,7 @@ class PipelineTaskMixin:
                             task.output().dataset_location for task in
                             additional_tasks]
                         np_task.additional_locations = additional_locations
+                        np_task.cpu_count = self.np_cores
                         np_task.set_requirement(classifier_task)
                         np_task.set_requirement(seg_task)
                         map(np_task.set_requirement, additional_tasks)
