@@ -798,7 +798,7 @@ class PipelineTaskMixin:
              self.np_tasks,
              NP_DATASET),
         )
-        for classifier_tasks, additional_clastask.sifier_tasks, seg_tasks, np_tasks, \
+        for classifier_tasks, additional_classifier_tasks, seg_tasks, np_tasks, \
             dataset_name in task_sets:
 
             for zi in range(classifier_tasks.shape[0]):
