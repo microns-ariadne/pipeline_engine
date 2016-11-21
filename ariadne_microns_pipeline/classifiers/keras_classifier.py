@@ -102,19 +102,23 @@ class KerasClassifier(AbstractPixelClassifier):
         #      GPU 0: GeForce GTX TITAN X ...
         #
         import theano.sandbox.cuda
-        nvidia_smi_output = subprocess.check_output(["nvidia-smi", "-L"])
-        for line in nvidia_smi_output.split("\n"):
-            match = re.search("GPU\\s(\\d+)", line)
-            if match is None:
-                continue
-            device = int(match.group(1))
-            try:
-                theano.sandbox.cuda.use("gpu%d" % device, force=True)
-                break
-            except:
-                continue
+        if "MICRONS_IPC_WORKER_GPU" in os.environ:
+            device = int(os.environ["MICRONS_IPC_WORKER_GPU"])
+            theano.sandbox.cuda.use("gpu%d" % device, force=True)
         else:
-            raise RuntimeError("Failed to acquire GPU")
+            nvidia_smi_output = subprocess.check_output(["nvidia-smi", "-L"])
+            for line in nvidia_smi_output.split("\n"):
+                match = re.search("GPU\\s(\\d+)", line)
+                if match is None:
+                    continue
+                device = int(match.group(1))
+                try:
+                    theano.sandbox.cuda.use("gpu%d" % device, force=True)
+                    break
+                except:
+                    continue
+            else:
+                raise RuntimeError("Failed to acquire GPU")
         logger.report_metric("gpu_acquisition_time", time.time() - t0)
         logger.report_event("Acquired GPU %d" % device)
         cls.has_bound_cuda=True
