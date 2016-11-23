@@ -754,7 +754,8 @@ class NeuroproofLearnPipelineTaskMixin:
             channel=self.gt_channel,
             url=self.url,
             volume=self.volume,
-            location = dataset_location)
+            location = dataset_location,
+            resolution=self.resolution)
         
     def generate_neuroproof_learn_task(self):
         '''Learn, baby, learn'''
