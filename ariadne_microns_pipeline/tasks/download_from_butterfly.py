@@ -26,6 +26,9 @@ class DownloadFromButterflyTaskMixin:
     url = luigi.Parameter(
         default="http://localhost:2001/api",
         description="URL of the REST endpoint of the Butterfly server")
+    resolution = luigi.IntParameter(
+        default=0,
+        description="The MIPMAP resolution of the image to be retrieved.")
     
     def output(self):
         return TargetFactory().get_volume_target(
@@ -47,7 +50,7 @@ class DownloadFromButterflyRunMixin:
                 
             plane = get_butterfly_plane_from_channel(
                 channel_target, self.volume.x, self.volume.y, z,
-                self.volume.width, self.volume.height)
+                self.volume.width, self.volume.height, self.resolution)
             img = plane.imread()
             if not haz_volume:
                 volume = np.zeros(

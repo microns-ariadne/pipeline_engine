@@ -126,6 +126,8 @@ class PipelineTaskMixin:
     # Optional parameters
     #
     #########
+    resolution = luigi.IntParameter(
+        description="The MIPMAP resolution of the volume to be processed.")
     block_width = luigi.IntParameter(
         description="Width of one of the processing blocks",
         default=2048)
@@ -515,7 +517,8 @@ class PipelineTaskMixin:
                             channel=self.channel,
                             url=self.url,
                             volume=volume,
-                            location=location)
+                            location=location,
+                            resolution=self.resolution)
 
     def generate_classifier_tasks(self):
         '''Get the pixel classifier tasks
@@ -867,7 +870,8 @@ class PipelineTaskMixin:
                 self.gt_channel,
                 self.url,
                 volume,
-                dataset_location)
+                dataset_location,
+                resolution=self.resolution)
             self.gt_tasks[zi, yi, xi] = btask
         if self.wants_synapse_statistics:
             synapse_gt_location = self.get_dataset_location(
@@ -880,7 +884,8 @@ class PipelineTaskMixin:
                     channel=self.synapse_channel,
                     url=self.url,
                     volume=volume,
-                    location=synapse_gt_location)
+                    location=synapse_gt_location,
+                    resolution=self.resolution)
         if self.has_annotation_mask:
             gt_mask_location = self.get_dataset_location(
                 volume, GT_MASK_DATASET)
@@ -892,7 +897,8 @@ class PipelineTaskMixin:
                     channel=self.gt_mask_channel,
                     url=self.url,
                     volume=volume,
-                    location=gt_mask_location)
+                    location=gt_mask_location,
+                    resolution=self.resolution)
             
     def generate_pred_cutouts(self):
         '''Generate volumes matching the ground truth segmentations'''

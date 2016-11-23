@@ -47,7 +47,8 @@ class AMTaskFactory(object):
                             channel,
                             url,
                             volume,
-                            location):
+                            location,
+                            resolution=0):
         '''Get a 3d volume
         
         :param experiment: the experiment done to produce the sample
@@ -60,6 +61,7 @@ class AMTaskFactory(object):
         :param location: the location on disk to write the volume data
         :type location: 
             :py:class:`ariadne_microns_pipeline.parameters.DatasetLocation`
+        :param resolution: the MIPMAP resolution of the volume
         :returns: A task that outputs a volume target.
         '''
         
@@ -69,7 +71,8 @@ class AMTaskFactory(object):
                                          channel=channel,
                                          url=url,
                                          volume=volume,
-                                         destination=location)
+                                         destination=location,
+                                         resolution=resolution)
 
     def gen_classify_task(
         self, paths, datasets, pattern, img_volume, img_location,

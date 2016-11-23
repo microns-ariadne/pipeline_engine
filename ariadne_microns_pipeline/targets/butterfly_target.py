@@ -15,7 +15,9 @@ class ButterflyTarget(luigi.Target):
                  sample,
                  dataset,
                  channel,
-                 x, y, z, width, height, url="http://localhost:2001/api"):
+                 x, y, z, width, height,
+                 url="http://localhost:2001/api",
+                 resolution=0):
         '''Initialize the butterfly target
         
         :param experiment: The parent experiment of the plane of data
@@ -30,6 +32,15 @@ class ButterflyTarget(luigi.Target):
         :param width: the width of the cutout
         :param height: the height of the cutout
         :param url: The REST endpoint for getting a chunk of data
+        :param resolution: MIPMAP level. A resolution of zero is 1:1,
+                           a resolution of one is 2:1, a resolution of
+                           two is 4:1, etc. Resolution is only in the x/y
+                           directions.
+        
+        All coordinates and dimensions are in the downsampled space of
+        the resolution. For instance x=1000, y=1000, z=200, width=1024,
+        height=1024, depth=10, resolution=1 is the downsampled volume of
+        x=2000, y=2000, z=200, width=2048, height=2048, depth=10, resolution=0.
         '''
         self.experiment = experiment
         self.sample = sample
@@ -41,6 +52,7 @@ class ButterflyTarget(luigi.Target):
         self.width = width
         self.height = height
         self.url = url
+        self.resolution = resolution
     
     def exists(self):
         '''Does the target exist?
@@ -64,6 +76,8 @@ class ButterflyTarget(luigi.Target):
             "&z=%d" % self.z +\
             "&width=%d" % self.width +\
             "&height=%d" % self.height
+        if self.resolution != 0:
+            url += "&resolution=%d" % self.resolution
         client = HTTPClient()
         response = client.fetch(url)
         assert isinstance(response, HTTPResponse)
@@ -134,7 +148,8 @@ class ButterflyChannelTarget(luigi.Target):
         self.__y_extent = d["dimensions"]["y"]
         self.__z_extent = d["dimensions"]["z"]
 
-def get_butterfly_plane_from_channel(channel_target, x, y, z, width, height):
+def get_butterfly_plane_from_channel(
+    channel_target, x, y, z, width, height, resolution=0):
     '''Get a butterfly plane from a butterfly channel target
     
     :param channel_target: A Butterfly channel target
@@ -143,6 +158,7 @@ def get_butterfly_plane_from_channel(channel_target, x, y, z, width, height):
     :param z: the plane # of the plane
     :param width: the width of the plane
     :param height: the height of the plane
+    :param resolution: the MIPMAP resolution at which to retrieve.
     '''
     return ButterflyTarget(
         experiment=channel_target.experiment,
@@ -150,6 +166,7 @@ def get_butterfly_plane_from_channel(channel_target, x, y, z, width, height):
         dataset=channel_target.dataset,
         channel=channel_target.channel,
         x=x, y=y, z=z, width=width, height=height,
-        url=channel_target.url)
+        url=channel_target.url,
+        resolution=resolution)
 
 all=[get_butterfly_plane_from_channel, ButterflyChannelTarget, ButterflyTarget]

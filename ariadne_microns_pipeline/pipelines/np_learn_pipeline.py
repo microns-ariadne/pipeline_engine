@@ -120,6 +120,10 @@ class NeuroproofLearnPipelineTaskMixin:
     # Optional parameters
     #
     #########
+    resolution = luigi.IntParameter(
+        default=0,
+        description="The mipmap resolution to use when retrieving "
+                    "from Butterfly")
     block_width = luigi.IntParameter(
         description="Width of one of the processing blocks",
         default=2048)
@@ -415,7 +419,8 @@ class NeuroproofLearnPipelineTaskMixin:
                             channel=self.channel,
                             url=self.url,
                             volume=volume,
-                            location=location)
+                            location=location,
+                            resolution=self.resolution)
 
     def generate_classifier_tasks(self):
         '''Get the pixel classifier tasks
