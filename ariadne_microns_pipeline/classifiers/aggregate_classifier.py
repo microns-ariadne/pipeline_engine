@@ -64,7 +64,18 @@ class AggregateClassifier(AbstractPixelClassifier):
     
     def get_class_names(self):
         return sum(operator.methodcaller("values"), self.name_maps, [])
-    
+
+    def get_resources(self):
+        d = {}
+        for classifier in self.classifiers():
+            resources = classifier.get_resources()
+            for key in resources:
+                if key not in d:
+                    d[key] = resources[key]
+                elif d[key] < resources[key]:
+                    d[key] = resources[key]
+        return d
+
     def run_via_ipc(self):
         return any(map(operator.methodcaller("run_via_ipc"), 
                        self.classifiers()))
