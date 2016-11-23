@@ -274,19 +274,18 @@ void write_labels(VolumeLabelPtr labelvol,
                   std::vector<std::string> filenames,
 		  std::vector<Label_t> mapping)
 {
-    vigra::BRGBImage image(labelvol->shape(0), labelvol->shape(1));
-    for (int i=0; i < labelvol->shape(2); i++) {
-	std::cout << "Writing " << filenames[i] << std::endl;
+    cilk_for (int i=0; i < labelvol->shape(2); i++) {
+        cv::Mat plane(labelvol->shape(1), labelvol->shape(0), CV_8UC3);
 	for (int x = 0; x < labelvol->shape(0); x++) {
 	    for (int y=0; y < labelvol->shape(1); y++) {
 		Label_t val = mapping[(*labelvol)(x, y, i)];
-		image(x, y)[2] = (vigra::UInt8)val;
-		image(x, y)[1] = val >> 8;
-		image(x, y)[0] = val >> 16;
+		cv::Vec3b &rgb = plane.at<Vec3b>(y, x);
+		rgb[0] = (vigra::UInt8)val;
+		rgb[1] = val >> 8;
+		rgb[2] = val >> 16;
 	    }
 	}
-	vigra::exportImage(vigra::srcImageRange(image), 
-	                   vigra::ImageExportInfo(filenames[i].c_str()));
+	cv::imwrite(filenames[i].c_str(), plane);
     }
 }
 
