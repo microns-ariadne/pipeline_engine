@@ -427,11 +427,11 @@ class KerasClassifier(AbstractPixelClassifier):
                         [int(_ * self.downsample_factor)
                          for _ in y0b, y1b, x0b, x1b]
                 # Fix padding
-                if x1b > self.image_shape[2]:
-                    x1b = self.image_shape[2]
+                if x1b > self.out_image.shape[2]:
+                    x1b = self.out_image.shape[2]
                     pred = pred[:, :, :x1b - x0b]
-                if y1b > self.image_shape[1]:
-                    y1b = self.image_shape[1]
+                if y1b > self.out_image.shape[1]:
+                    y1b = self.out_image.shape[1]
                     pred = pred[:, :y1b - y0b, :]
                 self.out_image[z0b:z1b, y0b:y1b, x0b:x1b] = \
                     (pred * 255).astype(np.uint8)
