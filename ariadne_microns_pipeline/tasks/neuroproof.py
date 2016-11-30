@@ -58,7 +58,18 @@ class NeuroproofRunMixin:
         "JSONCPP libraries, and OpenCV libraries.")
     classifier_filename = luigi.Parameter(
         description="The Vigra random forest classifier or OpenCV random "
-        "forest agglomeration classifier.")
+        "forest agglomeration classifier. In addition, there may be a file "
+        "with the given filename with \"_ignore.txt\" appended which gives "
+        "the indices of the features to ignore and similarly a file with "
+        "\"_config.json\" appended which gives configuration information to "
+        "neuroproof.")
+    threshold = luigi.FloatParameter(
+        default=0.2,
+        description="Segmentation threshold for neuroproof")
+    watershed_threshold = luigi.FloatParameter(
+        default=0,
+        description="Threshold used for removing small bodies as a "
+                    "post-processing step")
     
     def ariadne_run(self):
         '''Run the neuroproof subprocess'''
@@ -95,13 +106,26 @@ class NeuroproofRunMixin:
         #      [ filenames of channel 1],
         #      ...
         #      [ filenames of channel N]]
+        #   "config": {
+        #        "invert": [ True or False per probability ]
+        #   }
         #   "watershed": [ filenames of watershed ],
         #   "output": [ filenames to write on output] }
+        #
+        # config is optional as are its key/value pairs. Predictably,
+        # "invert" is False by default.
         #
         probabilities = [tgt.get_filenames() for tgt in
                          [prob_volume] + additional_maps]
         watershed = seg_volume.get_filenames()
-        d = dict(probabilities=probabilities,
+        config_path = \
+            os.path.splitext(self.classifier_filename)[0] + "_config.json"
+        if os.path.isfile(config_path):
+            config = json.load(open(config_path, "r"))
+        else:
+            config = {}
+        d = dict(config=config,
+                 probabilities=probabilities,
                  watershed=watershed,
                  output=output)
         fd, json_path = tempfile.mkstemp(".json")
@@ -110,6 +134,8 @@ class NeuroproofRunMixin:
         f.close()
         try:
             args = [self.neuroproof,
+                    "--threshold", str(self.threshold),
+                    "--watershed-threshold", str(self.watershed_threshold),
                     json_path,
                     json_path,
                     self.classifier_filename]

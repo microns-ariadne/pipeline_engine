@@ -195,6 +195,7 @@ void get_json_files(std::string path,
     Json::Reader reader;
     Json::Value d;
     
+    std::cout << "Using configuration, " << path << std::endl;
     ifstream fin(path);
     if (! fin) {
 	throw ErrMsg("Error: input file, \"" + path + "\" cannot be opened.");
@@ -207,6 +208,7 @@ void get_json_files(std::string path,
      * Read the probabilities: a list of lists of file names
      */
     Json::Value probabilities = d["probabilities"];
+    Json::Value config = d["config"];
     for (int i=0; i < probabilities.size(); i++) {
 	Json::Value probability = probabilities[i];
 	std::vector<std::string> file_names;
@@ -223,6 +225,36 @@ void get_json_files(std::string path,
 	if (i == 0) {
 	    prob_list.push_back(tmp[0]);
 	}
+    }
+    /*
+     * Invert probability maps other than #0 if configured to do so.
+     */
+    if (config.isObject()) {
+	Json::Value invert = config["invert"];
+	if (invert.isArray()) {
+	    for (int i=0; (i<invert.size()) && (i < prob_list.size()-1); i++) {
+		Json::Value bit=invert[i];
+		if (bit.isBool() && bit.asBool()) {
+		    std::cout << "Inverting channel # " << i << std::endl;
+		    VolumeProbPtr v = prob_list[i+1];
+		    VolumeProbPtr vInv = VolumeProb::create_volume();
+		    vInv->reshape(v->shape());
+		    for (auto it=vInv->begin(); it != vInv->end(); ++it) {
+			*it = 1;
+		    }
+		    *vInv -= *v;
+		    prob_list[i+1] = vInv;
+		    std::cout << "v[100, 100, 0]=" << (*v)(100, 100, 0) <<
+			       ", vInv[100, 100, 0]=" << (*vInv)(100, 100, 0) << std::endl;
+		} else {
+		    std::cout << "Not inverting channel # " << i << std::endl;
+		}
+	    }
+	} else {
+	    std::cout << "No invert array" << std::endl;
+	}
+    } else {
+	std::cout << "No config object." << std::endl;
     }
     /*
      * Capture the filenames for the watershed stack.
