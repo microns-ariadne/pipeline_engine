@@ -127,6 +127,7 @@ class PipelineTaskMixin:
     #
     #########
     resolution = luigi.IntParameter(
+        default=0,
         description="The MIPMAP resolution of the volume to be processed.")
     block_width = luigi.IntParameter(
         description="Width of one of the processing blocks",
