@@ -153,6 +153,10 @@ class PipelineTaskMixin:
         "of z-stacks. The value is the amount of padding"
         " on each of the blocks.",
         default=5)
+    np_threshold = luigi.FloatParameter(
+        default=.2,
+        description="The probability threshold for merging in Neuroproof "
+        "(range = 0-1).")
     np_cores = luigi.IntParameter(
         description="The number of cores used by a Neuroproof process",
         default=2)
@@ -819,6 +823,7 @@ class PipelineTaskMixin:
                             input_seg_location=seg_task.output_location,
                             output_seg_location=output_seg_location,
                             classifier_filename=self.neuroproof_classifier_path)
+                        np_task.threshold=self.np_threshold
                         additional_tasks = [ 
                             additional_classifier_tasks[k][zi, yi, xi]
                             for k in self.additional_neuroproof_channels]
