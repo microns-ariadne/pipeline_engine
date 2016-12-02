@@ -471,21 +471,19 @@ class AMTaskFactory(object):
             use_mito=use_mito)
     
     def gen_mask_border_task(
-        self, volume, prob_location, mask_location, border_width, close_width):
+        self, volume, prob_location, mask_location, threshold=250):
         '''Generate the outer and border masks for a volume
         
         :param volume: the volume being masked
         :param prob_location: the location of the membrane probabilities
         :param mask_location: where to write the masks
-        :param border_width: The width of the border to consider masking
-        :param close_width: the size of the square block to be used in the
-             morphological closing operation.
+        :param threshold: Mask out voxels with membrane probabilities at this
+        threshold or higher.
         '''
         return MaskBorderTask(volume=volume,
                               prob_location=prob_location,
                               mask_location=mask_location,
-                              border_width=border_width,
-                              close_width=close_width)
+                              threshold=threshold)
     
     def gen_connected_components_task(
         self, volume1, location1, volume2, location2, overlap_volume,

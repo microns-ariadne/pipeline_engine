@@ -486,9 +486,7 @@ class NeuroproofLearnPipelineTaskMixin:
                     btask = self.factory.gen_mask_border_task(
                         volume,
                         input_location,
-                        location,
-                        border_width=self.block_xy_overlap,
-                        close_width=self.close_width)
+                        location)
                     self.border_mask_tasks[zi, yi, xi] = btask
                     btask.set_requirement(ctask)
 

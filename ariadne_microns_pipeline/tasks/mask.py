@@ -1,6 +1,6 @@
 import luigi
 import numpy as np
-from scipy.ndimage import distance_transform_edt
+from scipy.ndimage import gaussian_filter
 
 from ..targets.factory import TargetFactory
 from ..parameters import VolumeParameter, DatasetLocationParameter
@@ -28,20 +28,26 @@ class MaskBorderRunMixin:
     #
     # Optional parameters
     #
-    border_width = luigi.IntParameter(
-        default=30,
-        description="Border to potentially exclude from watershed")
-    close_width = luigi.IntParameter(
-        default=5,
-        description="Radius of the close() operation")
-    
+    threshold = luigi.IntParameter(
+        default = 250,
+        description="Mask out voxels whose membrane probability is this value "
+                    "or higher (range = 0-256)")
+    smoothing_xy = luigi.FloatParameter(
+        default=0,
+        description="Smoothing in the x and y direction. "
+                    "Zero means smoothing off")
+    smoothing_z = luigi.FloatParameter(
+        default=0,
+        description="Smoothing in the Z direction")
     def ariadne_run(self):
         '''Create the mask of pixels to watershed'''
-        #
-        # TO_DO: implement this when we understand what it is
-        #
         prob = self.input().next().imread()
-        mask = np.ones(prob.shape, np.uint8)
+        if self.smoothing_xy != 0 or self.smoothing_z != 0:
+            prob = gaussian_filter(prob.astype(float32),
+                                   sigma=(self.smoothing_z,
+                                          self.smoothing_xy,
+                                          self.smoothing_xy))
+        mask = (prob < self.threshold).astype(np.uint8)
         self.output().imwrite(mask)
 
 

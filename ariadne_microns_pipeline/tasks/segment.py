@@ -64,12 +64,14 @@ class SegmentRunMixin:
         prob[~mask] = 255
         smoothed = gaussian_filter(
             prob, (self.sigma_z, self.sigma_xy, self.sigma_xy))
+        smoothed[~mask] = 255
         if self.dimensionality == Dimensionality.D3:
             seg = watershed(smoothed, labels)
         else:
             seg = np.zeros(smoothed.shape, np.uint16)
             for z in range(smoothed.shape[0]):
                 seg[z:z+1] = watershed(smoothed[z:z+1], labels[z:z+1])
+        seg[~mask] = 0
         seg_volume.imwrite(seg.astype(np.uint32))
 
 class SegmentTask(SegmentTaskMixin, SegmentRunMixin, RequiresMixin, 
