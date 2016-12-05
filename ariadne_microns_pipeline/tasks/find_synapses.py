@@ -15,8 +15,19 @@ class FindSynapsesTaskMixin:
     
     volume = VolumeParameter(
         description="The volume to be segmented")
-    input_location = DatasetLocationParameter(
-        description="The location of the probability map")
+    wants_dual_probability_maps = luigi.BoolParameter(
+        description="Set this if both a transmitter and receptor probability "
+                    "map are provided. Otherwise a single synapse probability "
+                    "map is used.")
+    synapse_map_location = DatasetLocationParameter(
+        default = EMPTY_DATASET_LOCATION,
+        description="The location of the synapse probability map")
+    transmitter_map_location = DatasetLocationParameter(
+        default = EMPTY_DATASET_LOCATION,
+        description = "The location of the synapse transmitter probability map")
+    receptor_map_location = DatasetLocationParameter(
+        default = EMPTY_DATASET_LOCATION,
+        description = "The location of the synapse receptor probability map")
     neuron_segmentation = DatasetLocationParameter(
         default=EMPTY_DATASET_LOCATION,
         description="The location of the segmented neurons.")
@@ -24,9 +35,17 @@ class FindSynapsesTaskMixin:
         description="The location for the segmentation")
     
     def input(self):
-        yield TargetFactory().get_volume_target(
-            location=self.input_location,
-            volume=self.volume)
+        if self.wants_dual_probability_maps:
+            yield TargetFactory().get_volume_target(
+                location=self.transmitter_map_location,
+                volume=self.volume)
+            yield TargetFactory().get_volume_target(
+                location=self.receptor_map_location,
+                volume=self.volume)
+        else:
+            yield TargetFactory().get_volume_target(
+                location=self.input_location,
+                volume=self.volume)
         if not is_empty_dataset_location(self.neuron_segmentation):
             yield TargetFactory().get_volume_target(
                 location=self.neuron_segmentation,
@@ -76,7 +95,11 @@ class FindSynapsesRunMixin:
     
     def ariadne_run(self):
         inputs = self.input()
-        volume = inputs.next().imread()
+        if self.wants_dual_probability_maps:
+            # Take the sum of the transmitter and receptor probabilities
+            volume = inputs.next().imread() + inputs.next().imread()
+        else:
+            volume = inputs.next().imread()
         if self.erode_with_neurons:
             #
             # Exclude the innards of the neuron from consideration

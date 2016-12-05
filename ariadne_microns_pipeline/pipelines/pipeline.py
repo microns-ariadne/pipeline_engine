@@ -44,6 +44,12 @@ MEMBRANE_DATASET = "membrane"
 '''The name of the synapse probability datasets'''
 SYNAPSE_DATASET = "synapse"
 
+'''The name of the synapse transmitter probability datasets'''
+SYNAPSE_TRANSMITTER_DATASET = "transmitter"
+
+'''The name of the synapse receptor probability datasets'''
+SYNAPSE_RECEPTOR_DATASET = "receptor"
+
 '''The name of the neuroproofed segmentation datasets'''
 NP_DATASET = "neuroproof"
 
@@ -166,9 +172,22 @@ class PipelineTaskMixin:
     membrane_class_name = luigi.Parameter(
         description="The name of the pixel classifier's membrane class",
         default="membrane")
+    wants_transmitter_receptor_synapse_maps = luigi.BoolParameter(
+        description="Use a synapse transmitter and receptor probability map "
+                    "instead of a map of synapse voxel probabilities.")
     synapse_class_name = luigi.Parameter(
         description="The name of the pixel classifier's synapse class",
         default="synapse")
+    transmitter_class_name = luigi.Parameter(
+        description="The name of the voxel classifier class that gives "
+                    "the probability that a voxel is on the transmitter side "
+                    "of a synapse.",
+        default="transmitter")
+    receptor_class_name = luigi.Parameter(
+        description="The name of the voxel classifier class that gives "
+                    "the probability that a voxel is on the receptor side "
+                    "of a synapse.",
+        default="receptor")
     additional_neuroproof_channels = luigi.ListParameter(
         default=[],
         description="The names of additional classifier classes "
@@ -532,16 +551,38 @@ class PipelineTaskMixin:
         '''
         self.classifier_tasks = \
             np.zeros((self.ncl_z, self.ncl_y, self.ncl_x), object)
-        self.synapse_classifier_tasks = np.zeros(
-            (self.ncl_z, self.ncl_y, self.ncl_x), object)
+        if self.wants_transmitter_receptor_synapse_maps:
+            self.transmitter_classifier_tasks = \
+                np.zeros((self.ncl_z, self.ncl_y, self.ncl_x), object)
+            self.receptor_classifier_tasks = \
+                np.zeros((self.ncl_z, self.ncl_y, self.ncl_x), object)
+            datasets = {
+                self.membrane_class_name: MEMBRANE_DATASET,
+                self.transmitter_class_name: SYNAPSE_TRANSMITTER_DATASET, 
+                self.receptor_class_name: SYNAPSE_RECEPTOR_DATASET
+            }
+            taskmaps = {
+                MEMBRANE_DATASET: self.classifier_tasks,
+                SYNAPSE_TRANSMITTER_DATASET: self.transmitter_classifier_tasks,
+                SYNAPSE_RECEPTOR_DATASET: self.receptor_classifier_tasks
+            }
+        else:
+            self.synapse_classifier_tasks = np.zeros(
+                (self.ncl_z, self.ncl_y, self.ncl_x), object)
+            datasets = {
+                self.membrane_class_name: MEMBRANE_DATASET,
+                self.synapse_class_name: SYNAPSE_DATASET}
+            taskmaps = {
+                MEMBRANE_DATASET: self.classifier_tasks,
+                SYNAPSE_DATASET: self.synapse_classifier_tasks
+            }
         self.additional_classifier_tasks = dict(
             [(k, np.zeros((self.ncl_z, self.ncl_y, self.ncl_x), object))
              for k in self.additional_neuroproof_channels])
-        datasets={self.membrane_class_name: MEMBRANE_DATASET,
-                  self.synapse_class_name: SYNAPSE_DATASET}
         for channel in self.additional_neuroproof_channels:
-            if channel != SYNAPSE_DATASET:
-                datasets[channel] = channel
+            if channel not in (SYNAPSE_DATASET, SYNAPSE_TRANSMITTER_DATASET,
+                               SYNAPSE_RECEPTOR_DATASET):
+                datasets[channel] = self.additional_classifier_tasks[channel]
         for zi in range(self.ncl_z):
             for yi in range(self.ncl_y):
                 for xi in range(self.ncl_x):
@@ -562,46 +603,51 @@ class PipelineTaskMixin:
                         classifier_path=self.pixel_classifier_path)
                     ctask.set_requirement(btask)
                     #
-                    # Create a shim that returns the membrane volume
-                    # as its output.
+                    # Create shims for all channels
                     #
-                    shim_task = ClassifyShimTask.make_shim(
-                        classify_task=ctask,
-                        dataset_name=MEMBRANE_DATASET)
-                    self.classifier_tasks[zi, yi, xi] = shim_task
-                    #
-                    # Create a shim that returns the synapse volume
-                    #
-                    shim_task = ClassifyShimTask.make_shim(
-                        classify_task=ctask,
-                        dataset_name=SYNAPSE_DATASET)
-                    self.synapse_classifier_tasks[zi, yi, xi] = shim_task
-                    if SYNAPSE_DATASET in self.additional_neuroproof_channels:
-                        t = self.additional_classifier_tasks[SYNAPSE_DATASET]
-                        t[zi, yi, xi] = shim_task
-                    for name in self.additional_neuroproof_channels:
+                    for channel, tasks in taskmaps.items():
                         shim_task = ClassifyShimTask.make_shim(
                             classify_task=ctask,
-                            dataset_name=name)
-                        self.additional_classifier_tasks[name][zi, yi, xi] = \
-                            shim_task
+                            dataset_name=channel)
+                        tasks[zi, yi, xi] = shim_task
      
     def generate_block_tasks(self):
         '''Generate tasks that reblock classifications for segmentation'''
-        self.old_classifier_tasks = self.classifier_tasks
-        self.old_synapse_classifier_tasks = self.synapse_classifier_tasks
-        self.old_additional_classifier_tasks = self.additional_classifier_tasks
+        old = [self.classifier_tasks]
         self.classifier_tasks = np.zeros((self.n_z, self.n_y, self.n_x), object)
-        self.synapse_classifier_tasks = \
-            np.zeros((self.n_z, self.n_y, self.n_x), object)
+        new = [self.classifier_tasks]
+        if self.wants_transmitter_receptor_synapse_maps:
+            old.append(self.transmitter_classifier_tasks)
+            self.transmitter_classifier_tasks = \
+                np.zeros((self.n_z, self.n_y, self.n_x), object)
+            new.append(self.transmitter_classifier_tasks)
+            old.append(self.receptor_classifier_tasks)
+            self.receptor_classifier_tasks = \
+                np.zeros((self.n_z, self.n_y, self.n_x), object)
+            new.append(self.receptor_classifier_tasks)
+        else:
+            old.append(self.synapse_classifier_tasks)
+            self.synapse_classifier_tasks = \
+                np.zeros((self.n_z, self.n_y, self.n_x), object)
+            new.append(self.synapse_classifier_tasks)
+            
+        old_additional_classifier_tasks = self.additional_classifier_tasks
         self.additional_classifier_tasks = {}
         for name in self.additional_neuroproof_channels:
             if name == SYNAPSE_DATASET:
                 self.additional_classifier_tasks[name] =\
                     self.synapse_classifier_tasks
+            elif name == SYNAPSE_TRANSMITTER_DATASET:
+                self.additional_classifier_tasks[name] = \
+                    self.transmitter_classifier_tasks
+            elif name == SYNAPSE_RECEPTOR_DATASET:
+                self.additional_classifier_tasks[name] = \
+                    self.receptor_classifier_tasks
             else:
+                old.append(old_additional_classifier_tasks)
                 self.additional_classifier_tasks[name] = \
                     np.zeros((self.n_z, self.n_y, self.n_x), object)
+                new.append(self.additional_classifier_tasks[name])
         for zi in range(self.n_z):
             zs = self.zs[zi]
             ze = self.ze[zi]
@@ -619,31 +665,23 @@ class PipelineTaskMixin:
                                if self.cl_xs[idx] < xe and self.cl_xe[idx] > xs]
                     self.generate_block_task(
                         xi, yi, zi, xs, xe, ys, ye, zs, ze, 
-                        cl_xidx, cl_yidx, cl_zidx)
+                        cl_xidx, cl_yidx, cl_zidx, old, new)
     
     def generate_block_task(self, xi, yi, zi, xs, xe, ys, ye, zs, ze, 
-                            cl_xidx, cl_yidx, cl_zidx):
+                            cl_xidx, cl_yidx, cl_zidx, old_list, new_list):
         '''Generate the tasks for one x/y/z
         
         xi, yi, zi: indices of the block
         xs, xe, ys, ye, zs, ze: starts and ends of the block
         cl_xidx, cl_yidx, cl_zidx: indices of the overlapping input blocks
+        old_list: the old task arrays
+        new_list: the new task arrays
         '''
-        pairs = [
-            (self.old_classifier_tasks, 
-             self.classifier_tasks, 
-             MEMBRANE_DATASET),
-            (self.old_synapse_classifier_tasks, 
-             self.synapse_classifier_tasks,
-             SYNAPSE_DATASET)]
-        for name in self.additional_neuroproof_channels:
-            if name == SYNAPSE_DATASET:
-                continue
-            pairs.append((self.old_additional_classifier_tasks[name],
-                          self.additional_classifier_tasks[name],
-                          name))
         volume = Volume(xs, ys, zs, xe-xs, ye-ys, ze-zs)
-        for old, new, name in pairs:
+        for old, new in zip(old_list, new_list):
+            if old.size == 0:
+                continue
+            name = old[0, 0, 0].output().dataset_location.dataset_name
             location = self.get_dataset_location(volume, name)
             inputs = []
             tasks = []
@@ -1215,6 +1253,45 @@ class PipelineTaskMixin:
                     stask.set_requirement(nptask)
                     self.synapse_segmentation_tasks[zi, yi, xi] = stask
     
+    def generate_synapse_tr_segmentation_tasks(self):
+        '''Generate tasks for segmenting synapses with transmitter/receptor maps
+        
+        '''
+        self.synapse_segmentation_tasks = np.zeros(
+            (self.n_z, self.n_y, self.n_x), object)
+        for zi in range(self.n_z):
+            for yi in range(self.n_y):
+                for xi in range(self.n_x):
+                    ttask = self.transmitter_classifier_tasks[zi, yi, xi]
+                    rtask = self.receptor_classifier_tasks[zi, yi, xi]
+                    nptask = self.np_tasks[zi, yi, xi]
+                    volume = ttask.output().volume
+                    ttask_loc = ttask.output().dataset_location
+                    rtask_loc = rtask.output().dataset_location
+                    np_loc = nptask.output().dataset_location
+                    stask_loc = self.get_dataset_location(
+                        volume, SYN_SEG_DATASET)
+                    stask = self.factory.gen_find_synapses_tr_task(
+                        volume=volume,
+                        transmitter_location=ttask_loc,
+                        receptor_location=rtask_loc,
+                        neuron_segmentation=np_loc,
+                        output_location=stask_loc,
+                        threshold=self.synapse_threshold,
+                        erosion_xy=self.synapse_xy_erosion,
+                        erosion_z=self.synapse_z_erosion,
+                        sigma_xy=self.synapse_xy_sigma,
+                        sigma_z=self.synapse_z_sigma,
+                        min_size_2d=self.synapse_min_size_2d,
+                        max_size_2d=self.synapse_max_size_2d,
+                        min_size_3d=self.min_synapse_area,
+                        min_slice=self.min_synapse_depth)
+                    stask.set_requirement(ttask)
+                    stask.set_requirement(rtask)
+                    stask.set_requirement(nptask)
+                    self.synapse_segmentation_tasks[zi, yi, xi] = stask
+                    
+    
     def generate_synapse_connectivity_tasks(self):
         '''Make tasks that connect neurons to synapses'''
         self.synapse_connectivity_tasks = np.zeros(
@@ -1242,6 +1319,19 @@ class PipelineTaskMixin:
                         min_contact=self.min_synapse_neuron_contact)
                     sctask.set_requirement(segtask)
                     sctask.set_requirement(ntask)
+                    if self.wants_transmitter_receptor_synapse_maps:
+                        #
+                        # If we have synapse polarity, hook the polarity
+                        # probability maps into the ConnectSynapsesTask
+                        #
+                        task = self.transmitter_classifier_tasks[zi, yi, xi]
+                        sctask.transmitter_probability_map_location = \
+                            task.output().dataset_location
+                        task = self.receptor_classifier_tasks[zi, yi, xi]
+                        sctask.set_requirement(task)
+                        sctask.receptor_probability_map_location = \
+                            task.output().dataset_location
+                        sctask.set_requirement(task)
                     self.synapse_connectivity_tasks[zi, yi, xi] = sctask
     
     def generate_synapse_statistics_tasks(self):
@@ -1461,7 +1551,10 @@ class PipelineTaskMixin:
                 # Step 9: Segment the synapses
                 #
                 rh_logger.logger.report_event("Segment synapses")
-                self.generate_synapse_segmentation_tasks()
+                if self.wants_transmitter_receptor_synapse_maps:
+                    self.generate_synapse_tr_segmentation_tasks()
+                else:
+                    self.generate_synapse_segmentation_tasks()
                 #
                 # Step 10: The connectivity graph.
                 #

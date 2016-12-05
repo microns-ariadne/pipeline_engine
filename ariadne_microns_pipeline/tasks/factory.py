@@ -282,9 +282,50 @@ class AMTaskFactory(object):
         :param min_slice: discard any 3d segments whose z-extent is lt this.
         '''
         return FindSynapsesTask(volume=volume,
-                                input_location=syn_location,
+                                synapse_map_location=syn_location,
                                 neuron_segmentation=neuron_segmentation,
                                 output_location=output_location,
+                                erosion_xy=erosion_xy,
+                                erosion_z= erosion_z,
+                                sigma_xy=sigma_xy,
+                                sigma_z=sigma_z,
+                                threshold=threshold,
+                                min_size_2d=min_size_2d,
+                                max_size_2d=max_size_2d,
+                                min_size_3d=min_size_3d,
+                                min_slice=min_slice)
+    
+    def gen_find_synapses_tr_task(
+        self, volume, transmitter_location, receptor_location,
+        neuron_segmentation, output_location,
+        erosion_xy, erosion_z, sigma_xy, sigma_z, threshold,
+        min_size_2d, max_size_2d, min_size_3d, min_slice):
+        '''Generate a task to segment synapses w/a transmitter and receptor map
+        
+        :param volume: the volume to segment
+        :param transmitter_location: the location of the transmitter
+                                     probability map
+        :param receptor_location: the location of the receptor probability map
+        :param neuron_location: the location of the neuron prob map
+        :param output_location: the location for the output segmentation
+        :param erosion_xy: how much to erode neurons in the x/y direction
+        :param erosion_z: how much to erode neurons in the z direction
+        :param sigma_xy: The sigma for the smoothing gaussian in the x and y
+                         directions
+        :param sigma_z: The sigma for the smoothing Gaussian in the z direction
+        :param threshold: The probability threshold above which, a voxel is
+                          deemed to be part of a synapse.
+        :param min_size_2d: discard any 2d segments with area less than this.
+        :param max_size_2d: discard any 2d segments with area greater than this.
+        :param min_size_3d: discard any 3d segments with area less than this.
+        :param min_slice: discard any 3d segments whose z-extent is lt this.
+        '''
+        return FindSynapsesTask(volume=volume,
+                                transmitter_map_location=transmitter_location,
+                                receptor_map_location=receptor_location,
+                                neuron_segmentation=neuron_segmentation,
+                                output_location=output_location,
+                                wants_dual_probability_maps=True,
                                 erosion_xy=erosion_xy,
                                 erosion_z= erosion_z,
                                 sigma_xy=sigma_xy,

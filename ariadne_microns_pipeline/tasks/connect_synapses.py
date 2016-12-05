@@ -6,7 +6,8 @@ import numpy as np
 from scipy.ndimage import grey_dilation, grey_erosion
 from scipy.sparse import coo_matrix
 
-from ..parameters import VolumeParameter, DatasetLocationParameter
+from ..parameters import VolumeParameter, DatasetLocationParameter, \
+     EMPTY_DATASET_LOCATION
 from ..targets.factory import TargetFactory
 from .utilities import RequiresMixin, RunMixin, SingleThreadedMixin
 
@@ -18,6 +19,14 @@ class ConnectSynapsesTaskMixin:
         description="The location of the segmented neuron dataset")
     synapse_seg_location = DatasetLocationParameter(
         description="The location of the segmented synapses")
+    transmitter_probability_map_location = DatasetLocationParameter(
+        default=EMPTY_DATASET_LOCATION,
+        description="The location of the voxel probabilities of being "
+                    "the transmitter side of a synapse")
+    receptor_probability_map_location = DatasetLocationParameter(
+        default=EMPTY_DATASET_LOCATION,
+        description="The location of the voxel probabilities of being "
+                    "the receptor side of a synapse")
     output_location = luigi.Parameter(
         description="Where to write the .json file containing the triplets")
     
@@ -29,6 +38,15 @@ class ConnectSynapsesTaskMixin:
         yield tf.get_volume_target(
             location=self.synapse_seg_location,
             volume = self.volume)
+        if self.transmitter_probability_map_location != EMPTY_DATASET_LOCATION:
+            yield tf.get_volume_target(
+                location=self.transmitter_probability_map_location,
+                volume=self.volume)
+            assert self.receptor_probability_map_location !=\
+                   EMPTY_DATASET_LOCATION
+            yield tf.get_volume_target(
+                location=self.receptor_probability_map_location,
+                volume=self.volume)
     
     def output(self):
         return luigi.LocalTarget(self.output_location)
@@ -66,7 +84,15 @@ class ConnectSynapsesRunMixin:
         # Synapses are sparse - we can perform a naive dilation of them
         # without worrying about running two of them together.
         #
-        neuron_target, synapse_target = list(self.input())
+        inputs = self.input()
+        neuron_target = inputs.next()
+        synapse_target = inputs.next()
+        if self.transmitter_probability_map_location == EMPTY_DATASET_LOCATION:
+            transmitter_target = None
+            receptor_target = None
+        else:
+            transmitter_target = inputs.next()
+            receptor_target = inputs.next()
         synapse = synapse_target.imread()
         #
         # Use a rectangular structuring element for speed.
@@ -100,11 +126,9 @@ class ConnectSynapsesRunMixin:
         # Extract only the overlapping pixels from the neurons and synapses
         #
         neuron = neuron_target.imread()
-        mask = (synapse != 0) & (neuron != 0) & mask
-        svoxels = synapse[mask]
-        nvoxels = neuron[mask]
-        del synapse
-        del neuron
+        volume_mask = (synapse != 0) & (neuron != 0) & mask
+        svoxels = synapse[volume_mask]
+        nvoxels = neuron[volume_mask]
         if len(nvoxels) > 0:
             #
             # Make a matrix of counts of voxels in both synapses and neurons
@@ -144,8 +168,46 @@ class ConnectSynapsesRunMixin:
             neuron_1 = neuron_labels[idx]
             synapses = synapse_labels[idx]
             neuron_2 = neuron_labels[idx+1]
+            if transmitter_target != None:
+                # put transmitters first and receptors second.
+                transmitter_probs = transmitter_target.imread()
+                receptor_probs = receptor_target.imread()
+                #
+                # Start by making a matrix to transform the map.
+                #
+                neuron_mapping = np.hstack(([0], neuron_1, neuron_2))
+                matrix = coo_matrix(
+                    (np.arange(len(idx)*2) + 1,
+                     (np.hstack((neuron_1, neuron_2)),
+                      np.hstack((synapses, synapses)))),
+                    shape=(np.max(nvoxels)+1, np.max(svoxels) + 1)).tocsr()
+                #
+                # Convert the neuron / synapse map to the mapping labels
+                #
+                mapping_labeling = matrix[nvoxels, svoxels]
+                #
+                # Score each synapse / label overlap on both the transmitter
+                # and receptor probabilities
+                #
+                areas = np.bincount(mapping_labeling.A1)
+                transmitter_score = np.bincount(
+                    mapping_labeling.A1, transmitter_probs[volume_mask])
+                receptor_score = np.bincount(
+                    mapping_labeling.A1, receptor_probs[volume_mask])
+                total_scores = (transmitter_score - receptor_score) / areas
+                score_1 = total_scores[1:len(idx)+1]
+                score_2 = total_scores[len(idx)+1:]
+                #
+                # Flip the scores and neuron assignments if score_2 > score_1
+                #
+                flippers = score_2 > score_1
+                score_1[flippers], score_2[flippers] = \
+                    score_2[flippers], score_1[flippers]
+                neuron_1[flippers], neuron_2[flippers] = \
+                    neuron_2[flippers], neuron_1[flippers]
         else:
             neuron_1 = neuron_2 = synapses = np.zeros(0, int)
+            score_1, score_2 = np.zeros(0)
         volume = dict(x=self.volume.x,
                       y=self.volume.y,
                       z=self.volume.z,
@@ -156,6 +218,9 @@ class ConnectSynapsesRunMixin:
                       neuron_1=neuron_1.tolist(),
                       neuron_2=neuron_2.tolist(),
                       synapse=synapses.tolist())
+        if transmitter_target != None:
+            result["transmitter_score_1"] = score_1.tolist()
+            result["transmitter_score_2"] = score_2.tolist()
         with self.output().open("w") as fd:
             json.dump(result, fd)
 

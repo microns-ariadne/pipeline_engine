@@ -43,7 +43,8 @@ class KerasClassifier(AbstractPixelClassifier):
                  normalize_method=NormalizeMethod.EQUALIZE_ADAPTHIST,
                  downsample_factor=1.0,
                  xy_trim_size=0,
-                 z_trim_size=0):
+                 z_trim_size=0,
+                 classes = ["membrane"]):
         '''Initialize from a model and weights
         
         :param model_path: path to JSON model file suitable for 
@@ -62,6 +63,7 @@ class KerasClassifier(AbstractPixelClassifier):
                             classification and before upsampling.
         :param z_trim_size: amount to trim from edge of segmentation in the Z
                            direction
+        :param classes: an array of class names to be output
         '''
         self.xypad_size = xypad_size
         self.zpad_size = zpad_size
@@ -73,6 +75,7 @@ class KerasClassifier(AbstractPixelClassifier):
         self.downsample_factor = downsample_factor
         self.xy_trim_size = xy_trim_size
         self.z_trim_size = z_trim_size
+        self.classes = classes
 
     @staticmethod
     def __keras_backend():
@@ -183,7 +186,8 @@ class KerasClassifier(AbstractPixelClassifier):
                     normalize_method=self.normalize_method.name,
                     downsample_factor=self.downsample_factor,
                     xy_trim_size=self.xy_trim_size,
-                    z_trim_size=self.z_trim_size)
+                    z_trim_size=self.z_trim_size,
+                    classes=self.classes)
     
     def __setstate__(self, state):
         '''Restore the state from the pickle'''
@@ -209,6 +213,10 @@ class KerasClassifier(AbstractPixelClassifier):
             self.z_trim_size = state["z_trim_size"]
         else:
             self.z_trim_size = 0
+        if "classes" in state:
+            self.classes = state["classes"]
+        else:
+            self.classes = ["membrane"]
     
     def get_class_names(self):
         return ["membrane"]
@@ -243,9 +251,11 @@ class KerasClassifier(AbstractPixelClassifier):
         #
         t0_total = time.time()
         self.image_shape = np.array(image.shape)
-        self.out_image = np.zeros((image.shape[0] - 2 * self.get_z_pad(),
-                                   image.shape[1] - 2 * self.get_y_pad(),
-                                   image.shape[2] - 2 * self.get_x_pad()),
+        self.out_image = np.zeros((
+            len(self.classes),
+            image.shape[0] - 2 * self.get_z_pad(),
+            image.shape[1] - 2 * self.get_y_pad(),
+            image.shape[2] - 2 * self.get_x_pad()),
                                   np.uint8)
         self.exception = None
         self.pred_queue = Queue.Queue()
@@ -263,7 +273,8 @@ class KerasClassifier(AbstractPixelClassifier):
             raise self.exception
         logger.report_metric("keras_volume_classification_time",
                              time.time() - t0_total)
-        return dict(membrane=self.out_image)
+        return dict([(key, self.out_image[i]) 
+                     for i, key in enumerate(self.classes)])
         
     def downsample_and_pad_image(self, image):
         '''Downsample the image according to the downsampling factor and pad it
@@ -414,26 +425,32 @@ class KerasClassifier(AbstractPixelClassifier):
                     (x0b, x1b, y0b, y1b, z0b, z1b, delta))
                 logger.report_metric("keras_block_classification_time",
                                      delta)
-                pred.shape = (z1b - z0b + 2 * self.z_trim_size, 
-                              y1b - y0b + 2 * self.xy_trim_size,
-                              x1b - x0b + 2 * self.xy_trim_size)
-                pred = pred[self.z_trim_size:pred.shape[0] - self.z_trim_size,
-                            self.xy_trim_size:pred.shape[1] - self.xy_trim_size,
-                            self.xy_trim_size:pred.shape[2] - self.xy_trim_size]
+                pred.shape = (
+                    len(self.classes),
+                    z1b - z0b + 2 * self.z_trim_size, 
+                    y1b - y0b + 2 * self.xy_trim_size,
+                    x1b - x0b + 2 * self.xy_trim_size)
+                pred = pred[:,
+                            self.z_trim_size:pred.shape[1] - self.z_trim_size,
+                            self.xy_trim_size:pred.shape[2] - self.xy_trim_size,
+                            self.xy_trim_size:pred.shape[3] - self.xy_trim_size]
                 if self.downsample_factor != 1:
-                    pred = np.array([zoom(plane, self.downsample_factor)
-                                     for plane in pred])
+                    pred = np.array([[zoom(plane, self.downsample_factor)
+                                      for plane in _]
+                                     for _ in pred])
                     y0b, y1b, x0b, x1b = \
                         [int(_ * self.downsample_factor)
                          for _ in y0b, y1b, x0b, x1b]
                 # Fix padding
-                if x1b > self.out_image.shape[2]:
-                    x1b = self.out_image.shape[2]
-                    pred = pred[:, :, :x1b - x0b]
-                if y1b > self.out_image.shape[1]:
-                    y1b = self.out_image.shape[1]
-                    pred = pred[:, :y1b - y0b, :]
-                self.out_image[z0b:z1b, y0b:y1b, x0b:x1b] = \
+                if x1b > self.out_image.shape[3]:
+                    x1b = self.out_image.shape[3]
+                    pred = pred[:, :, :, :x1b - x0b]
+                    logger.report_event("Fixing X padding: " + str(pred.shape))
+                if y1b > self.out_image.shape[2]:
+                    y1b = self.out_image.shape[2]
+                    pred = pred[:, :, :y1b - y0b, :]
+                    logger.report_event("Fixing Y padding): " + str(pred.shape))
+                self.out_image[:, z0b:z1b, y0b:y1b, x0b:x1b] = \
                     (pred * 255).astype(np.uint8)
         except:
             self.exception = sys.exc_value
