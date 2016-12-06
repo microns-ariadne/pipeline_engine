@@ -766,7 +766,11 @@ class NeuroproofLearnPipelineTaskMixin:
                 prob_location=prob_location,
                 seg_location=seg_location,
                 gt_location=gt_location,
-                output_location=self.output_location)
+                output_location=self.output_location,
+                strategy=self.strategy,
+                num_iterations=self.num_iterations,
+                prune_feature=self.prune_feature,
+                use_mito=self.use_mito)
         self.neuroproof_learn_task.additional_locations = \
             [_.output().dataset_location 
              for _ in self.additional_reblocking_tasks]
