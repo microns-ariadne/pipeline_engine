@@ -60,6 +60,15 @@ class PipelineRunReportMixin:
             tasks[task].append(delta.total_seconds())
         task_names = sorted(tasks.keys())
         timings = map(lambda k:tasks[k], task_names)
+        if self.pipeline_report_location != "/dev/null":
+            self.write_pdf_report(task_names, timings)
+            
+        with self.output().open("w") as fd:
+            writer = csv.writer(fd)
+            writer.writerow(["task_id", "run_time"])
+            writer.writerows(d.items())
+
+    def write_pdf_report(self, task_names, timings):
         pdf_path = os.path.splitext(self.pipeline_report_location)[0] + ".pdf"
         with matplotlib.backends.backend_pdf.PdfPages(pdf_path) as pdf:
             #
@@ -108,11 +117,6 @@ class PipelineRunReportMixin:
                 (total_runtime, mvoxel_per_sec))
             pdf.savefig(figure)
             rh_logger.logger.report_event("Finished plotting %s" % pdf_path)
-            
-        with self.output().open("w") as fd:
-            writer = csv.writer(fd)
-            writer.writerow(["task_id", "run_time"])
-            writer.writerows(d.items())
     
     def get_task_history(self, task, d, engine):
         subtasks = filter(lambda _:_.task_id not in d, task.requires())
