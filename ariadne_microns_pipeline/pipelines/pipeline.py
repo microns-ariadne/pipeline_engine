@@ -10,7 +10,7 @@ from ..targets.classifier_target import PixelClassifierTarget
 from ..targets.hdf5_target import HDF5FileTarget
 from ..targets.butterfly_target import ButterflyChannelTarget
 from ..parameters import Volume, VolumeParameter, DatasetLocation
-from ..parameters import EMPTY_DATASET_LOCATION
+from ..parameters import EMPTY_DATASET_LOCATION, is_empty_dataset_location
 from ..pipelines.synapse_gt_pipeline import SynapseGtTask
 import numpy as np
 import os
@@ -74,6 +74,9 @@ PRED_DATASET = "pred"
 '''The name of the skeleton directory'''
 SKEL_DIR_NAME = "skeleton"
 
+'''The name of the final stitched segmentation'''
+FINAL_SEGMENTATION = "final-segmentation"
+
 '''The pattern for border datasets
 
 parent - name of parent dataset, e.g. "membrane"
@@ -86,6 +89,9 @@ BORDER_DATASET_PATTERN = "{parent}_{direction}-border"
 direction - the adjacency direction: x-, x+, y-, y+, z-, z+
 '''
 CONNECTED_COMPONENTS_PATTERN = "connected-components_{direction}.json"
+
+'''The name of the connected components JSON file if not specified'''
+ALL_CONNECTED_COMPONENTS_JSON = "connected-components.json"
 
 '''Signals that the channel isn't available (e.g. no ground truth)'''
 NO_CHANNEL = "no-channel"
@@ -248,6 +254,10 @@ class PipelineTaskMixin:
         default="/dev/null",
         description="The location of the all-connected-components connectivity"
                     " .json file. Default = do not generate it.")
+    
+    stitched_segmentation_location = luigi.Parameter(
+        default="/dev/null",
+        description="The location for the final stitched segmentation")
     #
     # NB: minimum synapse area in AC3 was 561, median was ~5000
     #
@@ -389,7 +399,8 @@ class PipelineTaskMixin:
     @property
     def wants_connectivity(self):
         '''True if we are doing a connectivity graph'''
-        return self.connectivity_graph_location != "/dev/null"
+        return self.connectivity_graph_location != "/dev/null" or \
+            self.stitched_segmentation_location != "/dev/null"
     
     @property
     def wants_neuron_statistics(self):
@@ -1099,7 +1110,7 @@ class PipelineTaskMixin:
         input_locations = [task.output().path for task in input_tasks]
         self.all_connected_components_task = \
             self.factory.gen_all_connected_components_task(
-                input_locations, self.connectivity_graph_location)
+                input_locations, self.get_connectivity_graph_location())
         for task in input_tasks:
             self.all_connected_components_task.set_requirement(task)
     
@@ -1444,6 +1455,7 @@ class PipelineTaskMixin:
                     gt_sn_task.set_requirement(gt_neuron_task)
                     gt_sn_task.set_requirement(synapse_gt_seg_task)
                     gt_neuron_synapse_tasks[zi, yi, xi] = gt_sn_task
+        
         #
         # Create the statistics task
         #
@@ -1478,6 +1490,41 @@ class PipelineTaskMixin:
             self.synapse_connectivity_tasks.flatten())
         map(self.synapse_statistics_task.set_requirement,
             gt_neuron_map_tasks)
+    
+    def get_connectivity_graph_location(self):
+        '''Get the location of the AllConnectedComponentsTask output
+        
+        '''
+        if self.connectivity_graph_location != "/dev/null":
+            return self.connectivity_graph_location
+        elif self.stitched_segmentation_location != "/dev/null":
+            return os.path.join(self.temp_dirs[0],
+                                ALL_CONNECTED_COMPONENTS_JSON)
+        return None
+    
+    def generate_stitched_segmentation_task(self):
+        '''Generate the task that builds the HDF5 file with the segmentation
+        
+        '''
+        input_volumes = []
+        for task in self.np_tasks.flatten():
+            target = task.output()
+            input_volumes.append(
+                dict(volume=target.volume,
+                     location=target.dataset_location))
+        location = DatasetLocation(
+            [self.stitched_segmentation_location],
+            FINAL_SEGMENTATION,
+            self.get_pattern(FINAL_SEGMENTATION))
+        self.stitched_segmentation_task = \
+            self.factory.gen_stitch_segmentation_task(
+                input_volumes=input_volumes,
+                connected_components_location=
+                    self.all_connected_components_task.output().path,
+                output_volume=self.volume,
+                output_location=location)
+                
+        
         
     def compute_requirements(self):
         '''Compute the requirements for this task'''
@@ -1492,6 +1539,7 @@ class PipelineTaskMixin:
                 #
             import logging
             logging.getLogger("luigi-interface").disabled = False
+            self.requirements = []
             try:
                 self.factory = AMTaskFactory()
                 rh_logger.logger.report_event(
@@ -1571,6 +1619,13 @@ class PipelineTaskMixin:
                 rh_logger.logger.report_event("Comparing synapses to gt")
                 self.generate_synapse_statistics_tasks()
                 #
+                # Step 13: write out the stitched segmentation
+                #
+                if self.stitched_segmentation_location != "/dev/null":
+                    rh_logger.logger.report_event("Stitching segments")
+                    self.generate_stitched_segmentation_task()
+                    self.requirements.append(self.stitched_segmentation_task)
+                #
                 # The requirements:
                 #
                 # The skeletonize tasks if skeletonization is done
@@ -1578,7 +1633,6 @@ class PipelineTaskMixin:
                 # The border neuroproof tasks
                 # The statistics task
                 #
-                self.requirements = []
                 if self.wants_skeletonization:
                     self.requirements += \
                         self.skeletonize_tasks.flatten().tolist()

@@ -26,6 +26,7 @@ from .segment import \
 from .segmentation_statistics import \
      SegmentationStatisticsTask, SegmentationReportTask
 from .skeletonize import SkeletonizeTask
+from .stitch_segmentation import StitchSegmentationTask, Compression
 from .synapse_statistics import SynapseStatisticsTask
 from .utilities import to_hashable
 
@@ -694,3 +695,33 @@ class AMTaskFactory(object):
                              output_path=output_path,
                              excluded_keys=excluded_keys)
     
+    def gen_stitch_segmentation_task(self,
+                                     input_volumes,
+                                     connected_components_location,
+                                     output_volume,
+                                     output_location,
+                                     xy_chunking = 2048,
+                                     z_chunking = 4,
+                                     compression = Compression.GZIP):
+        '''Generate a task to stitch all the segmentations together
+        
+        input_volumes: a sequence of dictionaries with keys of "volume" and
+                       "location" which parse as Volumes and DatasetLocations
+        connected_components_location: the location of the connected components
+                       JSON file that is an output of AllConnectedComponentsTask
+        output_volume: the volume coordinates of the output volume
+        output_location: the dataset location for the output HDF5 file
+        xy_chunking: the chunk size in the x and y directions for the HDF5
+                     dataset
+        z_chunking: the chunk size in the z direction for the HDF5 dataset
+        compression: one of the compression enumerations from 
+                     stitch_segmentation.Compression
+        '''
+        return StitchSegmentationTask(
+            input_volumes=input_volumes,
+            connected_components_location=connected_components_location,
+            output_volume=output_volume,
+            output_location=output_location,
+            xy_chunking=xy_chunking,
+            z_chunking=z_chunking,
+            compression=compression)

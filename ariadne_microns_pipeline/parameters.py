@@ -105,6 +105,11 @@ class DatasetLocation(object):
     def __repr__(self):
         return "DatasetLocation: [%s].%s (%s)" % (
             ",".join(self.roots), self.dataset_name, self.pattern)
+    
+    def to_dictionary(self):
+        return dict(roots=self.roots,
+                    dataset_name=self.dataset_name,
+                    pattern=self.pattern)
 
 '''A dataset location for a dataset that doesn't exist
 
