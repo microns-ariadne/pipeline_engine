@@ -1523,8 +1523,15 @@ class PipelineTaskMixin:
                     self.all_connected_components_task.output().path,
                 output_volume=self.volume,
                 output_location=location)
-                
-        
+        self.stitched_segmentation_task.set_requirement(
+            self.all_connected_components_task)
+        #
+        # These are upstream dependencies of AllConnectedComponentsTask,
+        # but add them here anyway to make sure Luigi knows their outputs
+        # are needed.
+        #
+        for task in self.np_tasks.flatten():
+            self.stitched_segmentation_task.set_requirement(task)
         
     def compute_requirements(self):
         '''Compute the requirements for this task'''
