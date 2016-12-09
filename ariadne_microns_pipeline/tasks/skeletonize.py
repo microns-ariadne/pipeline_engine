@@ -1,3 +1,4 @@
+import cStringIO
 import h5py
 import json
 import luigi
@@ -10,6 +11,7 @@ import tempfile
 import rh_logger
 import rh_config
 from microns_skeletonization import skeletonize, write_swc
+import zipfile
 
 from ..parameters import VolumeParameter, DatasetLocationParameter
 from ..targets.factory import TargetFactory
@@ -31,6 +33,8 @@ class SkeletonizeTaskMixin:
             volume=self.volume)
     
     def output(self):
+        if self.skeleton_location.endswith(".zip"):
+            return luigi.LocalTarget(self.skeleton_location)
         return luigi.LocalTarget(self.skeleton_location+".done")
 
 class SkeletonizeRunMixin:
@@ -79,15 +83,24 @@ class SkeletonizeRunMixin:
         seg = self.input().next().imread()
         result = skeletonize(seg, self.xy_nm, self.z_nm, self.decimation_factor,
                     self.cpu_count)
-        if not os.path.isdir(self.skeleton_location):
-            os.makedirs(self.skeleton_location)
-        paths = []
-        for label in result:
-            path = os.path.join(self.skeleton_location, "%d.swc" % label)
-            write_swc(path, result[label], self.xy_nm, self.z_nm)
-            paths.append(path)
-        with self.output().open("w") as fd:
-            json.dump(paths, fd)
+        if (self.skeleton_location.endswith(".zip")):
+            # if the skeleton location is the name of a 
+            with zipfile.ZipFile(self.skeleton_location, "w") as zf:
+                for label in result:
+                    buf = cStringIO.StringIO()
+                    write_swc(buf, result[label], self.xy_nm, self.z_nm)
+                    filename = "%d.swc" % label
+                    zf.writestr(filename, buf.getvalue())
+        else:
+            if not os.path.isdir(self.skeleton_location):
+                os.makedirs(self.skeleton_location)
+            for label in result:
+                path = os.path.join(self.skeleton_location, "%d.swc" % label)
+                with open(path, "w") as fd:
+                    write_swc(fd, result[label], self.xy_nm, self.z_nm)
+                paths.append(path)
+            with self.output().open("w") as fd:
+                json.dump(paths, fd)
     
     def skeletonize_using_neutu(self):
         '''Skeletonize by running "skeletonize_stack" to execute NeuTu's code
