@@ -8,7 +8,7 @@ import numpy as np
 from scipy.ndimage import map_coordinates
 from .connected_components import ConnectivityGraph
 from .utilities import RequiresMixin, RunMixin
-from ..targets.factory import TargetFactory
+from ..targets.factory import TargetFactory, TFEnums
 from ..parameters import DatasetLocationParameter, VolumeParameter
 from ..parameters import MultiVolumeParameter
 
@@ -37,6 +37,10 @@ class BlockTaskMixin:
         default="/dev/null",
         description="A local to global segmentation mapping produced by "
                     "the AllConnectedComponents task.")
+    target_type = luigi.EnumParameter(
+        enum=TFEnums,
+        default=TFEnums.use_png_volume,
+        description="The target tyle for the output volume, e.g. PNG or HDF5")
     def input(self):
         '''Return the volumes to be assembled'''
         tf = TargetFactory()
@@ -46,7 +50,8 @@ class BlockTaskMixin:
     def output(self):
         '''Return the volume target that will be written'''
         tf = TargetFactory()
-        return tf.get_volume_target(self.output_location, self.output_volume)
+        return tf.get_volume_target(self.output_location, self.output_volume,
+                                    target_type=self.target_type)
 
 
 class BlockTaskRunMixin:

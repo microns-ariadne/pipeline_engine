@@ -114,6 +114,9 @@ class NeuroproofLearnPipelineTaskMixin:
         description="Automatically prune useless features")
     use_mito = luigi.BoolParameter(
         description="Set delayed mito agglomeration")
+    np_learn_cpu_count = luigi.IntParameter(
+        default=4,
+        description="The number of cores used by the Neuroproof learn process")
     
     #########
     #
@@ -774,6 +777,7 @@ class NeuroproofLearnPipelineTaskMixin:
         self.neuroproof_learn_task.additional_locations = \
             [_.output().dataset_location 
              for _ in self.additional_reblocking_tasks]
+        self.neuroproof_learn_task.cpu_count = self.np_learn_cpu_count
         self.neuroproof_learn_task.set_requirement(
             self.volume_relabeling_task)
         self.neuroproof_learn_task.set_requirement(
