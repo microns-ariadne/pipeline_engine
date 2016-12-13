@@ -3,7 +3,7 @@
 import json
 import luigi
 import numpy as np
-from scipy.ndimage import grey_dilation, grey_erosion
+from scipy.ndimage import grey_dilation, grey_erosion, center_of_mass
 from scipy.sparse import coo_matrix
 
 from ..parameters import VolumeParameter, DatasetLocationParameter, \
@@ -94,6 +94,14 @@ class ConnectSynapsesRunMixin:
             transmitter_target = inputs.next()
             receptor_target = inputs.next()
         synapse = synapse_target.imread()
+        #
+        # get the centers of the synapses for reference
+        #
+        n_synapses = np.max(synapse) + 1
+        synapse_centers = np.array(
+            center_of_mass(np.ones(synapse.shape, np.uint8),
+                           synapse, np.arange(1, n_synapses)),
+            np.uint32)
         #
         # Use a rectangular structuring element for speed.
         #
@@ -205,9 +213,18 @@ class ConnectSynapsesRunMixin:
                     score_2[flippers], score_1[flippers]
                 neuron_1[flippers], neuron_2[flippers] = \
                     neuron_2[flippers], neuron_1[flippers]
+            #
+            # Record the synapse coords. "synapse_centers" goes from 1 to
+            # N so that is why we subtract 1 below.
+            #
+            synapse_center_dict = dict(
+                x=synapse_centers[synapses-1, 2].tolist(),
+                y=synapse_centers[synapses-1, 1].tolist(),
+                z=synapse_centers[synapses-1, 0].tolist())
         else:
             neuron_1 = neuron_2 = synapses = np.zeros(0, int)
             score_1, score_2 = np.zeros(0)
+            synapse_center_dict = dict(x=[], y=[], z=[])
         volume = dict(x=self.volume.x,
                       y=self.volume.y,
                       z=self.volume.z,
@@ -217,7 +234,8 @@ class ConnectSynapsesRunMixin:
         result = dict(volume=volume,
                       neuron_1=neuron_1.tolist(),
                       neuron_2=neuron_2.tolist(),
-                      synapse=synapses.tolist())
+                      synapse=synapses.tolist(),
+                      synapse_centers=synapse_center_dict)
         if transmitter_target != None:
             result["transmitter_score_1"] = score_1.tolist()
             result["transmitter_score_2"] = score_2.tolist()

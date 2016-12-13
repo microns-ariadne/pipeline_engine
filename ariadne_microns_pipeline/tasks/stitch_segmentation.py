@@ -112,6 +112,7 @@ class StitchSegmentationRunMixin:
                     y0a-tgt.volume.y:y1a-tgt.volume.y,
                     x0a-tgt.volume.x:x1a-tgt.volume.x],
                 x0a, y0a, z0a)
+        output_tgt.finish_volume()
 
 class StitchSegmentationTask(StitchSegmentationTaskMixin,
                              StitchSegmentationRunMixin,

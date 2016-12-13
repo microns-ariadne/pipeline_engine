@@ -131,11 +131,13 @@ class ConnectedComponentsRunMixin:
         areas = areas[unique]
         d["1"]["labels"] = unique.tolist()
         d["1"]["areas"] = areas.tolist()
+        d["1"]["location"] = volume1.dataset_location.to_dictionary()
         areas = np.bincount(seg2.ravel())
         unique = np.where(areas)[0]
         unique = unique[unique != 0]
         d["2"]["labels"] = unique.tolist()
         d["2"]["areas"] = areas.tolist()
+        d["2"]["location"] = volume2.dataset_location.to_dictionary()
         with self.output().open("w") as fd:
             json.dump(d, fd)
 
@@ -408,6 +410,8 @@ class AllConnectedComponentsRunMixin:
     def ariadne_run(self):
         connections = []
         mappings = {}
+        locations = {}
+        joins = {}
         offset = 0
         #
         # The key here is to give each component its own global #
@@ -421,14 +425,19 @@ class AllConnectedComponentsRunMixin:
             c = np.array(d["connections"])
             l1 = d["1"]["labels"]
             l2 = d["2"]["labels"]
+            loc1 = d["1"]["location"]
+            loc2 = d["2"]["location"]
             for k1 in "1", "2":
-                for k2 in "labels", "areas":
+                for k2 in "labels", "areas", "location":
                     if k2 in d[k1]:
                         del d[k1][k2]
             d["pathname"] = input_target.path
             k1 = to_hashable(d["1"])
             k2 = to_hashable(d["2"])
-            for k, l in (k1, l1), (k2, l2):
+            joins[k1, k2] = input_target.path
+            for k, l, loc in (k1, l1, loc1), (k2, l2, loc2):
+                if k not in locations:
+                    locations[k] = loc
                 if k not in mappings:
                     global_labels = np.arange(offset, offset + len(l))
                     m = np.column_stack((l, global_labels))
@@ -474,6 +483,12 @@ class AllConnectedComponentsRunMixin:
         for volume, m in mappings.items():
             gm = [ (int(a), int(b)) for a, b in zip(m[:, 0], labels[m[:, 1]])]
             d["volumes"].append((dict(volume), gm))
+        d["locations"] = []
+        for volume, loc in locations.items():
+            d["locations"].append((dict(volume), loc))
+        d["joins"] = []
+        for (k1, k2), path in joins.items():
+            d["joins"].append((dict(k1), dict(k2), path))
         with self.output().open("w") as fd:
             json.dump(d, fd)
 
