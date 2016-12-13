@@ -41,6 +41,14 @@ class BlockTaskMixin:
         enum=TFEnums,
         default=TFEnums.use_png_volume,
         description="The target tyle for the output volume, e.g. PNG or HDF5")
+    xy_chunking = luigi.IntParameter(
+        default=1024,
+        description="The size of an HDF5 chunk in the x and y directions "
+                    "(HDF5 only).")
+    z_chunking = luigi.IntParameter(
+        default=1,
+        description="The size of an HDF5 chunk in the Z direction (HDF5 only).")
+    
     def input(self):
         '''Return the volumes to be assembled'''
         tf = TargetFactory()
@@ -145,7 +153,16 @@ class BlockTaskRunMixin:
                 subvolume = mapping.convert(subvolume, input_volume.volume)
             if first:
                 first = False
-                output_volume.create_volume(subvolume.dtype)
+                if self.target_type == TFEnums.use_hdf5_volume:
+                    chunks=(min(self.z_chunking, self.output_volume.depth),
+                            min(self.xy_chunking, self.output_volume.height),
+                            min(self.xy_chunking, self.output_volume.width))
+                    output_volume.create_volume(
+                        subvolume.dtype,
+                        chunks=chunks,
+                        compression="gzip")
+                else:
+                    output_volume.create_volume(subvolume.dtype)
             output_volume.imwrite_part(subvolume, x0, y0, z0)
                 
         output_volume.finish_volume()
