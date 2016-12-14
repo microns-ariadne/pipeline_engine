@@ -6,7 +6,8 @@ from ..parameters import Volume
 from ..parameters import DatasetLocation
 from ..targets.factory import TargetFactory
 from ..tasks.factory import AMTaskFactory
-from ..tasks.connected_components import LogicalOperation, JoiningMethod
+from ..tasks.connected_components import \
+     LogicalOperation, JoiningMethod, Direction
 from ..tasks.utilities import to_hashable
 
 class StitchPipelineTask(luigi.Task):
@@ -21,6 +22,12 @@ class StitchPipelineTask(luigi.Task):
     output_location = luigi.Parameter(
         description="The location of the component graph file written by "
                     "AllConnectedComponentsTask encompassing both volumes")
+    join_direction = luigi.EnumParameter(
+        enum=Direction,
+        description="The plane in which to join the components")
+    min_block_overlap_area = luigi.IntParameter(
+        description="Minimum overlap in the joining plane for blocks to be "
+                    "considered.")
     #
     # Parameters for the connected components task
     #
@@ -70,19 +77,22 @@ class StitchPipelineTask(luigi.Task):
     def output(self):
         return luigi.LocalTarget(self.output_location+".done")
 
-    @staticmethod
-    def _overlaps(v1, v2):
+    def _overlaps(self, v1, v2):
         '''Return true if volume 1 overlaps volume 2'''
-        for origin_key, size_key in (("x", "width"),
-                                     ("y", "height"),
-                                     ("z", "depth")):
+        overlap = 1
+        for origin_key, size_key, enum_key in (
+            ("x", "width", Direction.X),
+            ("y", "height", Direction.Y),
+            ("z", "depth", Direction.Z)):
             v1_0 = v1[origin_key]
             v1_1 = v1_0 + v1[size_key]
             v2_0 = v2[origin_key]
             v2_1 = v2_0 + v2[size_key]
             if v1_0 >= v2_1 or v2_0 >= v1_1:
                 return False
-        return True
+            if enum_key != self.join_direction:
+                overlap *= min(v1_1, v2_1) - max(v1_0, v2_0)
+        return overlap >= self.min_block_overlap_area
     
     def _find_overlapping_volume(self, v1, v2):
         '''Figure out how to configure our overlap plane
@@ -157,7 +167,7 @@ class StitchPipelineTask(luigi.Task):
         #
         for volume1, location1 in cg2["locations"]:
             for volume2, location2 in d_locs.items():
-                if StitchPipelineTask._overlaps(volume1, volume2):
+                if self._overlaps(volume1, volume2):
                     v1 = Volume(**volume1)
                     v2 = Volume(**volume2)
                     l1 = DatasetLocation(**location1)
