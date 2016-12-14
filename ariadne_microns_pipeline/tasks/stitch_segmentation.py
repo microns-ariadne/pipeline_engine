@@ -8,6 +8,7 @@ import numpy as np
 import os
 
 from ..parameters import VolumeParameter, DatasetLocationParameter
+from ..parameters import Volume, DatasetLocation
 from ..parameters import MultiVolumeParameter
 from ..targets.factory import TargetFactory, TFEnums
 from .utilities import RunMixin, RequiresMixin, SingleThreadedMixin, to_hashable
@@ -21,6 +22,7 @@ class Compression(enum.Enum):
 class StitchSegmentationTaskMixin:
     
     input_volumes=MultiVolumeParameter(
+        default=[],
         description="The input segmentation volumes")
     connected_components_location=luigi.Parameter(
         description="The output file from AllConnectedComponentsTask "
@@ -84,6 +86,14 @@ class StitchSegmentationRunMixin:
         # This is a map of volume to local/global labelings
         #
         volume_map = dict(cc["volumes"])
+        if len(self.input_volumes) == 0:
+            # Get input volumes from connected components
+            #
+            inputs = []
+            for volume, location in cc["locations"]:
+                inputs.append(TargetFactory().get_volume_target(
+                    DatasetLocation(**location),
+                    Volume(**volume)))
         #
         # Loop over each volume
         #

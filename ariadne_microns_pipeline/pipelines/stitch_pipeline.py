@@ -28,6 +28,8 @@ class StitchPipelineTask(luigi.Task):
     min_block_overlap_area = luigi.IntParameter(
         description="Minimum overlap in the joining plane for blocks to be "
                     "considered.")
+    min_block_overlap = luigi.IntParameter(
+        description="Minimum overlap in the joining direction for blocks")
     #
     # Parameters for the connected components task
     #
@@ -92,6 +94,8 @@ class StitchPipelineTask(luigi.Task):
                 return False
             if enum_key != self.join_direction:
                 overlap *= min(v1_1, v2_1) - max(v1_0, v2_0)
+            elif min(v1_1, v2_1) - max(v1_0, v2_0) < self.min_block_overlap:
+                return False
         return overlap >= self.min_block_overlap_area
     
     def _find_overlapping_volume(self, v1, v2):
