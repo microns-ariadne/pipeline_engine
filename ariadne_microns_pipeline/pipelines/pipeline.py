@@ -507,13 +507,13 @@ class PipelineTaskMixin:
                        (self.block_depth - self.np_z_pad)) + 2
         self.xs = np.linspace(self.x0, self.x1, self.n_x, endpoint = False)\
             .astype(int)
-        self.xe = self.xs + self.block_width
+        self.xe = np.minimum(self.xs + self.block_width, self.x1)
         self.ys = np.linspace(self.y0, self.y1, self.n_y, endpoint = False)\
             .astype(int)
-        self.ye = self.ys + self.block_height
+        self.ye = np.minimum(self.ys + self.block_height, self.y1)
         self.zs = np.linspace(self.z0, self.z1, self.n_z, endpoint=False)\
             .astype(int)
-        self.ze = self.zs + self.block_depth
+        self.ze = np.minimum(self.zs + self.block_depth, self.z1)
         #
         # The first and last valid blocks start and end at the extents.
         # The intermediate blocks start and end midway between the overlap

@@ -20,7 +20,8 @@ def draw_gantt(database_url, pdf_file, xy_scale, z_scale):
        tp.value from tasks t 
        join task_events te1 on t.id = te1.task_id 
        join task_events te2 on t.id = te2.task_id 
-       left join task_parameters tp on t.id = tp.task_id
+       left outer join (select task_id, value from task_parameters 
+                         where name="volume") tp on t.id = tp.task_id
        where te1.event_name = "RUNNING" and te2.event_name="DONE" 
              and tp.name="volume" order by te1.ts
     """
