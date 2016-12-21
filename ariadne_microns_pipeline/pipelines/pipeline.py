@@ -312,6 +312,11 @@ class PipelineTaskMixin:
         description="The minimum number of overlapping voxels needed "
                     "to consider joining neuron to synapse",
         default=25)
+    synapse_connection_location = luigi.Parameter(
+        default="/dev/null",
+        description="The location for the JSON file containing the global "
+                    "IDs of the neuron partners for each synapse and the "
+                    "coordinates of that synapse.")
     #
     # parameters for synapse statistics
     #
@@ -1344,6 +1349,24 @@ class PipelineTaskMixin:
                             task.output().dataset_location
                         sctask.set_requirement(task)
                     self.synapse_connectivity_tasks[zi, yi, xi] = sctask
+        if self.synapse_connection_location != "/dev/null":
+            #
+            # Generate the task that combines all of the synapse connection
+            # files.
+            #
+            sc_tasks = self.synapse_connectivity_tasks.flatten().tolist()
+            sc_outputs = [_.output().path for _ in sc_tasks]
+            connectivity_graph_location = self.get_connectivity_graph_location()
+            self.aggregate_synapse_connections_task = \
+                self.factory.gen_aggregate_connect_synapses_task(
+                    sc_outputs, connectivity_graph_location, 
+                self.synapse_connection_location)
+            map(self.aggregate_synapse_connections_task.set_requirement,
+                sc_tasks)
+            self.aggregate_synapse_connections_task.set_requirement(
+                self.all_connected_components_task)
+            yield self.aggregate_synapse_connections_task
+            
     
     def generate_synapse_statistics_tasks(self):
         '''Make tasks that calculate precision/recall on synapses'''
@@ -1523,6 +1546,9 @@ class PipelineTaskMixin:
                     self.all_connected_components_task.output().path,
                 output_volume=self.volume,
                 output_location=location)
+        self.stitched_segmentation_task.x_padding = self.np_x_pad
+        self.stitched_segmentation_task.y_padding = self.np_y_pad
+        self.stitched_segmentation_task.z_padding = self.np_z_pad
         self.stitched_segmentation_task.set_requirement(
             self.all_connected_components_task)
         #
@@ -1619,7 +1645,8 @@ class PipelineTaskMixin:
                 # Step 11: Connect synapses to neurites
                 #
                 rh_logger.logger.report_event("Connecting synapses and neurons")
-                self.generate_synapse_connectivity_tasks()
+                requirements = self.generate_synapse_connectivity_tasks()
+                self.requirements += list(requirements)
                 #
                 # Step 12: find ground-truth synapses and compute statistics
                 #
