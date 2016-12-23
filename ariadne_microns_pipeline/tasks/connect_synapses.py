@@ -3,6 +3,7 @@
 import json
 import luigi
 import numpy as np
+import rh_logger
 from scipy.ndimage import grey_dilation, grey_erosion, center_of_mass
 from scipy.sparse import coo_matrix
 
@@ -295,6 +296,11 @@ class AggregateSynapseConnectionsRunMixin:
             with synapse_tgt.open("r") as fd:
                 synapse_dict = json.load(fd)
             volume = Volume(**synapse_dict["volume"])
+            if len(synapse_dict["neuron_1"]) == 0:
+                rh_logger.logger.report_event(
+                    "No synapses found in volume, %d, %d, %d" % 
+                    (volume.x, volume.y, volume.z))
+                continue
             n1 = cg.convert(np.array(synapse_dict["neuron_1"]), volume)
             n2 = cg.convert(np.array(synapse_dict["neuron_2"]), volume)
             sx = np.array(synapse_dict["synapse_centers"]["x"])
