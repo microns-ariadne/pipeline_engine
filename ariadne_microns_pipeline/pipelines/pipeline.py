@@ -333,6 +333,12 @@ class PipelineTaskMixin:
         default=100.,
         description="The maximum allowed distance between centroids of "
              "ground-truth and detected synapses")
+    synapse_gt_classes = luigi.ListParameter(
+        default=[],
+        description="A list of the values of synapse voxels in the "
+        "ground-truth. For instance if 1=pre-synaptic and 2=post-synaptic and "
+        "3=gap junctions, use [1, 2] to exclude gap junctions. The default is "
+        "to include any value other than zero.")
     gt_neuron_synapse_xy_dilation = luigi.IntParameter(
         default=6,
         description="The number of pixels of dilation to apply to the synapses "
@@ -405,7 +411,9 @@ class PipelineTaskMixin:
     def wants_connectivity(self):
         '''True if we are doing a connectivity graph'''
         return self.connectivity_graph_location != "/dev/null" or \
-            self.stitched_segmentation_location != "/dev/null"
+            self.stitched_segmentation_location != "/dev/null" or \
+            self.wants_neuron_statistics or \
+            self.wants_synapse_statistics
     
     @property
     def wants_neuron_statistics(self):
@@ -1416,6 +1424,7 @@ class PipelineTaskMixin:
                         threshold=0,
                         dimensionality=Dimensionality.D3,
                         fg_is_higher=True)
+                    synapse_gt_seg_task.classes = self.synapse_gt_classes
                     synapse_gt_seg_task.set_requirement(synapse_gt_task)
                     #
                     # Match GT synapses against detected synapses
@@ -1520,7 +1529,7 @@ class PipelineTaskMixin:
         '''
         if self.connectivity_graph_location != "/dev/null":
             return self.connectivity_graph_location
-        elif self.stitched_segmentation_location != "/dev/null":
+        elif self.wants_connectivity:
             return os.path.join(self.temp_dirs[0],
                                 ALL_CONNECTED_COMPONENTS_JSON)
         return None

@@ -93,6 +93,11 @@ class SegmentCCTaskMixin:
         default=190,
         description="The probability threshold (from 0-255) to use as a"
         "cutoff for (not) membrane")
+    classes = luigi.ListParameter(
+        default=[],
+        description="If the volume is categorical (e.g. 1=pre-synaptic, "
+        "2=post-synaptic), then numeric classes (e.g. [1, 2] for both) "
+        "can be used instead of a numeric threshold.")
     fg_is_higher = luigi.BoolParameter(
         description="True if the foreground is > threshold")
     
@@ -109,6 +114,21 @@ class SegmentCCTaskMixin:
         return TargetFactory().get_volume_target(
             location = self.output_location,
             volume = self.volume)
+    
+    def apply_threshold(self, volume):
+        '''Apply the threshold to the volume to get a binary volume
+        
+        volume: a Numpy array to threshold
+        '''
+        if len(self.classes) > 0:
+            fg = np.zeros(volume.shape, bool)
+            for value in self.classes:
+                fg |= volume == value
+        elif self.fg_is_higher:
+            fg = (volume > self.threshold)
+        else:
+            fg = (volume < self.threshold)
+        return fg
 
 class SegmentCC2DRunMixin:    
 
@@ -124,13 +144,9 @@ class SegmentCC2DRunMixin:
         else:
             mask_target = None
         threshold = self.threshold
-        prob = prob_target.imread()
         if self.sigma > 0:
             prob = gaussian_filter(prob, (0, self.sigma, self.sigma))
-        if self.fg_is_higher:
-            fg = (prob > threshold)
-        else:
-            fg = (prob < threshold)
+        fg = self.apply_threshold(volume)
         del prob
         if mask_target is not None:
             fg = fg & mask_target.imread()
@@ -173,15 +189,11 @@ class SegmentCC3DRunMixin:
             mask_target = tgts[1]
         else:
             mask_target = None
-        threshold = self.threshold
         prob = prob_target.imread()
         if self.xy_sigma > 0 or self.z_sigma > 0:
             prob = gaussian_filter(
                 prob, sigma=(self.z_sigma, self.xy_sigma, self.xy_sigma))
-        if self.fg_is_higher:
-            fg = (prob > threshold)
-        else:
-            fg = (prob < threshold)
+        fg = self.apply_threshold(prob)
         del prob
         if mask_target is not None:
             fg = fg & mask_target.imread()

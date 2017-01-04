@@ -396,6 +396,10 @@ class AllConnectedComponentsTaskMixin:
         "ConnectedComponentsTask")
     output_location = luigi.Parameter(
         description="The filename of the global assignment")
+    max_connections = luigi.Parameter(
+        default=0,
+        description="Reject a component if it makes more than this many "
+                    "connections outside of its volume.")
     
     def input(self):
         for input_location in self.input_locations:
@@ -462,10 +466,20 @@ class AllConnectedComponentsRunMixin:
                     np.column_stack([rm1[c[:, 0]], rm2[c[:, 1]]]))
                 connections.append(
                     np.column_stack([rm2[c[:, 1]], rm1[c[:, 0]]]))
+        connections = np.vstack(connections)
+        #
+        # Filter for too many connections
+        if self.max_connections != 0:
+            n_connections = np.bincount(connections[:, 0])
+            too_many = np.where(n_connections > self.max_connections)[0]
+            cmap = np.ones(len(n_connections), bool)
+            cmap[too_many] = False
+            mask = cmap[connections[:, 0]] & cmap[connections[:, 1]]
+            connections = np.vstack(
+                (connections[mask], np.column_stack((too_many, too_many))))
         #
         # Now run connected components on the adjacency graph
         #
-        connections = np.vstack(connections)
         g = coo_matrix((np.ones(connections.shape[0], int), 
                         (connections[:, 0], connections[:, 1])))
         n_components, labels = connected_components(g, directed=False)

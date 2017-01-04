@@ -1,6 +1,6 @@
 '''Butterfly Luigi target'''
 
-from cv2 import imdecode, IMREAD_ANYDEPTH
+from cv2 import imdecode, IMREAD_ANYDEPTH, IMREAD_COLOR
 import json
 import luigi
 import numpy as np
@@ -53,6 +53,8 @@ class ButterflyTarget(luigi.Target):
         self.height = height
         self.url = url
         self.resolution = resolution
+        self.channel_target = ButterflyChannelTarget(
+            experiment, sample, dataset, channel, url)
     
     def exists(self):
         '''Does the target exist?
@@ -78,6 +80,11 @@ class ButterflyTarget(luigi.Target):
             "&height=%d" % self.height
         if self.resolution != 0:
             url += "&resolution=%d" % self.resolution
+        if self.channel_target.data_type == np.uint32:
+            thirty_two_bit = True
+            url += "&view=rgb"
+        else:
+            thirty_two_bit = False
         client = HTTPClient()
         response = client.fetch(url)
         assert isinstance(response, HTTPResponse)
@@ -85,8 +92,14 @@ class ButterflyTarget(luigi.Target):
             raise HTTPError(
                 url, response.code, response.reason, response.headers, None)
         body = np.frombuffer(response.body, np.uint8)
-        return imdecode(body, IMREAD_ANYDEPTH)
-
+        if thirty_two_bit:
+            result = imdecode(body, IMREAD_COLOR)
+            result = result[:, :, 0].astype(np.uint32) +\
+                result[:, :, 1].astype(np.uint32) * 256 +\
+                result[:, :, 2].astype(np.uint32) * 256 * 256
+        else:
+            result = imdecode(body, IMREAD_ANYDEPTH)
+        return result
 
 class ButterflyChannelTarget(luigi.Target):
     '''Represents a channel on the volume of a Butterfly dataset'''
@@ -107,6 +120,7 @@ class ButterflyChannelTarget(luigi.Target):
         self.dataset = dataset
         self.channel = channel
         self.url = url
+        self.__fetched = False
     
     def exists(self):
         try:
@@ -130,8 +144,15 @@ class ButterflyChannelTarget(luigi.Target):
         self.__cache_channel_params()
         return self.__z_extent
     
+    @property
+    def data_type(self):
+        self.__cache_channel_params()
+        return getattr(np, self.__data_type)
+    
     def __cache_channel_params(self):
         '''Make the REST channel_metadata call to get the volume extents'''
+        if self.__fetched:
+            return
         url = "%s/channel_metadata" % self.url +\
             "?experiment=%s" % self.experiment +\
             "&sample=%s" % self.sample +\
@@ -147,6 +168,8 @@ class ButterflyChannelTarget(luigi.Target):
         self.__x_extent = d["dimensions"]["x"]
         self.__y_extent = d["dimensions"]["y"]
         self.__z_extent = d["dimensions"]["z"]
+        self.__data_type = d["data-type"]
+        self.__fetched = True
 
 def get_butterfly_plane_from_channel(
     channel_target, x, y, z, width, height, resolution=0):
