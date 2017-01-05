@@ -9,6 +9,7 @@ import matplotlib
 from matplotlib.backends.backend_pdf import FigureCanvasPdf
 import numpy as np
 from scipy.sparse import coo_matrix
+from scipy.ndimage import grey_erosion, grey_dilation
 
 from ..algorithms.evaluation import segmentation_metrics, Rand, f_info
 from ..algorithms.vi import split_vi, bits_to_nats
@@ -52,6 +53,31 @@ class SegmentationStatisticsTaskMixin:
 
 class SegmentationStatisticsRunMixin:
     
+    xy_erosion = luigi.IntParameter(
+        default=1,
+        description="# of pixels to erode segmentations in the x and y "
+        "directions.")
+    z_erosion = luigi.IntParameter(
+        default=1,
+        description="# of pixels to erode segmentations in the z direction")
+    
+    def erode_seg(self, seg):
+        '''Erode the segmentation passed (or not)
+        
+        The segmentation is eroded by the factors in the xy_erosion and 
+        z_erosion
+        
+        seg: the segmentation to erode, which is done in-place
+        '''
+        if self.xy_erosion == 0 and self.z_erosion == 0:
+            return
+        strel = np.ones((self.z_erosion*2 + 1, 
+                         self.xy_erosion*2 + 1,
+                         self.xy_erosion*2 + 1), bool)
+        mask = grey_erosion(seg, footprint=strel) == \
+               grey_dilation(seg, footprint=strel)
+        seg[~ mask] = 0
+
     def cutout(self, segmentation, volume):
         '''Limit the segmentation to the task's volume
         
@@ -75,7 +101,9 @@ class SegmentationStatisticsRunMixin:
         test_volume = inputs.next()
         gt_volume = inputs.next()
         test_labels = self.cutout(test_volume.imread(), test_volume.volume)
+        self.erode_seg(test_labels)
         gt_labels = self.cutout(gt_volume.imread(), gt_volume.volume)
+        self.erode_seg(gt_labels)
         try:
             with inputs.next().open("r") as fd:
                 c = ConnectivityGraph.load(fd)
