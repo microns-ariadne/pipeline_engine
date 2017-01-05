@@ -434,8 +434,13 @@ def match_synapses_by_overlap(gt, detected, min_overlap_pct):
     big_matrix[:n_gt, :n_d] = matrix
     big_matrix[n_gt:, :n_d] = np.inf
     big_matrix[:n_gt, n_d:] = np.inf
-    big_matrix[n_gt+np.arange(n_d), np.arange(n_d)] = d_areas[d_map]
-    big_matrix[np.arange(n_gt), n_d+np.arange(n_gt)] = gt_areas[gt_map]
+    #
+    # The "eps" here is present to guarantees that the hungarian will take the
+    # alternative if there is no overlap.
+    #
+    eps = np.finfo(np.float32).eps
+    big_matrix[n_gt+np.arange(n_d), np.arange(n_d)] = d_areas[d_map] - eps
+    big_matrix[np.arange(n_gt), n_d+np.arange(n_gt)] = gt_areas[gt_map] - eps
     #
     # There's a problem with hungarian.lap where it can't solve if all
     # rows or columns has no members less than infinity. This would not be
@@ -445,7 +450,7 @@ def match_synapses_by_overlap(gt, detected, min_overlap_pct):
     hungarian_inf = 100000
     mmax = np.max(big_matrix[~np.isinf(big_matrix)])
     if mmax >= hungarian_inf:
-        big_matrix = big_matrix * .9 * hungarian_inf / mmax
+        big_matrix = big_matrix / mmax
     #
     #
     # Solve it
