@@ -303,9 +303,9 @@ class AggregateSynapseConnectionsRunMixin:
                 continue
             n1 = cg.convert(np.array(synapse_dict["neuron_1"]), volume)
             n2 = cg.convert(np.array(synapse_dict["neuron_2"]), volume)
-            sx = np.array(synapse_dict["synapse_centers"]["x"])
-            sy = np.array(synapse_dict["synapse_centers"]["y"])
-            sz = np.array(synapse_dict["synapse_centers"]["z"])
+            sx = np.array(synapse_dict["synapse_centers"]["x"])+volume.x
+            sy = np.array(synapse_dict["synapse_centers"]["y"])+volume.y
+            sz = np.array(synapse_dict["synapse_centers"]["z"])+volume.z
             neuron_1.append(n1)
             neuron_2.append(n2)
             synapse_center_x.append(sx)
