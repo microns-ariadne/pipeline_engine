@@ -528,6 +528,56 @@ class AllConnectedComponentsTask(AllConnectedComponentsTaskMixin,
     '''
     
     task_namespace="ariadne_microns_pipeline"
+    
+class FakeAllConnectedComponentsTaskMixin:
+    
+    volume = VolumeParameter(
+        description="The volume of the segmentation")
+    location = DatasetLocationParameter(
+        description="The location of the segmentation")
+    output_location = luigi.Parameter(
+        description="The location of the connectivity graph")
+    
+    def input(self):
+        yield TargetFactory().get_volume_target(self.location, self.volume)
+    
+    def output(self):
+        return luigi.LocalTarget(self.output_location)
+
+class FakeAllConnectedComponentsRunMixin:
+    
+    def ariadne_run(self):
+        '''Create a connection graph for a single volume'''
+        
+        tgt = self.input().next()
+        seg = tgt.imread()
+        components = np.where(np.bincount(seg.flatten()) != 0)[0]
+        if components[0] == 0:
+            components = components[1:]
+        volumes = [[ tgt.volume.to_dictionary(), 
+                     [[_, _] for _ in components]]]
+        locations = [[ tgt.volume.to_dictionary(),
+                      tgt.dataset_location.to_dictionary()]]
+        d = dict(count=len(components),
+                 volumes=volumes,
+                 locations=locations,
+                 joins=[])
+        with self.output().open("w") as fd:
+            json.dump(d, fd)
+
+class FakeAllConnectedComponentsTask(FakeAllConnectedComponentsTaskMixin,
+                                     FakeAllConnectedComponentsRunMixin,
+                                     RequiresMixin,
+                                     RunMixin,
+                                     luigi.Task):
+    '''A task to write out the connectivity graph if we have a single volume
+    
+    The FakeAllConnectedComponentsTask creates a fake connectivity graph
+    JSON file (see AllConnectedComponentsTask for details on this file) for
+    the case where the pipeline consists of only one volume.
+    '''
+    
+    task_namespace = "ariadne_microns_pipeline"
 
 class VolumeRelabelingTaskMixin:
     

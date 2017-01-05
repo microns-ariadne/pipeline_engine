@@ -4,6 +4,7 @@ from .utilities import PipelineRunReportMixin
 from ..tasks.factory import AMTaskFactory
 from ..tasks.classify import ClassifyShimTask
 from ..tasks.connected_components import JoiningMethod
+from ..tasks.connected_components import FakeAllConnectedComponentsTask
 from ..tasks.find_seeds import SeedsMethodEnum, Dimensionality
 from ..tasks.match_synapses import MatchMethod
 from ..targets.classifier_target import PixelClassifierTarget
@@ -1117,6 +1118,17 @@ class PipelineTaskMixin:
             task.dont_join_orphans = self.dont_join_orphans
             task.orphan_min_overlap_ratio = self.orphan_min_overlap_ratio
             task.orphan_min_total_area_ratio = self.orphan_min_total_area_ratio
+        if len(input_tasks) == 0:
+            # There's only a single block, so fake doing AllConnectedComponents
+            input_task = self.np_tasks[0, 0, 0]
+            np_tgt = input_task.output()
+            self.all_connected_components_task = \
+                FakeAllConnectedComponentsTask(
+                    volume=np_tgt.volume,
+                    location=np_tgt.dataset_location,
+                    output_location=self.get_connectivity_graph_location())
+            self.all_connected_components_task.set_requirement(input_task)
+            return
         #
         # Build the all-connected-components task
         #
