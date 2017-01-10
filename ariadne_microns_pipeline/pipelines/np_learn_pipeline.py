@@ -162,6 +162,12 @@ class NeuroproofLearnPipelineTaskMixin:
     threshold = luigi.FloatParameter(
         description="The threshold used during segmentation for finding seeds",
         default=1)
+    watershed_threshold = luigi.IntParameter(
+        default=192,
+        description="The threshold to use when computing the distance from "
+        "membrane")
+    use_distance_watershed = luigi.BoolParameter(
+        description="Use the distance transform when computing watershed")
     method = luigi.EnumParameter(enum=SeedsMethodEnum,
         default=SeedsMethodEnum.Smoothing,
         description="The algorithm for finding seeds")
@@ -553,6 +559,10 @@ class NeuroproofLearnPipelineTaskMixin:
                             sigma_xy=self.sigma_xy,
                             sigma_z=self.sigma_z,
                             dimensionality=self.dimensionality)
+                        stask.set_requirement(seeds_task)
+                        if self.use_distance_watershed:
+                            stask.use_distance = True
+                            stask.threshold = self.watershed_threshold
                         stask.set_requirement(seeds_task)
                     else:
                         stask = self.factory.gen_2D_segmentation_task(

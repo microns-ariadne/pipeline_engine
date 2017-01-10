@@ -6,6 +6,7 @@ from scipy.sparse import coo_matrix
 
 from .find_seeds import Dimensionality
 from ..algorithms import watershed
+from ..algorithms.morphology import parallel_distance_transform
 from ..targets.factory import TargetFactory
 from ..parameters import \
      VolumeParameter, DatasetLocationParameter, is_empty_dataset_location
@@ -53,6 +54,32 @@ class SegmentRunMixin:
         description=
         "The sigma of the smoothing Gaussian in the z direction",
         default=.4)
+    use_distance = luigi.BoolParameter(
+        description="Do a watershed on the distance transform of the membrane")
+    threshold = luigi.IntParameter(
+        default=128,
+        description="The threshold for membrane if using the distance transform")
+    xy_nm = luigi.FloatParameter(
+        default=4,
+        description="Size of a voxel in the x and y directions")
+    z_nm = luigi.FloatParameter(
+        default=30,
+        description="Size of a voxel in the z direction")
+    n_cores = luigi.IntParameter(
+        default=4,
+        description="# of cores to use when computing distance transform")
+    xy_overlap = luigi.IntParameter(
+        default=100,
+        description="Amt of overlap between blocks in the x and y directions")
+    z_overlap = luigi.IntParameter(
+        default=10,
+        description="Amt of overlap between blocks in the z direction")
+    xy_block_size = luigi.IntParameter(
+        default=512,
+        description="X and Y block size for parallel distance transform")
+    z_block_size = luigi.IntParameter(
+        default=50,
+        description="Z block size for parallel distance transform")
 
     def ariadne_run(self):
         prob_volume, seed_volume, mask_volume = list(self.input())
@@ -62,15 +89,27 @@ class SegmentRunMixin:
         mask = mask_volume.imread() != 0
         labels[~ mask] = 0
         prob[~mask] = 255
-        smoothed = gaussian_filter(
-            prob, (self.sigma_z, self.sigma_xy, self.sigma_xy))
-        smoothed[~mask] = 255
-        if self.dimensionality == Dimensionality.D3:
-            seg = watershed(smoothed, labels)
+        if self.use_distance:
+            not_membrane = prob < self.threshold
+            dt = parallel_distance_transform(
+                not_membrane, self.xy_nm, self.z_nm, 
+                self.xy_overlap, self.z_overlap,
+                self.xy_block_size, self.z_block_size, self.n_cores)
+            max_dt = np.max(dt)
+            prob = ((max_dt - dt) * 255 / max_dt).astype(np.uint8)
+            del dt
+            del not_membrane
         else:
-            seg = np.zeros(smoothed.shape, np.uint16)
-            for z in range(smoothed.shape[0]):
-                seg[z:z+1] = watershed(smoothed[z:z+1], labels[z:z+1])
+            smoothed = gaussian_filter(
+                prob, (self.sigma_z, self.sigma_xy, self.sigma_xy))
+            smoothed[~mask] = 255
+            prob = smoothed
+        if self.dimensionality == Dimensionality.D3:
+            seg = watershed(prob, labels)
+        else:
+            seg = np.zeros(prob.shape, np.uint16)
+            for z in range(prob.shape[0]):
+                seg[z:z+1] = watershed(prob[z:z+1], labels[z:z+1])
         seg[~mask] = 0
         seg_volume.imwrite(seg.astype(np.uint32))
 
