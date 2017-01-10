@@ -8,7 +8,7 @@ from scipy.ndimage import grey_dilation, grey_erosion, center_of_mass
 from scipy.sparse import coo_matrix
 
 from ..parameters import VolumeParameter, DatasetLocationParameter, \
-     EMPTY_DATASET_LOCATION, Volume
+     EMPTY_DATASET_LOCATION, Volume, is_empty_dataset_location
 from ..targets.factory import TargetFactory
 from .utilities import RequiresMixin, RunMixin, SingleThreadedMixin
 from .connected_components import ConnectivityGraph
@@ -70,6 +70,19 @@ class ConnectSynapsesRunMixin:
         "synapse, otherwise consider overlap between the whole synapse "
         "and neurons")
     
+    def report_empty_result(self):
+        '''Report a result with no synapses.'''
+        result = dict(volume=self.volume.to_dictionary(),
+                      neuron_1=[],
+                      neuron_2=[],
+                      synapse=[],
+                      synapse_centers=dict(x=[], y=[], z=[]))
+        if not is_empty_dataset_location(self.transmitter_probability_map_location):
+            result["transmitter_score_1"] = score_1.tolist()
+            result["transmitter_score_2"] = score_2.tolist()
+        with self.output().open("w") as fd:
+            json.dump(result, fd)
+        
     def ariadne_run(self):
         #
         # The heuristic for matching synapses with neurites
@@ -100,10 +113,21 @@ class ConnectSynapsesRunMixin:
         # get the centers of the synapses for reference
         #
         n_synapses = np.max(synapse) + 1
+        if n_synapses == 1:
+            # There are none, return an empty result
+            self.report_empty_result()
+            return
+            
         synapse_centers = np.array(
             center_of_mass(np.ones(synapse.shape, np.uint8),
                            synapse, np.arange(1, n_synapses)),
             np.uint32)
+        #
+        # There is/may be a bug here if there is only a single synapse in
+        # the volume. The result is transposed.
+        #
+        if synapse_centers.shape[0] != 3:
+            synapse_centers=synapse_centers.transpose()
         synapse_centers[0] += self.volume.z
         synapse_centers[1] += self.volume.y
         synapse_centers[2] += self.volume.x
@@ -173,6 +197,10 @@ class ConnectSynapsesRunMixin:
             # Get rid of counts < 2
             #
             mask = per_synapse_counts >= 2
+            if not np.any(mask):
+                # another way to get nothing.
+                self.report_empty_result()
+                return
             idx = idx[:-1][mask]
             #
             # pick out the first and second most overlapping neurons and
