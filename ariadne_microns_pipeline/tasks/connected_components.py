@@ -13,6 +13,7 @@ from scipy.sparse import coo_matrix
 from scipy.sparse.csgraph import connected_components
 
 from .utilities import RequiresMixin, RunMixin, SingleThreadedMixin
+from ..parameters import DatasetLocation, Volume
 from ..parameters import VolumeParameter, DatasetLocationParameter
 from ..parameters import MultiVolumeParameter
 from ..targets.factory import TargetFactory
@@ -697,6 +698,10 @@ class ConnectivityGraph(object):
         mappings = json.load(fd)
         for volume, mapping in mappings["volumes"]:
             self.volumes[to_hashable(volume)] = np.array(mapping)
+        self.locations = {}
+        if "locations" in mappings:
+            for volume, location in mappings["locations"]:
+                self.locations[to_hashable(volume)] = location
         return self
     
     def convert(self, segmentation, volume):
@@ -711,4 +716,11 @@ class ConnectivityGraph(object):
                      segmentation.dtype)
         t[mappings[:, 0]] = mappings[:, 1]
         return t[segmentation]
+    
+    def get_tgt(self, volume):
+        location = DatasetLocation(
+            **self.locations[to_hashable(volume.to_dictionary())])
+        return TargetFactory().get_volume_target(
+            location=location,
+            volume=volume)
         
