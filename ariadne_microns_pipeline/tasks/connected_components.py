@@ -9,6 +9,7 @@ import logging
 import luigi
 import numpy as np
 import rh_logger
+import time
 from scipy.sparse import coo_matrix
 from scipy.sparse.csgraph import connected_components
 
@@ -81,15 +82,19 @@ class ConnectedComponentsRunMixin:
         enum=JoiningMethod,
         default=JoiningMethod.SIMPLE_OVERLAP,
         description="Algorithm to use to join segmentations across blocks")
-    partner_min_total_area_ratio = luigi.FloatParameter(
-        default=0.001)
+    min_overlap_volume = luigi.IntParameter(
+        default=1000,
+        description="The minimum acceptable volume in voxels of overlap "
+        "between segments needed to join them.")
     max_poly_matches = luigi.IntParameter(
         default=1)
     dont_join_orphans = luigi.BoolParameter()
     orphan_min_overlap_ratio = luigi.FloatParameter(
         default=0.9)
-    orphan_min_total_area_ratio = luigi.FloatParameter(
-        default=0.001)
+    orphan_min_overlap_volume = luigi.IntParameter(
+        default=1000,
+        description="The minimum acceptable volume in voxels of overlap "
+                    "needed to join an orphan segment.")
     
     def ariadne_run(self):
         '''Look within the overlap volume to find the concordances
@@ -191,8 +196,6 @@ class ConnectedComponentsRunMixin:
         The code in this routine is adapted from Seymour Knowles-Barley's
         pairwise_multimatch: https://github.com/Rhoana/rhoana/blob/29526687202921e7173b33ec909fcd6e5b9e18bf/PairwiseMatching/pairwise_multimatch.py
         '''
-        total_area = np.float32(np.prod(cutout1.shape))
-        
         counter = fast64counter.ValueCountInt64()
         counter.add_values_pair32(cutout1.astype(np.int32).ravel(), 
                                   cutout2.astype(np.int32).ravel())
@@ -214,10 +217,8 @@ class ConnectedComponentsRunMixin:
         for l1, l2, overlap_area in zip(
             overlap_labels1, overlap_labels2, overlap_areas):
     
-            total_area_ratio = overlap_area / total_area
-    
             if l1 != 0 and l2 != 0 and\
-               total_area_ratio >= self.partner_min_total_area_ratio:
+               overlap_area >= self.min_overlap_volume:
                 if l1 not in m_preference:
                     m_preference[l1] = [(l2, overlap_area)]
                 else:
@@ -250,6 +251,7 @@ class ConnectedComponentsRunMixin:
     
         # Stable marriage loop
         rh_logger.logger.report_event("Entering stable marriage loop")
+        t0 = time.time()
         while mfree:
             m = mfree.pop(0)
             mlist = mprefers2[m]
@@ -289,12 +291,14 @@ class ConnectedComponentsRunMixin:
                     if not dumped and mlist:
                         # She is faithful to old fiance - look again
                         mfree.append(m)
+        rh_logger.logger.report_metric("Stable marriage loop time (sec)",
+                                       time.time() - t0)
     
         # m_can_adopt = copy.deepcopy(overlap_labels1)
         # w_can_adopt = copy.deepcopy(overlap_labels1)
         m_partner = {}
         w_partner = {}
-    
+        t0 = time.time()
         for l2 in engaged.keys():
             for l1 in engaged[l2]:
     
@@ -313,9 +317,11 @@ class ConnectedComponentsRunMixin:
                     w_partner[l2].append(l1)
                 else:
                     w_partner[l2] = [l1]
-    
+        rh_logger.logger.report_metric("Pairwise multimatch merge time (sec)",
+                                       time.time() - t0)
         # Join all orphans that fit overlap proportion critera (no limit)
         if not self.dont_join_orphans:
+            t0 = time.time()
             for l1 in m_preference.keys():
     
                 # ignore any labels with a match
@@ -329,10 +335,9 @@ class ConnectedComponentsRunMixin:
                     continue
     
                 overlap_ratio = overlap_area / np.float32(areas[l1])
-                total_area_ratio = overlap_area / total_area
     
                 if overlap_ratio >= self.orphan_min_overlap_ratio and \
-                   total_area_ratio >= self.orphan_min_total_area_ratio:
+                   overlap_area >= self.orphan_min_overlap_volume:
                     rh_logger.logger.report_event(
                         "Merging orphan segment {0} to {1} ({2} voxel overlap = {3:0.2f}%)."
                         .format(l1, l2, overlap_area, overlap_ratio * 100),
@@ -353,16 +358,18 @@ class ConnectedComponentsRunMixin:
                     continue
     
                 overlap_ratio = overlap_area / np.float32(areas[l2])
-                total_area_ratio = overlap_area / total_area
     
                 if overlap_ratio >= self.orphan_min_overlap_ratio and \
-                   total_area_ratio >= self.orphan_min_total_area_ratio:
+                   overlap_area >= self.orphan_min_overlap_volume:
                     rh_logger.logger.report_event(
                         "Merging orphan segment {0} to {1} ({2} voxel overlap = {3:0.2f}%)."
                         .format(l2, l1, overlap_area, overlap_ratio * 100),
                         log_level=logging.DEBUG)
                     to_merge.append((l1, l2))
                     to_merge_overlap_areas.append(get_area(l1,l2))
+            rh_logger.logger.report_metric(
+                "Pairwise multimatch orphan joining time", 
+                time.time() - t0)            
         #
         # Convert from np.uint32 or whatever to int to make JSON serializable
         #

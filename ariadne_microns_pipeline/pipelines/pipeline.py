@@ -371,15 +371,19 @@ class PipelineTaskMixin:
     min_percent_connected = luigi.FloatParameter(
         default=75.0,
         description="Minimum overlap required to join segments across blocks")
-    partner_min_total_area_ratio = luigi.FloatParameter(
-        default=0.001)
+    min_overlap_volume = luigi.IntParameter(
+        default=1000,
+        description="The minimum # of voxels of overlap between two objects "
+                    "required to join them across blocks")
     max_poly_matches = luigi.IntParameter(
         default=1)
     dont_join_orphans = luigi.BoolParameter()
     orphan_min_overlap_ratio = luigi.FloatParameter(
         default=0.9)
-    orphan_min_total_area_ratio = luigi.FloatParameter(
-        default=0.001)
+    orphan_min_overlap_volume = luigi.IntParameter(
+        default=1000,
+        description="The minimum # of voxels of overlap needed to join "
+                    "an orphan segment")
     halo_size_xy = luigi.IntParameter(
         default=5,
         description="The number of pixels on either side of the origin to "
@@ -1121,12 +1125,12 @@ class PipelineTaskMixin:
         for task in input_tasks:
             task.joining_method = self.joining_method
             task.min_overlap_percent = self.min_percent_connected
-            task.partner_min_total_area_ration = \
-                self.partner_min_total_area_ratio
+            task.min_overlap_volume = \
+                self.min_overlap_volume
             task.max_poly_matches = self.max_poly_matches
             task.dont_join_orphans = self.dont_join_orphans
             task.orphan_min_overlap_ratio = self.orphan_min_overlap_ratio
-            task.orphan_min_total_area_ratio = self.orphan_min_total_area_ratio
+            task.orphan_min_overlap_volume = self.orphan_overlap_volume
         if len(input_tasks) == 0:
             # There's only a single block, so fake doing AllConnectedComponents
             input_task = self.np_tasks[0, 0, 0]
