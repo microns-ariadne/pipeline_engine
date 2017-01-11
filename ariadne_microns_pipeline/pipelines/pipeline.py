@@ -1130,7 +1130,7 @@ class PipelineTaskMixin:
             task.max_poly_matches = self.max_poly_matches
             task.dont_join_orphans = self.dont_join_orphans
             task.orphan_min_overlap_ratio = self.orphan_min_overlap_ratio
-            task.orphan_min_overlap_volume = self.orphan_overlap_volume
+            task.orphan_min_overlap_volume = self.orphan_min_overlap_volume
         if len(input_tasks) == 0:
             # There's only a single block, so fake doing AllConnectedComponents
             input_task = self.np_tasks[0, 0, 0]
