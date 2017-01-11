@@ -251,9 +251,9 @@ class ConnectSynapsesRunMixin:
             # N so that is why we subtract 1 below.
             #
             synapse_center_dict = dict(
-                x=synapse_centers[synapses-1, 2].tolist(),
-                y=synapse_centers[synapses-1, 1].tolist(),
-                z=synapse_centers[synapses-1, 0].tolist())
+                x=synapse_centers[2, synapses-1].tolist(),
+                y=synapse_centers[1, synapses-1].tolist(),
+                z=synapse_centers[0, synapses-1].tolist())
         else:
             neuron_1 = neuron_2 = synapses = np.zeros(0, int)
             score_1, score_2 = np.zeros(0)
