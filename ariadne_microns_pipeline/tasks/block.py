@@ -63,9 +63,9 @@ class BlockTaskMixin:
     
     def estimate_memory_usage(self):
         '''Return an estimate of bytes of memory required by this task'''
-        v1 = np.prod([1888, 1888, 100]) * 2
+        v1 = np.prod([1416, 1888, 70]) + np.prod([1888, 1888, 100])
         m1 = 921211 * 1000
-        v2 = np.prod([1888, 1888, 52]) * 2
+        v2 = np.prod([1416, 1888, 42]) + np.prod([1888, 1888, 52])
         m2 = 601100 * 1000
         #
         # Model is Ax + B where x is volume in voxels of the largest input

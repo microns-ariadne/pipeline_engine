@@ -36,9 +36,9 @@ class DownloadFromButterflyTaskMixin:
 
     def estimate_memory_usage(self):
         '''Return an estimate of bytes of memory required by this task'''
-        v1 = np.prod([1888, 1888, 100]) / 2**(self.resolution*2)
+        v1 = np.prod([1928, 1928, 102]) / 2**(self.resolution*2)
         m1 = 510271 * 1000
-        v2 = np.prod([1888, 1888, 52])
+        v2 = np.prod([1928, 1928, 54])
         m2 = 346971 * 1000
         #
         # Model is Ax + B where x is volume in voxels

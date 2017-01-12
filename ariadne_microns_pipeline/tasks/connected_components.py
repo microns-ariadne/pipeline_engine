@@ -64,9 +64,9 @@ class ConnectedComponentsTaskMixin:
     
     def estimate_memory_usage(self):
         '''Return an estimate of the number of bytes required to run'''
-        v1 = np.prod([1888, 1888, 100])
+        v1 = np.prod([1888, 1888, 70])
         m1 = 3459457 * 1000
-        v2 = np.prod([1888, 1888, 52])
+        v2 = np.prod([1888, 1416, 42])
         m2 = 1868989 * 1000
         #
         # Model is Ax + B where x is volume in voxels. We assume the major

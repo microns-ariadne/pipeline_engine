@@ -75,9 +75,9 @@ class FindSeedsTaskMixin:
 
     def estimate_memory_usage(self):
         '''Return an estimate of bytes of memory required by this task'''
-        v1 = np.prod([1888, 1888, 100])
+        v1 = np.prod([1416, 1888, 70])
         m1 = 2877614 * 1000
-        v2 = np.prod([1888, 1888, 52])
+        v2 = np.prod([1416, 1888, 42])
         m2 = 1693022 * 1000
         #
         # Model is Ax + B where x is volume in voxels
