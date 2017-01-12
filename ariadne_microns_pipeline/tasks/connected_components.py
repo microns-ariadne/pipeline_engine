@@ -69,11 +69,12 @@ class ConnectedComponentsTaskMixin:
         v2 = np.prod([1888, 1888, 52])
         m2 = 3416594 * 1000
         #
-        # Model is Ax + B where x is volume in voxels
+        # Model is Ax + B where x is volume in voxels. We assume the major
+        # memory cost is loading the big volumes and that they are the same size
         #
         B = (v1 * m2 - v2 * m1) / (v1 - v2)
         A = (float(m1) - B) / v1
-        v = np.prod([self.volume.width, self.volume.height, self.volume.depth])
+        v = np.prod([self.volume1.width, self.volume1.height, self.volume1.depth])
         return int(A * v + B)
         
     
