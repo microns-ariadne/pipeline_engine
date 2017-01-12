@@ -62,6 +62,21 @@ class ConnectedComponentsTaskMixin:
     def output(self):
         return luigi.LocalTarget(self.output_location)
     
+    def estimate_memory_usage(self):
+        '''Return an estimate of the number of bytes required to run'''
+        v1 = np.prod([1888, 1888, 100])
+        m1 = 5098469 * 1000
+        v2 = np.prod([1888, 1888, 52])
+        m2 = 3416594 * 1000
+        #
+        # Model is Ax + B where x is volume in voxels
+        #
+        B = (v1 * m2 - v2 * m1) / (v1 - v2)
+        A = (float(m1) - B) / v1
+        v = np.prod([self.volume.width, self.volume.height, self.volume.depth])
+        return int(A * v + B)
+        
+    
 class ConnectedComponentsRunMixin:
     
     min_overlap_percent = luigi.FloatParameter(

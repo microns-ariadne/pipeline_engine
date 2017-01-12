@@ -34,6 +34,24 @@ class DownloadFromButterflyTaskMixin:
         return TargetFactory().get_volume_target(
             self.destination, self.volume)
 
+    def estimate_memory_usage(self):
+        '''Return an estimate of bytes of memory required by this task'''
+        v1 = np.prod([1888, 1888, 100]) / 2**(self.resolution*2)
+        m1 = 1403534 * 1000
+        v2 = np.prod([1888, 1888, 52])
+        m2 = 1271454 * 1000
+        #
+        # Model is Ax + B where x is volume in voxels
+        #
+        B = (v1 * m2 - v2 * m1) / (v1 - v2)
+        A = (float(m1) - B) / v1
+        v = np.prod([self.volume.width, self.volume.height, self.volume.depth])
+        #
+        # Make a guess as to the bit depth of the output based on the channel
+        #
+        if self.channel != "raw":
+            v = v * 4
+        return int(A * v + B)
 
 class DownloadFromButterflyRunMixin:
     '''Perform the aggregation of butterfly planes into a volume'''

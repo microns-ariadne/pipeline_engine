@@ -48,6 +48,25 @@ class NeuroproofTaskMixin:
         '''Return the output segmentation'''
         tf = TargetFactory()
         return tf.get_volume_target(self.output_seg_location, self.volume)
+    
+    def estimate_memory_usage(self):
+        '''Return an estimate of bytes of memory required by this task'''
+        v1 = np.prod([2048, 2048, 100])
+        m1 = (3685308 + 152132) * 1000
+        v2 = np.prod([1436, 1436, 65])
+        m2 = (1348048 + 152100) * 1000
+        #
+        # Model is Ax + B + ALx where x is the output volume and AL is the
+        # number of additional locations.
+        #
+        B = (v1 * m2 - v2 * m1) / (v1 - v2)
+        A = (float(m1) - B) / v1
+        v = np.prod([self.volume.width, 
+                     self.volume.height, 
+                     self.volume.depth])
+        AL = len(self.additional_locations)
+        return int(A * v + AL * v + B)
+
 
 class NeuroproofRunMixin:
     neuroproof = luigi.Parameter(

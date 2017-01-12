@@ -22,6 +22,24 @@ class MaskBorderTaskMixin:
     def output(self):
         return TargetFactory().get_volume_target(
             self.mask_location, self.volume)
+    
+    def estimate_memory_usage(self):
+        '''Return an estimate of bytes of memory required by this task'''
+        v1 = np.prod([1888, 1888, 100]) * 2
+        m1 = 1846815 * 1000
+        v2 = np.prod([1888, 1888, 52]) * 2
+        m2 = 1484125 * 1000
+        #
+        # Model is Ax + B where x is the output volume
+        #
+        B = (v1 * m2 - v2 * m1) / (v1 - v2)
+        A = (float(m1) - B) / v1
+        v = np.prod([self.output_volume.width, 
+                     self.output_volume.height, 
+                     self.output_volume.depth]) +\
+            np.max([np.prod([volume.width, volume.height, volume.depth])
+                    for volume in self.input()])
+        return int(A * v + B)
 
 
 class MaskBorderRunMixin:

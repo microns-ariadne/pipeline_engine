@@ -65,10 +65,10 @@ class AggregateClassifier(AbstractPixelClassifier):
     def get_class_names(self):
         return sum(operator.methodcaller("values"), self.name_maps, [])
 
-    def get_resources(self):
+    def get_resources(self, volume):
         d = {}
         for classifier in self.classifiers():
-            resources = classifier.get_resources()
+            resources = classifier.get_resources(volume)
             for key in resources:
                 if key not in d:
                     d[key] = resources[key]

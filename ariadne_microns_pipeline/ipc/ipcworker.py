@@ -7,6 +7,7 @@ Code derived from example at above. Thank you Daniel Lundin
 '''
 import argparse
 import cPickle
+import gc
 import rh_logger
 import sys
 import time
@@ -14,6 +15,7 @@ import zmq
 import uuid
 
 from .protocol import *
+from ..tasks.utilities import get_memstats
 
 def process_args():
     parser = argparse.ArgumentParser()
@@ -98,6 +100,9 @@ def main():
                     result = work()
                     frames = [client, "", SP_RESULT, cPickle.dumps(result)]
                     rh_logger.logger.report_event("Finished running work")
+                    for key, value in get_memstats().items():
+                        rh_logger.logger.report_metric(
+                            "IPCWorker."+key, value)
                     worker.send_multipart(frames)
                     rh_logger.logger.report_event("Sent work result")
                 except:
@@ -105,6 +110,7 @@ def main():
                     e = sys.exc_info()[1]
                     frames = [client, "", SP_EXCEPTION, cPickle.dumps(e)]
                     worker.send_multipart(frames)
+                gc.collect()
         if heartbeat_timeout < time.time():
             heartbeat_misses += 1
             if heartbeat_misses >= args.max_tries:

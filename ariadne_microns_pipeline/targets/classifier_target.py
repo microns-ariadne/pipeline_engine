@@ -39,13 +39,16 @@ class AbstractPixelClassifier:
         '''Return the names of the classes produced by the classifier'''
         raise NotImplementedError()
     
-    def get_resources(self):
+    def get_resources(self, volume):
         '''The resources needed by this classifier
+        
+        :param volume: the volume being run (to get the size of the data)
         
         Some typical resources are:
         
         * cpu_count: the number of CPUs required to run
         * gpu_count: the number of GPU devices required to run
+        * memory: the amount of memory consumed during the run
         
         :returns: a dictionary of resource name to integer amount.
         '''
@@ -126,8 +129,12 @@ class PixelClassifierTarget(luigi.File):
         '''
         return self.classifier.get_z_pad()
     
-    def get_resources(self):
-        return self.classifier.get_resources()
+    def get_resources(self, volume):
+        '''The resources needed to run the classifier
+        
+        :param volume: the volume being classified
+        '''
+        return self.classifier.get_resources(volume)
     
     def classify(self, image):
         '''Classify the image

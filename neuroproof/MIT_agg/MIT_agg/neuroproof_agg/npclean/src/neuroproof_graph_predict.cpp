@@ -16,6 +16,8 @@
 #include <json/reader.h>
 #include <opencv2/core/core.hpp>
 #include <opencv2/highgui/highgui.hpp>
+#include <unistd.h>
+#include <stdio.h>
 
 
 #include <cilk/cilk.h>
@@ -552,6 +554,27 @@ void testing_func () {
     cout << "TESTING CILK..." << endl;
 }
 
+/*
+ * Print the value of VmHWM from /proc/<my-pid>/status
+ */
+void print_vmhwm() {
+    pid_t pid = getpid();
+    char filename[100];
+    snprintf(filename, 100, "/proc/%d/status", pid);
+    std::ifstream status(filename);
+    string line;
+    while (std::getline(status, line)) {
+	size_t loc = line.find("VmHWM:");
+	if (loc != std::string::npos) {
+	    size_t start = loc + 8;
+	    while ((line[start] < '0') || (line[start] > '9')) start++;
+	    size_t end=start+1;
+	    while ((line[end] >= '0') && (line[end] <= '9')) end++;
+	    std::cout << line.substr(loc, end) << std::endl;
+	}
+    }
+}
+
 int main(int argc, char** argv) 
 {
     PredictOptions options(argc, argv);
@@ -565,6 +588,7 @@ int main(int argc, char** argv)
     testing_func();
     // cilk_sync;
     
+    print_vmhwm();
     printf("-= PROC SUCCESS =-\n");
     
     return 0;

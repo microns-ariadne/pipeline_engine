@@ -72,6 +72,10 @@ class SkeletonizeRunMixin:
     skeletonize_stack_location = luigi.Parameter(
         default="/dev/null",
         description="Location of the NeuTu skeletonize_stack binary")
+    too_big = luigi.FloatParameter(
+        default=200,
+        description="Do not include voxels this far or farther from the "
+                    "boundary (in nm) in the skeleton")
     
     def ariadne_run(self):
         if self.use_neutu:
@@ -81,8 +85,9 @@ class SkeletonizeRunMixin:
     
     def skeletonize_using_microns(self):
         seg = self.input().next().imread()
+
         result = skeletonize(seg, self.xy_nm, self.z_nm, self.decimation_factor,
-                    self.cpu_count)
+                    self.cpu_count, too_big=self.too_big)
         if (self.skeleton_location.endswith(".zip")):
             # if the skeleton location is the name of a 
             with zipfile.ZipFile(self.skeleton_location, "w") as zf:

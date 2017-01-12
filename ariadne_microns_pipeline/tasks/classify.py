@@ -56,7 +56,15 @@ class ClassifyTaskMixin:
     def process_resources(self):
         '''Ask for the resources required by the classifier'''
         resources = self.resources.copy()
-        resources.update(self.get_classifier_target().get_resources())
+        resources.update(self.get_classifier_target().get_resources(self.volume))
+        #
+        # Add the process memory
+        #
+        if "memory" in resources:
+            memory = resources["memory"]
+        else:
+            memory = 0
+        resources["memory"] = memory + 150220000
         return resources
     
     @property

@@ -7,6 +7,27 @@ import rh_logger
 import sys
 import time
 
+
+MEMSTATS_KEYS = ["VmPeak", "VmSwap", "VmHWM"]
+def get_memstats():
+    '''Get statistics related to this process's use of memory
+    
+    VmPeak: peak memory usage in Kb
+    VmSwap: swap space usage in Kb
+    Returns a dictionary with key = stat, value = amt used in kb
+    '''
+    d = {}
+    try:
+        for row in open("/proc/%d/status" % os.getpid()):
+            fields = row.split()
+            key = fields[0][:-1]
+            if key in MEMSTATS_KEYS:
+                d[key] = int(fields[1])
+    except:
+        rh_logger.logger.report_event("Failed to get memory statistics")
+    return d
+
+
 class RequiresMixin:
     '''This mixin lets you add task requirements dynamically
     
@@ -41,25 +62,6 @@ class RunMixin:
             task_name = "%s.%s" % (task_namespace, self.__class__.__name__)
         return task_name
     
-    MEMSTATS_KEYS = ["VmPeak", "VmSwap"]
-    def get_memstats(self):
-        '''Get statistics related to this process's use of memory
-        
-        VmPeak: peak memory usage in Kb
-        VmSwap: swap space usage in Kb
-        Returns a dictionary with key = stat, value = amt used in kb
-        '''
-        d = {}
-        try:
-            for row in open("/proc/%d/status" % os.getpid()):
-                fields = row.split()
-                key = fields[0][:-1]
-                if key in self.MEMSTATS_KEYS:
-                    d[key] = int(fields[1])
-        except:
-            rh_logger.logger.report_event("Failed to get memory statistics")
-        return d
-    
     def run(self):
         if not hasattr(rh_logger.logger, "logger"):
             rh_logger.logger.start_process("Luigi", "Starting logging")
@@ -78,10 +80,9 @@ class RunMixin:
         delta = time.time() - t0
         rh_logger.logger.report_metric(
             task_name + ".runtime", delta)
-        for key, value in self.get_memstats().items():
+        for key, value in get_memstats().items():
             rh_logger.logger.report_metric(
                 task_name + "." + key, value)
-
 
 class CILKCPUMixin:
     '''This mixin provides a standardized mechanism for setting CPU utilization
@@ -100,6 +101,9 @@ class CILKCPUMixin:
     def process_resources(self):
         resources = self.resources.copy()
         resources["cpu_count"] = self.cpu_count
+        if hasattr(self, "estimate_memory_usage"):
+            memory = self.estimate_memory_usage()
+            resources["memory"] = memory
         return resources
     
     def configure_env(self, env):
@@ -120,6 +124,9 @@ class SingleThreadedMixin:
     def process_resources(self):
         resources = self.resources.copy()
         resources["cpu_count"] = 1
+        if hasattr(self, "estimate_memory_usage"):
+            memory = self.estimate_memory_usage()
+            resources["memory"] = memory
         return resources
 
 

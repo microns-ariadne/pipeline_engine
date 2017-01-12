@@ -239,9 +239,32 @@ class KerasClassifier(AbstractPixelClassifier):
     def run_via_ipc(self):
         return True
     
-    def get_resources(self):
-        '''Request one GPU for the classifier'''
-        return dict(gpu_count=1)
+    def get_resources(self, volume):
+        '''Request one GPU for the classifier + memory'''
+        resources = dict(gpu_count=1)
+        #
+        # The high water mark and the RSS after garbage collection were
+        # measured and it seems that the difference between them (the amount
+        # of memory consumed by running the classifier and recovered afterwards)
+        # is independent of the number of channels (or worse, increasing the
+        # number of channels *decreases* the amount consumed!!! - it must be
+        # the classifier model)
+        #
+        # A * volume + B = memory
+        #
+        memory1 = 3075720000
+        volume1 = 1536 * 1536 * 67
+        memory2 = 5928804000
+        volume2 = 1928 * 1928 * 102
+        
+        B = (volume1 * memory2 - volume2 * memory1) / (volume1 - volume2)
+        A = (float(memory1) - B) / volume1
+        v = np.prod([volume.width, 
+                     volume.height, 
+                     volume.depth])
+        resources["memory"] = int(A * v + B)
+        
+        return resources
     
     def classify(self, image, x, y, z):
         #

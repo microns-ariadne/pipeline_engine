@@ -27,7 +27,7 @@ INC+=-I$(SPARSEHASH_DIR)/include -I$(JSONCPP_DIR)/include
 PREPROC_FLAGS=
 CXXFLAGS=-std=c++11
 CXXFLAGS+=-D_GLIBCXX_USE_CXX11_ABI=1
-CXXFLAGS+=-fcilkplus -m64 -march=native -ffast-math -mfma -funroll-loops -flto -O3
+CXXFLAGS+=-fcilkplus -m64 -march=native -ffast-math -mfma -funroll-loops -flto -O3 -g
 CXXFLAGS+=$(INC)
 CXXFLAGS+=$(PREPROC_FLAGS)
 

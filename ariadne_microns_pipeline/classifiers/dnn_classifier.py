@@ -41,7 +41,7 @@ class DNNClassifier(AbstractPixelClassifier):
     def get_class_names(self):
         return ["membrane"]
     
-    def get_resources(self):
+    def get_resources(self, volume):
         '''Request CPU resources
         
         By default, ask for all CPU resources or, if "cpu_count" is

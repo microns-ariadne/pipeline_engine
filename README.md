@@ -69,6 +69,13 @@ You should add the following section to your .rh_config.yaml file:
 luigid:
     db_connection=<sqlalchemy db connection>
 
+### Luigi daemon configuration
+
+The Luigi daemon (luigid) manages resources as part of scheduling tasks.
+The Ariadne Microns pipeline tasks keep track of the number of cores they use,
+the number of GPUs they use and the memory (the highwater mark of the resident
+set size) that they use. These are controlled by the luigi
+
 ## Running
 
 To get help on the pipeline task, run it from Luigi:
