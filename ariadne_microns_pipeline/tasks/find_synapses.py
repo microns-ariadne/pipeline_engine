@@ -67,11 +67,9 @@ class FindSynapsesTaskMixin:
         #
         B = (v1 * m2 - v2 * m1) / (v1 - v2)
         A = (float(m1) - B) / v1
-        v = np.prod([self.output_volume.width, 
-                     self.output_volume.height, 
-                     self.output_volume.depth]) +\
-            np.max([np.prod([volume.width, volume.height, volume.depth])
-                    for volume in self.input()])
+        v = np.prod([self.volume.width, 
+                     self.volume.height, 
+                     self.volume.depth])
         return int(A * v + B)
     
     

@@ -83,6 +83,10 @@ class RunMixin:
         for key, value in get_memstats().items():
             rh_logger.logger.report_metric(
                 task_name + "." + key, value)
+        if hasattr(self, "estimate_memory_usage"):
+            rh_logger.logger.report_metric(
+                "Estimated memory usage (KB)", 
+                self.estimate_memory_usage() / 1024)
 
 class CILKCPUMixin:
     '''This mixin provides a standardized mechanism for setting CPU utilization
