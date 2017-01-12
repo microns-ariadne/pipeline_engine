@@ -58,9 +58,9 @@ class FindSynapsesTaskMixin:
     
     def estimate_memory_usage(self):
         '''Return an estimate of bytes of memory required by this task'''
-        v1 = np.prod([1888, 1888, 100]) * 2
+        v1 = np.prod([1888, 1888, 100])
         m1 = 3722953 * 1000
-        v2 = np.prod([1888, 1888, 52]) * 2
+        v2 = np.prod([1888, 1888, 52])
         m2 = 2050723 * 1000
         #
         # Model is Ax + B where x is the output volume
