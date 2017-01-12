@@ -26,9 +26,9 @@ class MaskBorderTaskMixin:
     def estimate_memory_usage(self):
         '''Return an estimate of bytes of memory required by this task'''
         v1 = np.prod([1888, 1888, 100]) * 2
-        m1 = 1846815 * 1000
+        m1 = 716834 * 1000
         v2 = np.prod([1888, 1888, 52]) * 2
-        m2 = 1484125 * 1000
+        m2 = 468952 * 1000
         #
         # Model is Ax + B where x is the output volume
         #

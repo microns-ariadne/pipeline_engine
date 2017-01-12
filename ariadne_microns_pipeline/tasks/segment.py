@@ -47,9 +47,9 @@ class SegmentTaskMixin:
     def estimate_memory_usage(self):
         '''Return an estimate of bytes of memory required by this task'''
         v1 = np.prod([1888, 1888, 100])
-        m1 = 5373359 * 1000
+        m1 = 3510513 * 1000
         v2 = np.prod([1888, 1888, 52])
-        m2 = 3416594 * 1000
+        m2 = 1929795 * 1000
         #
         # Model is Ax + B where x is volume in voxels
         #

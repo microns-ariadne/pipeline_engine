@@ -56,9 +56,9 @@ class ConnectSynapsesTaskMixin:
     def estimate_memory_usage(self):
         '''Return an estimate of bytes of memory required by this task'''
         v1 = np.prod([1888, 1888, 100]) * 2
-        m1 = 8333052 * 1000
+        m1 = 4008223 * 1000
         v2 = np.prod([1888, 1888, 52]) * 2
-        m2 = 4831100 * 1000
+        m2 = 2294840 * 1000
         #
         # Model is Ax + B where x is the output volume
         #
