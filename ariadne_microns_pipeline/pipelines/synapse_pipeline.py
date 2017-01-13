@@ -172,6 +172,17 @@ class SynapsePipelineTask(luigi.Task):
     def compute_requirements(self):
         if hasattr(self, "requirements"):
             return
+        try:
+            rh_logger.logger.report_event("Assembling pipeline")
+        except:
+            rh_logger.logger.start_process("Ariadne pipeline",
+                                           "Assembling pipeline")
+            #
+            # Configuration turns off the luigi-interface logger
+            #
+        import logging
+        logging.getLogger("luigi-interface").disabled = False
+        
         self.task_factory = AMTaskFactory()
         rh_logger.logger.report_event(
             "Loading classifier from %s" % self.classifier_location)
