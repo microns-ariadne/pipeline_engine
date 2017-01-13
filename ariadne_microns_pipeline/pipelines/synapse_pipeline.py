@@ -352,6 +352,8 @@ class SynapsePipelineTask(luigi.Task):
             acc_task = self.task_factory.gen_all_connected_components_task(
                 [_.output().path for _ in cc_tasks],
                 acc_location)
+            for task in cc_tasks:
+                acc_task.set_requirement(task)
         else:
             # only one block - do a fake connected components
             seg_tgt = self.segmentation_tasks[0, 0, 0].output()
