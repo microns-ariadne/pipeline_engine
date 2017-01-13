@@ -44,7 +44,7 @@ class FindSynapsesTaskMixin:
                 volume=self.volume)
         else:
             yield TargetFactory().get_volume_target(
-                location=self.input_location,
+                location=self.synapse_map_location,
                 volume=self.volume)
         if not is_empty_dataset_location(self.neuron_segmentation):
             yield TargetFactory().get_volume_target(

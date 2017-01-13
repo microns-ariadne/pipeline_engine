@@ -76,7 +76,7 @@ def draw_gantt(database_url, pdf_file, xy_scale, z_scale):
                 return cmp(od[av], od[bv])
         
             
-            data = sorted(data, cmp=compare)
+        data = sorted(data, cmp=compare)
     
     sm = ScalarMappable(cmap="jet")
     names = set([_['name'] for _ in data])
