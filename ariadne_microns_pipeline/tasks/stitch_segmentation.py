@@ -139,22 +139,22 @@ class StitchSegmentationRunMixin:
             rh_logger.logger.report_metric("Mapping time (sec)", time.time() - t0)
             
             x0a = max(x0, tgt.volume.x)
-            if x0a != x0:
+            if x0a != x0 and self.x_padding > 0:
                 x0a += self.x_padding / 2 - 1
             x1a = min(x1, tgt.volume.x1)
-            if x1a != x1:
+            if x1a != x1 and self.x_padding > 0:
                 x1a -= self.x_padding / 2 - 1
             y0a = max(y0, tgt.volume.y)
-            if y0a != y0:
+            if y0a != y0 and self.y_padding > 0:
                 y0a += self.y_padding / 2 - 1
             y1a = min(y1, tgt.volume.y1)
-            if y1a != y1:
+            if y1a != y1 and self.y_padding > 0:
                 y1a -= self.y_padding / 2 - 1
             z0a = max(z0, tgt.volume.z)
-            if z0a != z0:
+            if z0a != z0 and self.z_padding > 0:
                 z0a += self.z_padding / 2 - 1
             z1a = min(z1, tgt.volume.z1)
-            if z1a != z1:
+            if z1a != z1 and self.z_padding > 0:
                 z1a -= self.z_padding / 2 - 1
             if x1a < x0a or y1a < y0a or z1a < z0a:
                 continue
