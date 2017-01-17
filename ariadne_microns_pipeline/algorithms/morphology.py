@@ -53,21 +53,21 @@ def parallel_distance_transform(volume, xy_nm, z_nm, xy_overlap, z_overlap,
     '''
     n_blocks_x = max(1, 1 + (volume.shape[2] - xy_block_size) / 
                      (xy_block_size - xy_overlap))
-    x = np.linspace(0, volume.shape[2], n_blocks_x).astype(int)
+    x = np.linspace(0, volume.shape[2], n_blocks_x+1).astype(int)
     sx = x[:-1].copy()
     sx[1:] -= xy_overlap / 2
     ex = x[1:].copy()
     ex[:-1] += xy_overlap / 2
     n_blocks_y = max(1, 1 + (volume.shape[1] - xy_block_size) / 
                      (xy_block_size - xy_overlap))
-    y = np.linspace(0, volume.shape[1], n_blocks_y).astype(int)
+    y = np.linspace(0, volume.shape[1], n_blocks_y+1).astype(int)
     sy = y[:-1].copy()
     sy[1:] = sy[1:] - xy_overlap / 2
     ey = y[1:].copy()
     ey[:-1] = ey[:-1] + xy_overlap / 2
     n_blocks_z = max(1, 1 + (volume.shape[0] - z_block_size) / 
                      (z_block_size - z_overlap))
-    z = np.linspace(0, volume.shape[0], n_blocks_z).astype(int)
+    z = np.linspace(0, volume.shape[0], n_blocks_z+1).astype(int)
     sz = z[:-1].copy()
     sz[1:] -= z_overlap / 2
     ez = z[1:].copy()

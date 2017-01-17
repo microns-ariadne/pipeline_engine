@@ -5,6 +5,7 @@ import rh_logger
 from scipy.ndimage import gaussian_filter, label, distance_transform_edt
 from scipy.ndimage import grey_dilation, grey_erosion
 
+from ..algorithms.morphology import parallel_distance_transform
 from ..parameters import VolumeParameter, DatasetLocationParameter
 from ..targets.factory import TargetFactory
 from .utilities import RequiresMixin, RunMixin, SingleThreadedMixin
@@ -122,8 +123,8 @@ class FindSeedsRunMixin:
         " Cube is faster, but excludes due to extrema at the corners of "
         "the cube")
     distance_threshold = luigi.FloatParameter(
-        default=5,
-        description="The distance threshold cutoff for the seeds")
+        default=20,
+        description="The distance threshold cutoff for the seeds in nm")
     
     def make_strel(self):
         '''make the structuring element for the minimum distance'''
@@ -192,10 +193,9 @@ class FindSeedsRunMixin:
     
     def find_using_3d_distance(self, probs):
         distance = []
-        for plane in probs.astype(np.float32):
-            thresholded = plane < self.threshold
-            distance.append(distance_transform_edt(thresholded))
-        distance = np.array(distance)
+        thresholded = probs < self.threshold
+        distance = parallel_distance_transform(
+            thresholded, 4, 30, 40, 5, 512, 40, 4)
         dilated = grey_dilation(distance, footprint=self.make_strel())
         mask = (distance == dilated) & (distance >= self.distance_threshold)
         labels, count = label(mask)
