@@ -372,6 +372,9 @@ class SynapsePipelineTask(luigi.Task):
             self.get_pattern("synapse_segmentation"))
         stask = self.task_factory.gen_stitch_segmentation_task(
              [], acc_task.output().path, self.volume, output_location)
+        stask.x_padding = self.xy_overlap / 2
+        stask.y_padding = self.xy_overlap / 2
+        stask.z_padding = self.z_overlap / 2
         stask.set_requirement(acc_task)
         self.requirements = [stask]
     
@@ -428,7 +431,7 @@ class SynapsePipelineTask(luigi.Task):
         
         output_location = os.path.join(
             self.get_dirs(tgt1.x, tgt1.y, tgt1.z)[0],
-            "connected-components-x.json")
+            "connected-components-y.json")
         cctask = self.task_factory.gen_connected_components_task(
             volume1=tgt1.volume,
             location1=tgt1.dataset_location,
@@ -456,7 +459,7 @@ class SynapsePipelineTask(luigi.Task):
         
         output_location = os.path.join(
             self.get_dirs(tgt1.x, tgt1.y, tgt1.z)[0],
-            "connected-components-x.json")
+            "connected-components-z.json")
         cctask = self.task_factory.gen_connected_components_task(
             volume1=tgt1.volume,
             location1=tgt1.dataset_location,
