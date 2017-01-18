@@ -125,6 +125,34 @@ class FindSeedsRunMixin:
     distance_threshold = luigi.FloatParameter(
         default=20,
         description="The distance threshold cutoff for the seeds in nm")
+    #
+    # Parameters for block management of the distance threshold calculation
+    #
+    xy_nm = luigi.FloatParameter(
+        default=4.0,
+        description="Size of a voxel in the X and Y direction")
+    z_nm = luigi.FloatParameter(
+        default=30.0,
+        description="Size of a voxel in the Z direction")
+    dt_xy_overlap = luigi.IntParameter(
+        default=40,
+        description="Overlap between distance transform blocks in the x and y "
+        "directions")
+    dt_z_overlap = luigi.IntParameter(
+        default=5,
+        description="Overlap between distance transform blocks in the z "
+        "direction")
+    dt_xy_block_size = luigi.IntParameter(
+        default=512,
+        description="Block size in the x and y directions for the distance "
+        "transform.")
+    dt_z_block_size = luigi.IntParameter(
+        default=40,
+        description="Block size in the z direction for the distance transform")
+    dt_n_cpus = luigi.IntParameter(
+        default=4,
+        description="Number of CPUs to use when computing the distance "
+        "transform")
     
     def make_strel(self):
         '''make the structuring element for the minimum distance'''
@@ -195,7 +223,9 @@ class FindSeedsRunMixin:
         distance = []
         thresholded = probs < self.threshold
         distance = parallel_distance_transform(
-            thresholded, 4, 30, 40, 5, 512, 40, 4)
+            thresholded, self.xy_nm, self.z_nm, 
+            self.dt_xy_overlap, self.dt_z_overlap, 
+            self.dt_xy_block_size, self.dt_z_block_size, self.dt_n_cpus)
         dilated = grey_dilation(distance, footprint=self.make_strel())
         mask = (distance == dilated) & (distance >= self.distance_threshold)
         labels, count = label(mask)
