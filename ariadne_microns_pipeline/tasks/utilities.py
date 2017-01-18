@@ -88,20 +88,17 @@ class RunMixin:
                 "Estimated memory usage (KB)", 
                 self.estimate_memory_usage() / 1024)
 
-class CILKCPUMixin:
-    '''This mixin provides a standardized mechanism for setting CPU utilization
+class MultiprocessorMixin:
+    '''This mixin provides a standardized mechanism for allocating CPUs
     
-    CILK uses the environment variable, CILK_NWORKERS, to set the number of
-    CPUs available to a subprocess. This mixin makes that number configurable
-    for a task and asks the scheduler for the given number of CPUs.
     '''
     cpu_count = luigi.IntParameter(
-         default=min(
+        default=min(
              luigi.configuration.get_config().getint(
                  "resources", "cpu_count", default=sys.maxint),
              multiprocessing.cpu_count()),
          description="The number of CPUs/CILK workers devoted to this task")
-    
+
     def process_resources(self):
         resources = self.resources.copy()
         resources["cpu_count"] = self.cpu_count
@@ -110,6 +107,13 @@ class CILKCPUMixin:
             resources["memory"] = memory
         return resources
     
+class CILKCPUMixin(MultiprocessorMixin):
+    '''This mixin configures CILK for a number of worker threads
+    
+    CILK uses the environment variable, CILK_NWORKERS, to set the number of
+    CPUs available to a subprocess. This mixin makes that number configurable
+    for a task and asks the scheduler for the given number of CPUs.
+    '''
     def configure_env(self, env):
         '''Configure the CILK subprocess environment
         

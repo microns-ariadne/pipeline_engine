@@ -13,6 +13,8 @@ from .connected_components import ConnectedComponentsTask
 from .connected_components import VolumeRelabelingTask
 from .connect_synapses import ConnectSynapsesTask
 from .connect_synapses import AggregateSynapseConnectionsTask
+from .distance_transform import DistanceTransformInputType
+from .distance_transform import DistanceTransformTask
 from .filter import FilterSegmentationTask
 from .find_seeds import FindSeedsTask, Dimensionality, SeedsMethodEnum
 from .find_synapses import FindSynapsesTask
@@ -742,3 +744,25 @@ class AMTaskFactory(object):
             xy_chunking=xy_chunking,
             z_chunking=z_chunking,
             compression=compression)
+
+    def gen_distance_transform_task(
+        self,
+        volume,
+        input_location,
+        input_type,
+        output_location):
+        '''Generate a task to compute the distance transform on a volume
+        
+        :param volume: the volume to be analyzed
+        :param input_location: the DatasetLocation of the input volume
+        :param input_type: an enum of DistanceTransformInputType.
+            BinaryMask for a binary mask, ProbabilityMap to threshold
+            a probability map to get background / foreground, Segmentation
+            to get the background from the borders between segments.
+        :param output_location: the DatasetLocation of the target output
+        '''
+        return DistanceTransformTask(
+            volume=volume,
+            input_location=input_location,
+            input_type=input_type,
+            output_location=output_location)
