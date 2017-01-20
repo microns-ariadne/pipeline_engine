@@ -12,7 +12,9 @@ from ..targets.hdf5_target import HDF5FileTarget
 from ..targets.butterfly_target import ButterflyChannelTarget
 from ..parameters import Volume, VolumeParameter, DatasetLocation
 from ..parameters import EMPTY_DATASET_LOCATION, is_empty_dataset_location
+from ..tasks.utilities import to_hashable
 from ..pipelines.synapse_gt_pipeline import SynapseGtTask
+import json
 import numpy as np
 import os
 import tempfile
@@ -265,6 +267,9 @@ class PipelineTaskMixin:
     stitched_segmentation_location = luigi.Parameter(
         default="/dev/null",
         description="The location for the final stitched segmentation")
+    index_file_location = luigi.Parameter(
+        default="/dev/null",
+        description="A JSON file that maps volumes to datasets")
     #
     # NB: minimum synapse area in AC3 was 561, median was ~5000
     #
@@ -578,6 +583,8 @@ class PipelineTaskMixin:
                             volume=volume,
                             location=location,
                             resolution=self.resolution)
+                    self.register_dataset(
+                        self.butterfly_tasks[zi, yi, xi].output())
 
     def generate_classifier_tasks(self):
         '''Get the pixel classifier tasks
@@ -644,6 +651,7 @@ class PipelineTaskMixin:
                         shim_task = ClassifyShimTask.make_shim(
                             classify_task=ctask,
                             dataset_name=channel)
+                        self.register_dataset(shim_task.output())
                         tasks[zi, yi, xi] = shim_task
      
     def generate_block_tasks(self):
@@ -790,6 +798,7 @@ class PipelineTaskMixin:
                         minimum_distance_xy=self.minimum_distance_xy,
                         minimum_distance_z=self.minimum_distance_z)
                     self.seed_tasks[zi, yi, xi] = stask
+                    self.register_dataset(stask.output())
                     stask.set_requirement(ctask)
 
     def generate_watershed_tasks(self):
@@ -834,6 +843,7 @@ class PipelineTaskMixin:
                             mask_location=btask.mask_location,
                             seg_location=seg_location,
                             threshold=self.threshold)
+                    self.register_dataset(stask.output())
                     self.watershed_tasks[zi, yi, xi] = stask
                     stask.set_requirement(ctask)
                     stask.set_requirement(btask)
@@ -857,6 +867,7 @@ class PipelineTaskMixin:
                         use_min_contact = self.use_min_contact,
                         contact_threshold = self.contact_threshold)
                     rtask.set_requirement(wtask)
+                    self.register_dataset(rtask.output())
                     self.resegmentation_tasks[zi, yi, xi] = rtask
     
     def generate_neuroproof_tasks(self):
@@ -910,6 +921,7 @@ class PipelineTaskMixin:
                         np_task.set_requirement(seg_task)
                         map(np_task.set_requirement, additional_tasks)
                         np_tasks[zi, yi, xi] = np_task
+                        self.register_dataset(np_task.output())
     
     def generate_gt_cutouts(self):
         '''Generate volumes of ground truth segmentation
@@ -952,6 +964,7 @@ class PipelineTaskMixin:
                 volume,
                 dataset_location,
                 resolution=self.resolution)
+            self.register_dataset(btask.output())
             self.gt_tasks[zi, yi, xi] = btask
         if self.wants_synapse_statistics:
             synapse_gt_location = self.get_dataset_location(
@@ -966,6 +979,7 @@ class PipelineTaskMixin:
                     volume=volume,
                     location=synapse_gt_location,
                     resolution=self.resolution)
+            self.register_dataset(self.gt_synapse_tasks[zi, yi, xi].output())
         if self.has_annotation_mask:
             gt_mask_location = self.get_dataset_location(
                 volume, GT_MASK_DATASET)
@@ -979,6 +993,7 @@ class PipelineTaskMixin:
                     volume=volume,
                     location=gt_mask_location,
                     resolution=self.resolution)
+            self.register_dataset(self.gt_mask_tasks[zi, yi, xi].output())
             
     def generate_pred_cutouts(self):
         '''Generate volumes matching the ground truth segmentations'''
@@ -1300,6 +1315,7 @@ class PipelineTaskMixin:
                         min_slice=self.min_synapse_depth)
                     stask.set_requirement(ctask)
                     stask.set_requirement(nptask)
+                    self.register_dataset(stask.output())
                     self.synapse_segmentation_tasks[zi, yi, xi] = stask
     
     def generate_synapse_tr_segmentation_tasks(self):
@@ -1338,6 +1354,7 @@ class PipelineTaskMixin:
                     stask.set_requirement(ttask)
                     stask.set_requirement(rtask)
                     stask.set_requirement(nptask)
+                    self.register_dataset(stask.output())
                     self.synapse_segmentation_tasks[zi, yi, xi] = stask
                     
     
@@ -1451,6 +1468,7 @@ class PipelineTaskMixin:
                         fg_is_higher=True)
                     synapse_gt_seg_task.classes = self.synapse_gt_classes
                     synapse_gt_seg_task.set_requirement(synapse_gt_task)
+                    self.register_dataset(synapse_gt_seg_task.output())
                     #
                     # Match GT synapses against detected synapses
                     #
@@ -1592,6 +1610,22 @@ class PipelineTaskMixin:
         #
         for task in self.np_tasks.flatten():
             self.stitched_segmentation_task.set_requirement(task)
+        self.register_dataset(self.stitched_segmentation_task.output())
+    
+    def register_dataset(self, target):
+        '''Register the location of a dataset
+        
+        :param target: a VolumeTarget having a volume and a dataset_location
+        
+        Store the location of a target produced by the pipeline in the
+        datasets dictionary for inclusion in the index file.
+        '''
+        dataset_name = target.dataset_location.dataset_name
+        if dataset_name not in self.datasets:
+            self.datasets[dataset_name] = {}
+        volume = to_hashable(target.volume.to_dictionary())
+        self.datasets[dataset_name][volume] = \
+            target.dataset_location.to_dictionary()
         
     def compute_requirements(self):
         '''Compute the requirements for this task'''
@@ -1607,6 +1641,7 @@ class PipelineTaskMixin:
             import logging
             logging.getLogger("luigi-interface").disabled = False
             self.requirements = []
+            self.datasets = {}
             try:
                 self.factory = AMTaskFactory()
                 rh_logger.logger.report_event(
@@ -1728,10 +1763,13 @@ class PipelineTaskMixin:
         self.compute_requirements()
         return self.requirements
         
-    #def output(self):
-    #    return HDF5FileTarget(self.output_path,
-    #                          [SEG_DATASET])
-
+    def ariadne_run(self):
+        '''Write the optional index file'''
+        if self.index_file_location != "/dev/null":
+            for key in self.datasets:
+                self.datasets[key] = \
+                    [(dict(k), v) for k, v in self.datasets[key].items()]
+            json.dump(self.datasets, open(self.index_file_location, "w"))
 
 class PipelineTask(PipelineTaskMixin, PipelineRunReportMixin, luigi.Task):
     task_namespace = "ariadne_microns_pipeline"
