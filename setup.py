@@ -49,7 +49,8 @@ setup(
         "console_scripts": [
             "microns-ipc-broker = ariadne_microns_pipeline.ipc.ipcbroker:main",
             "microns-ipc-worker = ariadne_microns_pipeline.ipc.ipcworker:main",
-            "microns-ipc-echo = ariadne_microns_pipeline.ipc.ipcecho:main"
+            "microns-ipc-echo = ariadne_microns_pipeline.ipc.ipcecho:main",
+            "microns-volume = ariadne_microns_pipeline.scripts.microns_volume:main"
             ]},
     zip_safe=False
 )
