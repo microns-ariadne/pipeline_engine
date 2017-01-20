@@ -190,7 +190,7 @@ keys:
 
 * **locations** (list): a list of two-tuples, one per subvolume, giving the
 volume and dataset location of the Neuroproof segmentation of that subvolume
-(see [JSON objects]).
+(see [JSON objects](#json-objects)).
 
 * **volumes** (list): a list of two-tuples, one per subvolume. The first
 element of the two-tuple is a subvolume and the second is a list of two-tuples
@@ -210,7 +210,7 @@ and the connectivity graph .json file location, `cg_path`:
 produces the segmentation using the global neuron-ids.
 
 * **joins** (list) - this is a list of three-tuples. The first two elements
-in the three-tuple are two overlapping subvolumes (see [Volume object]).
+in the three-tuple are two overlapping subvolumes (see [Volume object](#volume-object)).
 The last element is the path to the connected-components JSON file that
 contains the correspondences between matching neuron-ids in the first and
 second volumes. The connected-components file is for internal use and
@@ -238,8 +238,8 @@ partner of each synapse
 The index file is a global index into the subvolume data for each channel
 produced by the analysis. The file contains a single dictionary object.
 The keys of this object are the names of the channels and the values are
-lists of two-tuples of volume (see [Volume object]) and dataset location
-(see [Dataset location object]).
+lists of two-tuples of volume (see [Volume object](#volume-object)) and dataset location
+(see [Dataset location object](#dataset-location-object)).
 
 The microns-volume script [ariadne_microns_pipeline/scripts/microns_volume.py]
 has an example of how to use the index.json file to read an arbitrary
