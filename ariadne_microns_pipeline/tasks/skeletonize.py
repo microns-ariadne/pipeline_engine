@@ -88,6 +88,7 @@ class SkeletonizeRunMixin:
 
         result = skeletonize(seg, self.xy_nm, self.z_nm, self.decimation_factor,
                     self.cpu_count, too_big=self.too_big)
+        paths = []
         if (self.skeleton_location.endswith(".zip")):
             # if the skeleton location is the name of a 
             with zipfile.ZipFile(self.skeleton_location, "w") as zf:
