@@ -180,6 +180,7 @@ class PngVolumeTarget(VolumeTarget):
         x = d["x"]
         y = d["y"]
         z = d["z"]
-        return PngVolumeTarget(roots, dataset_name, pattern, x, y, z,
-                               width, height, depth)
+        result = PngVolumeTarget(roots, dataset_name, pattern, x, y, z,
+                                 width, height, depth, touchfile_name=path)
+        return result
         

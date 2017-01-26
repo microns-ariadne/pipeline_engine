@@ -14,7 +14,7 @@ class VolumeTarget(luigi.LocalTarget):
     '''
     
     def __init__(self, paths, dataset_path, pattern, 
-                 x, y, z, width, height, depth):
+                 x, y, z, width, height, depth, touchfile_name=None):
         '''Initialize the target with the pathnames and file name pattern
 
         :param paths: A list of paths. For a plane, Z, we write the png file
@@ -32,6 +32,8 @@ class VolumeTarget(luigi.LocalTarget):
         :param width: the width of the volume
         :param height: the height of the volume
         :param depth: the depth of the volume
+        :param touchfile_name: the name of the touchfile (.done file). Default
+                               is constructed as described above.
         '''
         self.paths = paths
         self.dataset_path = dataset_path
@@ -43,6 +45,7 @@ class VolumeTarget(luigi.LocalTarget):
         self.height = height
         self.depth = depth
         self.__has_volume = False
+        self.__touchfile_name = touchfile_name
         super(VolumeTarget, self).__init__(self._get_touchfile_name())
 
     def __getstate__(self):
@@ -69,6 +72,8 @@ class VolumeTarget(luigi.LocalTarget):
         super(VolumeTarget, self).__init__(self.__get_touchfile_name())
     
     def _get_touchfile_name(self):
+        if self.__touchfile_name is not None:
+            return self.__touchfile_name
         root = shard(self.paths, self.x, self.y, self.z)
         filename = "{x:09d}_{y:09d}_{z:09d}_{dataset_path:s}.done".format(
             **self.__getstate__())
