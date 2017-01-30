@@ -10,7 +10,6 @@ import numpy as np
 import Queue
 import os
 from scipy.ndimage import gaussian_filter, zoom
-from skimage.exposure import equalize_adapthist
 import skimage
 import re
 import subprocess
@@ -22,16 +21,7 @@ import enum
 import rh_config
 from rh_logger import logger
 from ..targets.classifier_target import AbstractPixelClassifier
-
-class NormalizeMethod(enum.Enum):
-    '''The algorithm to use to normalize image planes'''
-
-    '''Use a local adaptive histogram filter to normalize'''
-    EQUALIZE_ADAPTHIST=1,
-    '''Rescale to -.5, .5, discarding outliers'''
-    RESCALE=2,
-    '''Rescale 0-255 to 0-1 and otherwise do no normalization'''
-    NONE=3
+from ..algorithms.normalize import NormalizeMethod, normalize_image
 
 class KerasClassifier(AbstractPixelClassifier):
     
@@ -362,7 +352,7 @@ class KerasClassifier(AbstractPixelClassifier):
         xs = np.linspace(x0, x1, n_x+1).astype(int)
         t0 = time.time()
         norm_img = [
-            self.normalize_image(image[zi])
+            normalize_image(image[zi], self.normalize_method)
             for zi in range(image.shape[0])]
         logger.report_metric("keras_cpu_block_processing_time",
                              time.time() - t0)
@@ -479,41 +469,3 @@ class KerasClassifier(AbstractPixelClassifier):
             self.exception = sys.exc_value
             logger.report_exception()
     
-    def normalize_image(self, img):
-        '''Normalize an image plane's intensity to the range, -.5:.5'''
-        if self.normalize_method == NormalizeMethod.EQUALIZE_ADAPTHIST:
-            return self.normalize_image_adapthist(img)
-        elif self.normalize_method == NormalizeMethod.RESCALE:
-            return self.normalize_image_rescale(img)
-        else:
-            return img.astype(float) / 255.0
-    
-    def normalize_image_rescale(self, img, saturation_level=0.05):
-        '''Normalize the image by rescaling after discaring outliers'''
-        sortedValues = np.sort( img.ravel())                                        
-        minVal = np.float32(
-            sortedValues[np.int(len(sortedValues) * (saturation_level / 2))])                                                                      
-        maxVal = np.float32(
-            sortedValues[np.int(len(sortedValues) * (1 - saturation_level / 2))])                                                                  
-        normImg = np.float32(img - minVal) * (255 / (maxVal-minVal))                
-        normImg[normImg<0] = 0                                                      
-        normImg[normImg>255] = 255                                                  
-        return (np.float32(normImg) / 255.0) - .5
-    
-    def normalize_image_adapthist(self, img):
-        '''Normalize image using a locally adaptive histogram
-        
-        :param img: image to be normalized
-        :returns: normalized image
-        '''
-        version = tuple(map(int, skimage.__version__.split(".")))
-        if version < (0, 12, 0):
-            img = img.astype(np.uint16)
-        img = equalize_adapthist(img)
-        if version < (0, 12, 0):
-            # Scale image if prior to 0.12
-            imax = img.max()
-            imin = img.min()
-            img = (img.astype(np.float32) - imin) / \
-                (imax - imin + np.finfo(np.float32).eps)
-        return img - .5
