@@ -69,7 +69,7 @@ class WorkerQueue(object):
             if t > worker.expiry:  # Worker expired
                 expired.append(address)
         for address in expired:
-            print "W: Idle worker expired: %s" % address
+            rh_logger.logger.report_event("Idle worker expired: %s" % address)
             self.queue.pop(address, None)
 
     def next(self):
@@ -128,6 +128,12 @@ def main():
                         "E: Invalid message from worker: %s" % msg,
                         logging.ERROR)
             else:
+                if msg[0] == SP_READY:
+                    rh_logger.logger.report_event("Received SP_READY")
+                elif msg[0] == SP_HEARTBEAT:
+                    rh_logger.logger.report_event("Received SP_HEARTBEAT")
+                elif msg[0] == SP_WORK:
+                    rh_logger.logger.report_event("Forwarding work")
                 frontend.send_multipart(msg)
     
             # Send heartbeats to idle workers if it's time
@@ -135,8 +141,10 @@ def main():
                 for worker in workers.queue:
                     msg = [worker, SP_HEARTBEAT]
                     backend.send_multipart(msg)
+                    rh_logger.logger.report_event("Sent heartbeat")
                 heartbeat_at = time.time() + args.heartbeat_interval
         if socks.get(frontend) == zmq.POLLIN:
+            rh_logger.logger.report_event("Received work")
             frames = frontend.recv_multipart()
             if not frames:
                 break
