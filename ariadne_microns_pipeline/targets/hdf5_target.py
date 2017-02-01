@@ -131,7 +131,7 @@ class HDF5VolumeTarget(VolumeTarget):
             ds[z0:z1, y0:y1, x0:x1] = subvolume
 
 
-class HDF5FileTarget(luigi.File):
+class HDF5FileTarget(luigi.LocalTarget):
     '''An HDF5 file encompassing multiple targets
     
     If a task produces multiple volumes, it's often easiest to put them

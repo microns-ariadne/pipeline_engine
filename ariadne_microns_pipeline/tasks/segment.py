@@ -397,3 +397,59 @@ class UnsegmentTask(UnsegmentTaskMixin,
     '''
     
     task_namespace = "ariadne_microns_pipeline"
+    
+class ZWatershedTaskMixin:
+    
+    volume=VolumeParameter(
+         description="The volume to be segmented")
+    x_prob_location=DatasetLocationParameter(
+        description="Location of the x probability map")
+    y_prob_location=DatasetLocationParameter(
+        description="Location of the y probability map")
+    z_prob_location=DatasetLocationParameter(
+        description="Location of the z probability map")
+    output_location=DatasetLocationParameter(
+        description="Location for the segmentation output")
+    
+    def input(self):
+        tf = TargetFactory()
+        yield tf.get_volume_target(self.x_prob_location, self.volume)
+        yield tf.get_volume_target(self.y_prob_location, self.volume)
+        yield tf.get_volume_target(self.z_prob_location, self.volume)
+    
+    def output(self):
+        tf = TargetFactory()
+        return tf.get_volume_target(self.output_location, self.volume)
+
+class ZWatershedRunMixin:
+    
+    threshold=luigi.IntParameter(
+        default=40000,
+        description="The targeted size threshold for a segment")
+    
+    def ariadne_run(self):
+        import zwatershed
+        
+        xtgt, ytgt, ztgt = self.input()
+        volume = np.zeros((3,
+                           self.volume.depth,
+                           self.volume.height,
+                           self.volume.width), np.float32)
+        for i, tgt in enumerate((ztgt, ytgt, xtgt)):
+            volume[i] = tgt.imread_part(
+            self.volume.x, self.volume.y, self.volume.z,
+            self.volume.width, self.volume.height, self.volume.depth)
+        result = zwatershed.zwatershed(volume / 255, [self.threshold])[0]
+        self.output().imwrite(result)
+
+class ZWatershedTask(ZWatershedTaskMixin,
+                     ZWatershedRunMixin,
+                     RequiresMixin,
+                     RunMixin,
+                     SingleThreadedMixin,
+                     luigi.Task):
+    '''The Z-Watershed task segments a volume using x, y and z affinity maps
+    
+    '''
+    
+    task_namespace="ariadne_microns_pipeline"

@@ -7,6 +7,7 @@ from ..tasks.connected_components import JoiningMethod
 from ..tasks.connected_components import FakeAllConnectedComponentsTask
 from ..tasks.find_seeds import SeedsMethodEnum, Dimensionality
 from ..tasks.match_synapses import MatchMethod
+from ..tasks.nplearn import StrategyEnum
 from ..targets.classifier_target import PixelClassifierTarget
 from ..targets.hdf5_target import HDF5FileTarget
 from ..targets.butterfly_target import ButterflyChannelTarget
@@ -43,6 +44,15 @@ IMG_DATASET = "image"
 
 '''The name of the membrane probability datasets'''
 MEMBRANE_DATASET = "membrane"
+
+'''The name of the X affinity probability datasets'''
+X_AFFINITY_DATASET = "x-affinity"
+
+'''The name of the Y affinity probability datasets'''
+Y_AFFINITY_DATASET = "y-affinity"
+
+'''The name of the Z affinity probability datasets'''
+Z_AFFINITY_DATASET = "z-affinity"
 
 '''The name of the synapse probability datasets'''
 SYNAPSE_DATASET = "synapse"
@@ -98,6 +108,9 @@ ALL_CONNECTED_COMPONENTS_JSON = "connected-components.json"
 
 '''Signals that the channel isn't available (e.g. no ground truth)'''
 NO_CHANNEL = "no-channel"
+
+'''Prepended to stitched versions of dataset names for nplearn'''
+NPLEARN_PREFIX = "nplearn-"
 
 class PipelineTaskMixin:
     '''The Ariadne-Microns pipeline'''
@@ -181,6 +194,24 @@ class PipelineTaskMixin:
     membrane_class_name = luigi.Parameter(
         description="The name of the pixel classifier's membrane class",
         default="membrane")
+    wants_affinity_segmentation = luigi.BoolParameter(
+        description="Use affinity probabilities and z-watershed to "
+        "segment the volume.")
+    x_affinity_class_name = luigi.Parameter(
+        default="x",
+        description="The name of the affinity classifier's class connecting "
+        "voxels in the x direction.")
+    y_affinity_class_name = luigi.Parameter(
+        default="y",
+        description="The name of the affinity classifier's class connecting "
+        "voxels in the y direction.")
+    z_affinity_class_name = luigi.Parameter(
+        default="z",
+        description="The name of the affinity classifier's class connecting "
+        "voxels in the z direction.")
+    z_watershed_threshold = luigi.IntParameter(
+        default=40000,
+        description="Target size for segments produced by the z-watershed")
     wants_transmitter_receptor_synapse_maps = luigi.BoolParameter(
         description="Use a synapse transmitter and receptor probability map "
                     "instead of a map of synapse voxel probabilities.")
@@ -197,10 +228,26 @@ class PipelineTaskMixin:
                     "the probability that a voxel is on the receptor side "
                     "of a synapse.",
         default="receptor")
+    wants_neuroproof_learn = luigi.BoolParameter(
+        description="Train Neuroproof's classifier")
     additional_neuroproof_channels = luigi.ListParameter(
         default=[],
         description="The names of additional classifier classes "
                     "that are fed into Neuroproof as channels")
+    nplearn_strategy = luigi.EnumParameter(
+        enum=StrategyEnum,
+        default=StrategyEnum.all,
+        description="Learning strategy to use")
+    nplearn_num_iterations = luigi.IntParameter(
+        default=1,
+        description="# of iterations of Neuroproof learning to run")
+    prune_feature = luigi.BoolParameter(
+        description="Automatically prune useless features")
+    use_mito = luigi.BoolParameter(
+        description="Set delayed mito agglomeration")
+    nplearn_cpu_count = luigi.IntParameter(
+        default=4,
+        description="# of CPUS to use in the NeuroproofLearnTask")
     close_width = luigi.IntParameter(
         description="The width of the structuring element used for closing "
         "when computing the border masks.",
@@ -429,7 +476,8 @@ class PipelineTaskMixin:
         return self.connectivity_graph_location != "/dev/null" or \
             self.stitched_segmentation_location != "/dev/null" or \
             self.wants_neuron_statistics or \
-            self.wants_synapse_statistics
+            self.wants_synapse_statistics or \
+            self.wants_neuroproof_learn
     
     @property
     def wants_neuron_statistics(self):
@@ -591,39 +639,65 @@ class PipelineTaskMixin:
         
         Take each butterfly task and run a pixel classifier on its output.
         '''
-        self.classifier_tasks = \
-            np.zeros((self.ncl_z, self.ncl_y, self.ncl_x), object)
-        if self.wants_transmitter_receptor_synapse_maps:
-            self.transmitter_classifier_tasks = \
-                np.zeros((self.ncl_z, self.ncl_y, self.ncl_x), object)
-            self.receptor_classifier_tasks = \
-                np.zeros((self.ncl_z, self.ncl_y, self.ncl_x), object)
+        #
+        # The datasets dictionary maps a class name baked into the classifier
+        # to a generic name, for instance "membrane".
+        #
+        # The taskmaps dictionary maps a generic name to the 3D array that
+        # stores the shim task associated with that generic name.
+        #
+        if self.wants_affinity_segmentation:
+            self.classifier_tasks = \
+                np.zeros((3, self.ncl_z, self.ncl_y, self.ncl_x), object)
             datasets = {
-                self.membrane_class_name: MEMBRANE_DATASET,
-                self.transmitter_class_name: SYNAPSE_TRANSMITTER_DATASET, 
-                self.receptor_class_name: SYNAPSE_RECEPTOR_DATASET
-            }
+                self.x_affinity_class_name:X_AFFINITY_DATASET,
+                self.y_affinity_class_name:Y_AFFINITY_DATASET,
+                self.z_affinity_class_name:Z_AFFINITY_DATASET
+                }
             taskmaps = {
-                MEMBRANE_DATASET: self.classifier_tasks,
-                SYNAPSE_TRANSMITTER_DATASET: self.transmitter_classifier_tasks,
-                SYNAPSE_RECEPTOR_DATASET: self.receptor_classifier_tasks
+                Z_AFFINITY_DATASET: self.classifier_tasks[0],
+                Y_AFFINITY_DATASET: self.classifier_tasks[1],
+                X_AFFINITY_DATASET: self.classifier_tasks[2]
             }
         else:
-            self.synapse_classifier_tasks = np.zeros(
-                (self.ncl_z, self.ncl_y, self.ncl_x), object)
+            self.classifier_tasks = \
+                np.zeros((self.ncl_z, self.ncl_y, self.ncl_x), object)
             datasets = {
-                self.membrane_class_name: MEMBRANE_DATASET,
-                self.synapse_class_name: SYNAPSE_DATASET}
-            taskmaps = {
-                MEMBRANE_DATASET: self.classifier_tasks,
-                SYNAPSE_DATASET: self.synapse_classifier_tasks
+                self.membrane_class_name: MEMBRANE_DATASET
             }
+            taskmaps = {
+                MEMBRANE_DATASET: self.classifier_tasks
+            }
+            
+        if not self.wants_neuroproof_learn:
+            if self.wants_transmitter_receptor_synapse_maps:
+                self.transmitter_classifier_tasks = \
+                    np.zeros((self.ncl_z, self.ncl_y, self.ncl_x), object)
+                self.receptor_classifier_tasks = \
+                    np.zeros((self.ncl_z, self.ncl_y, self.ncl_x), object)
+                datasets.update({
+                    self.transmitter_class_name: SYNAPSE_TRANSMITTER_DATASET, 
+                    self.receptor_class_name: SYNAPSE_RECEPTOR_DATASET
+                })
+                taskmaps.update({
+                    SYNAPSE_TRANSMITTER_DATASET: self.transmitter_classifier_tasks,
+                    SYNAPSE_RECEPTOR_DATASET: self.receptor_classifier_tasks
+                })
+            else:
+                self.synapse_classifier_tasks = np.zeros(
+                    (self.ncl_z, self.ncl_y, self.ncl_x), object)
+                datasets.update({
+                    self.synapse_class_name: SYNAPSE_DATASET})
+                taskmaps.update({
+                    SYNAPSE_DATASET: self.synapse_classifier_tasks
+                })
         self.additional_classifier_tasks = dict(
             [(k, np.zeros((self.ncl_z, self.ncl_y, self.ncl_x), object))
              for k in self.additional_neuroproof_channels])
         for channel in self.additional_neuroproof_channels:
             if channel not in (SYNAPSE_DATASET, SYNAPSE_TRANSMITTER_DATASET,
-                               SYNAPSE_RECEPTOR_DATASET):
+                               SYNAPSE_RECEPTOR_DATASET) \
+               and not self.wants_neuroproof_learn:
                 datasets[channel] = self.additional_classifier_tasks[channel]
         for zi in range(self.ncl_z):
             for yi in range(self.ncl_y):
@@ -656,34 +730,44 @@ class PipelineTaskMixin:
      
     def generate_block_tasks(self):
         '''Generate tasks that reblock classifications for segmentation'''
-        old = [self.classifier_tasks]
-        self.classifier_tasks = np.zeros((self.n_z, self.n_y, self.n_x), object)
-        new = [self.classifier_tasks]
-        if self.wants_transmitter_receptor_synapse_maps:
-            old.append(self.transmitter_classifier_tasks)
-            self.transmitter_classifier_tasks = \
-                np.zeros((self.n_z, self.n_y, self.n_x), object)
-            new.append(self.transmitter_classifier_tasks)
-            old.append(self.receptor_classifier_tasks)
-            self.receptor_classifier_tasks = \
-                np.zeros((self.n_z, self.n_y, self.n_x), object)
-            new.append(self.receptor_classifier_tasks)
+        if self.wants_affinity_segmentation:
+            old = list(self.classifier_tasks)
+            self.classifier_tasks = np.zeros(
+                (3, self.n_z, self.n_y, self.n_x), object)
+            new = list(self.classifier_tasks)
         else:
-            old.append(self.synapse_classifier_tasks)
-            self.synapse_classifier_tasks = \
-                np.zeros((self.n_z, self.n_y, self.n_x), object)
-            new.append(self.synapse_classifier_tasks)
+            old = [self.classifier_tasks]
+            self.classifier_tasks = np.zeros(
+                (self.n_z, self.n_y, self.n_x), object)
+            new = [self.classifier_tasks]
+        if not self.wants_neuroproof_learn:
+            if self.wants_transmitter_receptor_synapse_maps:
+                old.append(self.transmitter_classifier_tasks)
+                self.transmitter_classifier_tasks = \
+                    np.zeros((self.n_z, self.n_y, self.n_x), object)
+                new.append(self.transmitter_classifier_tasks)
+                old.append(self.receptor_classifier_tasks)
+                self.receptor_classifier_tasks = \
+                    np.zeros((self.n_z, self.n_y, self.n_x), object)
+                new.append(self.receptor_classifier_tasks)
+            else:
+                old.append(self.synapse_classifier_tasks)
+                self.synapse_classifier_tasks = \
+                    np.zeros((self.n_z, self.n_y, self.n_x), object)
+                new.append(self.synapse_classifier_tasks)
             
         old_additional_classifier_tasks = self.additional_classifier_tasks
         self.additional_classifier_tasks = {}
         for name in self.additional_neuroproof_channels:
-            if name == SYNAPSE_DATASET:
+            if name == SYNAPSE_DATASET and not self.wants_neuroproof_learn:
                 self.additional_classifier_tasks[name] =\
                     self.synapse_classifier_tasks
-            elif name == SYNAPSE_TRANSMITTER_DATASET:
+            elif name == SYNAPSE_TRANSMITTER_DATASET \
+                 and not self.wants_neuroproof_learn:
                 self.additional_classifier_tasks[name] = \
                     self.transmitter_classifier_tasks
-            elif name == SYNAPSE_RECEPTOR_DATASET:
+            elif name == SYNAPSE_RECEPTOR_DATASET \
+                 and not self.wants_neuroproof_learn:
                 self.additional_classifier_tasks[name] = \
                     self.receptor_classifier_tasks
             else:
@@ -870,6 +954,33 @@ class PipelineTaskMixin:
                     self.register_dataset(rtask.output())
                     self.resegmentation_tasks[zi, yi, xi] = rtask
     
+    def generate_z_watershed_tasks(self):
+        '''Generate tasks to go from affinity maps to oversegmentations'''
+        self.watershed_tasks = \
+            np.zeros((self.n_z, self.n_y, self.n_x), object)
+        self.segmentation_tasks = self.watershed_tasks
+        for zi in range(self.n_z):
+            for yi in range(self.n_y):
+                for xi in range(self.n_x):
+                    ztask = self.classifier_tasks[0, zi, yi, xi]
+                    ytask = self.classifier_tasks[1, zi, yi, xi]
+                    xtask = self.classifier_tasks[2, zi, yi, xi]
+                    volume = ztask.output().volume
+                    output_location = self.get_dataset_location(
+                        volume, SEG_DATASET)
+                    zwtask = self.factory.gen_z_watershed_task(
+                         volume=volume,
+                         x_prob_location=xtask.output().dataset_location,
+                         y_prob_location=ytask.output().dataset_location,
+                         z_prob_location=ztask.output().dataset_location,
+                         output_location=output_location)
+                    zwtask.set_requirement(xtask)
+                    zwtask.set_requirement(ytask)
+                    zwtask.set_requirement(ztask)
+                    zwtask.threshold = self.z_watershed_threshold
+                    self.register_dataset(zwtask.output())
+                    self.watershed_tasks[zi, yi, xi] = zwtask
+    
     def generate_neuroproof_tasks(self):
         '''Generate all tasks involved in Neuroproofing a segmentation
         
@@ -883,14 +994,33 @@ class PipelineTaskMixin:
         # segmentation tasks
         # output tasks
         # output dataset name
-        # 
-        task_sets = (
-            (self.classifier_tasks,
-             self.additional_classifier_tasks,
-             self.segmentation_tasks,
-             self.np_tasks,
-             NP_DATASET),
-        )
+        #
+        if not self.wants_affinity_segmentation:
+            task_sets = (
+                (self.classifier_tasks,
+                 self.additional_classifier_tasks,
+                 self.segmentation_tasks,
+                 self.np_tasks,
+                 NP_DATASET),
+            )
+        else:
+            #
+            # Use the x affinity, inverted, as the "membrane"
+            # Add the y and z affinities into Neuroproof.
+            #
+            additional_classifier_tasks = {
+                Y_AFFINITY_DATASET:self.classifier_tasks[1],
+                Z_AFFINITY_DATASET:self.classifier_tasks[0]
+            }
+            additional_classifier_tasks.update(self.additional_classifier_tasks)
+            task_sets = (
+                (self.classifier_tasks[2],
+                 additional_classifier_tasks,
+                 self.segmentation_tasks,
+                 self.np_tasks,
+                 NP_DATASET),
+            )
+            
         for classifier_tasks, additional_classifier_tasks, seg_tasks, np_tasks, \
             dataset_name in task_sets:
 
@@ -1612,6 +1742,98 @@ class PipelineTaskMixin:
             self.stitched_segmentation_task.set_requirement(task)
         self.register_dataset(self.stitched_segmentation_task.output())
     
+    ########################################################
+    #
+    # NPLEARN tasks
+    #
+    ########################################################
+    
+    def generate_nplearn_block_tasks(self):
+        '''Generate tasks to unify probability masks'''
+        if self.wants_affinity_segmentation:
+            probability_map_tasks = reversed(list(self.classifier_tasks))
+        else:
+            probability_map_tasks = [self.classifier_tasks]
+        for key in self.additional_neuroproof_channels:
+            probability_map_tasks.append(self.additional_classifier_tasks[key])
+        self.nplearn_block_tasks = []
+        for tasks in probability_map_tasks:
+            tasks = tasks.flatten()
+            tgt = tasks[0].output()
+            name = NPLEARN_PREFIX + tgt.dataset_location.dataset_name
+            inputs = [dict(volume=_.output().volume,
+                           location=_.output().dataset_location)
+                      for _ in tasks]
+            output_location = self.get_dataset_location(self.volume, name)
+            btask = self.factory.gen_block_task(
+                inputs=inputs,
+                output_volume=self.volume,
+            output_location=output_location)
+            map(btask.set_requirement, tasks)
+            self.nplearn_block_tasks.append(btask)
+
+    def generate_nplearn_ground_truth_task(self):
+        '''Download the ground truth as one big hunk'''
+        dataset_location = self.get_dataset_location(
+            self.volume, GT_DATASET)
+        self.ground_truth_task = self.factory.gen_get_volume_task(
+            experiment=self.experiment,
+            sample=self.sample,
+            dataset=self.dataset,
+            channel=self.gt_channel,
+            url=self.url,
+            volume=self.volume,
+            location = dataset_location,
+            resolution=self.resolution)
+    
+    def generate_volume_relabeling_task(self):
+        '''Make a global segmentation for nplearn'''
+        #
+        # I feel so dirty, but faking that the segmentation tasks
+        # are the neuroproof tasks means we don't have to rework the
+        # connected-components code.
+        #
+        self.np_tasks = self.segmentation_tasks
+        self.generate_connectivity_graph_tasks()
+        inputs = [dict(volume=_.output().volume,
+                       location=_.output().dataset_location)
+                  for _ in self.segmentation_tasks.flatten()]
+        output_location = self.get_dataset_location(self.volume,
+                                                    NPLEARN_PREFIX+SEG_DATASET)
+        self.volume_relabeling_task = \
+            self.factory.gen_volume_relabeling_task(
+                input_volumes=inputs,
+                relabeling_location=
+                self.all_connected_components_task.output_location,
+                output_volume=self.volume,
+                output_location=output_location)
+        map(self.volume_relabeling_task.set_requirement,
+            self.segmentation_tasks.flatten())
+        self.volume_relabeling_task.set_requirement(
+            self.all_connected_components_task)
+    
+    def generate_nplearn_task(self):
+        '''Make the task that trains neuroproof'''
+        prob_location = self.nplearn_block_tasks[0].output().dataset_location
+        seg_location = self.volume_relabeling_task.output().dataset_location
+        gt_location = self.ground_truth_task.output().dataset_location
+        self.neuroproof_learn_task = \
+            self.factory.gen_neuroproof_learn_task(
+                volume=self.volume,
+                prob_location=prob_location,
+                seg_location=seg_location,
+                gt_location=gt_location,
+                output_location=self.neuroproof_classifier_path,
+                strategy=self.nplearn_strategy,
+                num_iterations=self.nplearn_num_iterations,
+                prune_feature=self.prune_feature,
+                use_mito=self.use_mito) 
+        self.neuroproof_learn_task.cpu_count = self.nplearn_cpu_count
+        map(self.neuroproof_learn_task.set_requirement,
+            self.nplearn_block_tasks)
+        self.neuroproof_learn_task.set_requirement(self.volume_relabeling_task)
+        self.neuroproof_learn_task.set_requirement(self.ground_truth_task)
+    
     def register_dataset(self, target):
         '''Register the location of a dataset
         
@@ -1656,8 +1878,13 @@ class PipelineTaskMixin:
                 #
                 rh_logger.logger.report_event("Making Butterfly download tasks")
                 self.generate_butterfly_tasks()
-                rh_logger.logger.report_event("Making gt cutout tasks")
-                self.generate_gt_cutouts()
+                if self.wants_neuroproof_learn:
+                    rh_logger.logger.report_event(
+                        "Making GT Butterfly task for nplearn")
+                    self.generate_nplearn_ground_truth_task()
+                else:
+                    rh_logger.logger.report_event("Making gt cutout tasks")
+                    self.generate_gt_cutouts()
                 #
                 # Step 2: run the pixel classifier on each
                 #
@@ -1669,24 +1896,48 @@ class PipelineTaskMixin:
                 #
                 rh_logger.logger.report_event("Making block tasks")
                 self.generate_block_tasks()
-                #
-                # Step 4: make the border masks
-                #
-                rh_logger.logger.report_event("Making border mask tasks")
-                self.generate_border_mask_tasks()
-                if self.method != SeedsMethodEnum.ConnectedComponents:
+                if not self.wants_affinity_segmentation:
                     #
-                    # Step 5: find the seeds for the watershed
+                    # Step 4: make the border masks
                     #
-                    rh_logger.logger.report_event("Making watershed seed tasks")
-                    self.generate_seed_tasks()
-                #
-                # Step 6: run watershed
-                #
-                rh_logger.logger.report_event("Making watershed tasks")
-                self.generate_watershed_tasks()
-                if self.wants_resegmentation:
-                    self.generate_resegmentation_tasks()
+                    rh_logger.logger.report_event("Making border mask tasks")
+                    self.generate_border_mask_tasks()
+                    if self.method != SeedsMethodEnum.ConnectedComponents:
+                        #
+                        # Step 5: find the seeds for the watershed
+                        #
+                        rh_logger.logger.report_event(
+                            "Making watershed seed tasks")
+                        self.generate_seed_tasks()
+                    #
+                    # Step 6: run watershed
+                    #
+                    rh_logger.logger.report_event("Making watershed tasks")
+                    self.generate_watershed_tasks()
+                    if self.wants_resegmentation:
+                        self.generate_resegmentation_tasks()
+                else:
+                    #
+                    # For affinity maps, run the z-watershed to produce
+                    # the oversegmentation
+                    #
+                    rh_logger.logger.report_event("Making z-watershed tasks")
+                    self.generate_z_watershed_tasks()
+                if self.wants_neuroproof_learn:
+                    #
+                    # Neuroproof Learn needs to have everything reblocked
+                    #
+                    rh_logger.logger.report_event(
+                        "Making segmentation relabeling task")
+                    self.generate_volume_relabeling_task()
+                    rh_logger.logger.report_event(
+                        "Making tasks to reblock probability maps for nplearn")
+                    self.generate_nplearn_block_tasks()
+                    rh_logger.logger.report_event(
+                        "Making neuroproof learn task")
+                    self.generate_nplearn_task()
+                    self.requirements.append(self.neuroproof_learn_task)
+                    return
                 #
                 # Step 7: run Neuroproof on the blocks and border blocks
                 #

@@ -81,7 +81,7 @@ class ConnectSynapsesRunMixin:
         default=25,
         description="Minimum acceptable overlap between neurite and synapse "
                     "border.")
-    wants_edge_contact = luigi.BooleanParameter(
+    wants_edge_contact = luigi.BoolParameter(
         description="If true, only count pixels along the edge of the "
         "synapse, otherwise consider overlap between the whole synapse "
         "and neurons")

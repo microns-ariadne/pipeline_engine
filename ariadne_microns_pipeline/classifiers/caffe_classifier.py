@@ -83,7 +83,7 @@ class CaffeClassifier(AbstractPixelClassifier):
             PyGreentea.caffe.set_device(device_id)
             PyGreentea.caffe.set_mode_gpu()
         key = (self.model_path, self.proto_path)
-        if key not in network_map:
+        if key not in self.network_map:
             net = PyGreentea.caffe.Net(self.proto_path,
                                        self.model_path,
                                        PyGreentea.caffe.TEST)
@@ -91,19 +91,22 @@ class CaffeClassifier(AbstractPixelClassifier):
         else:
             net = self.network_map[key]
         if self.xpad == 0 and self.ypad == 0 and self.zpad == 0:
-            zero_pad_source_data = False
-        else:
             zero_pad_source_data = True
-        image = normalize_image(img, normalize_method, 
+        else:
+            zero_pad_source_data = False
+        image = normalize_image(image, self.normalize_method, 
                                saturation_level=self.saturation_level,
                               offset=self.offset)
+        dataset = [dict(name="Volume-%d-%d-%d" % (x, y, z),
+                        data=image[np.newaxis, :])]
         output = PyGreentea.process(
-            net, image[np.newaxis, :],
+            net, dataset,
             zero_pad_source_data=zero_pad_source_data)[0]
-        result = dict([(k, o[self.zpad:o.shape[0] - self.zpad,
-                             self.ypad:o.shape[1] - self.ypad,
-                             self.xpad:o.shape[2] - self.xpad])
-                       for k, o in zip(self.class_names, output)])
+        result = dict(
+            [(k, (o[self.zpad:o.shape[0] - self.zpad,
+                    self.ypad:o.shape[1] - self.ypad,
+                    self.xpad:o.shape[2] - self.xpad] * 255).astype(np.uint8))
+             for k, o in zip(self.class_names, output)])
         return result
     
     def get_x_pad(self):

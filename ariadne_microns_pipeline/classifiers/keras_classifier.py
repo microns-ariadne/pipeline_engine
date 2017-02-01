@@ -351,9 +351,7 @@ class KerasClassifier(AbstractPixelClassifier):
         n_x = 1 + int((x1-x0 - 1) / output_block_size[2])
         xs = np.linspace(x0, x1, n_x+1).astype(int)
         t0 = time.time()
-        norm_img = [
-            normalize_image(image[zi], self.normalize_method)
-            for zi in range(image.shape[0])]
+        norm_img = normalize_image(image, self.normalize_method)
         logger.report_metric("keras_cpu_block_processing_time",
                              time.time() - t0)
         #

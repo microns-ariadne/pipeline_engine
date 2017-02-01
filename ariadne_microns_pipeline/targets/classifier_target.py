@@ -72,7 +72,7 @@ class AbstractPixelClassifier:
         raise NotImplementedError()
 
 
-class PixelClassifierTarget(luigi.File):
+class PixelClassifierTarget(luigi.LocalTarget):
     '''A pixel classifier target. You can use this target to classify pixels'''
     
     # A cache of classifier pickle pathname to two-tuple of

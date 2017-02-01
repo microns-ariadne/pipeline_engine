@@ -25,7 +25,8 @@ from .match_synapses import MatchSynapsesTask
 from .neuroproof import NeuroproofTask
 from .nplearn import NeuroproofLearnTask, StrategyEnum
 from .segment import \
-     SegmentTask, SegmentCC2DTask, SegmentCC3DTask, UnsegmentTask
+     SegmentTask, SegmentCC2DTask, SegmentCC3DTask, UnsegmentTask, \
+     ZWatershedTask
 from .segmentation_statistics import \
      SegmentationStatisticsTask, SegmentationReportTask
 from .skeletonize import SkeletonizeTask
@@ -766,3 +767,27 @@ class AMTaskFactory(object):
             input_location=input_location,
             input_type=input_type,
             output_location=output_location)
+    
+    def gen_z_watershed_task(
+        self,
+        volume,
+        x_prob_location,
+        y_prob_location,
+        z_prob_location,
+        output_location):
+        '''Generate a Z-watershed task to segment a volume using affinities
+        
+        :param volume: the volume to be segmented
+        :param x_prob_location: the location of the probability map of
+        affinities between voxels in the X direction.
+        :param y_prob_location: the location of the probability map of
+        affinities between voxels in the Y direction.
+        :param z_prob_location: the location of the probability map of
+        affinities between voxels in the Z direction.
+        :param output_location: the DatasetLocation for the output volume.
+        '''
+        return ZWatershedTask(volume=volume,
+                              x_prob_location=x_prob_location,
+                              y_prob_location=y_prob_location,
+                              z_prob_location=z_prob_location,
+                              output_location=output_location)
