@@ -1,10 +1,11 @@
 '''Butterfly Luigi target'''
 
-from cv2 import imdecode, IMREAD_ANYDEPTH, IMREAD_COLOR, IMREAD_UNCHANGED
 import json
 import luigi
 import numpy as np
+import tifffile
 from tornado.httpclient import HTTPClient, HTTPResponse
+from cStringIO import StringIO
 from urllib2 import HTTPError
 
 class ButterflyTarget(luigi.Target):
@@ -77,32 +78,19 @@ class ButterflyTarget(luigi.Target):
             "&y=%d" % self.y +\
             "&z=%d" % self.z +\
             "&width=%d" % self.width +\
-            "&height=%d" % self.height
+            "&height=%d" % self.height +\
+            "&format=tif"+\
+            "&view=grayscale"
         if self.resolution != 0:
             url += "&resolution=%d" % self.resolution
-        if self.channel_target.data_type == np.uint32:
-            thirty_two_bit = True
-            url += "&view=rgb"
-        else:
-            thirty_two_bit = False
         client = HTTPClient()
         response = client.fetch(url)
         assert isinstance(response, HTTPResponse)
         if response.code >= 400:
             raise HTTPError(
                 url, response.code, response.reason, response.headers, None)
-        body = np.frombuffer(response.body, np.uint8)
-        result = imdecode(body, IMREAD_UNCHANGED)
-        if result.ndim == 3:
-            if result.shape[2] == 3:
-                result = result[:, :, 0].astype(np.uint32) +\
-                    result[:, :, 1].astype(np.uint32) * 256 +\
-                    result[:, :, 2].astype(np.uint32) * 256 * 256
-            else:
-                result = result.view(np.uint32).reshape(result.shape[0], 
-                                                        result.shape[1])
-        else:
-            result = imdecode(body, IMREAD_ANYDEPTH)
+        body = StringIO(response.body)
+        result = tifffile.imread(body)
         return result
 
 class ButterflyChannelTarget(luigi.Target):

@@ -43,7 +43,8 @@ setup(
         "scikit-learn",
         "sqlalchemy>=1.0.0",
         "luigi>=2.1.1",
-        "pyzmq"],
+        "pyzmq",
+        "tifffile>=0.10.0"],
     ext_modules=[watershed_ext],
     entry_points={
         "console_scripts": [
