@@ -421,6 +421,21 @@ class ZWatershedTaskMixin:
         tf = TargetFactory()
         return tf.get_volume_target(self.output_location, self.volume)
 
+    def estimate_memory_usage(self):
+        '''Return an estimate of bytes of memory required by this task'''
+        v1 = np.prod([1408, 1408, 40])
+        m1 = 10003584 * 1000
+        v2 = np.prod([512, 512, 40])
+        m2 = 1710532 * 1000
+        #
+        # Model is Ax + B where x is volume in voxels
+        #
+        B = (v1 * m2 - v2 * m1) / (v1 - v2)
+        A = (float(m1) - B) / v1
+        v = np.prod([self.volume.width, self.volume.height, self.volume.depth])
+        return int(A * v + B)
+    
+
 class ZWatershedRunMixin:
     
     threshold=luigi.IntParameter(
