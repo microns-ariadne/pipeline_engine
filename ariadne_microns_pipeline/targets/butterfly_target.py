@@ -1,6 +1,6 @@
 '''Butterfly Luigi target'''
 
-from cv2 import imdecode, IMREAD_ANYDEPTH, IMREAD_COLOR
+from cv2 import imdecode, IMREAD_ANYDEPTH, IMREAD_COLOR, IMREAD_UNCHANGED
 import json
 import luigi
 import numpy as np
@@ -92,11 +92,15 @@ class ButterflyTarget(luigi.Target):
             raise HTTPError(
                 url, response.code, response.reason, response.headers, None)
         body = np.frombuffer(response.body, np.uint8)
-        if thirty_two_bit:
-            result = imdecode(body, IMREAD_COLOR)
-            result = result[:, :, 0].astype(np.uint32) +\
-                result[:, :, 1].astype(np.uint32) * 256 +\
-                result[:, :, 2].astype(np.uint32) * 256 * 256
+        result = imdecode(body, IMREAD_UNCHANGED)
+        if result.ndim == 3:
+            if result.shape[2] == 3:
+                result = result[:, :, 0].astype(np.uint32) +\
+                    result[:, :, 1].astype(np.uint32) * 256 +\
+                    result[:, :, 2].astype(np.uint32) * 256 * 256
+            else:
+                result = result.view(np.uint32).reshape(result.shape[0], 
+                                                        result.shape[1])
         else:
             result = imdecode(body, IMREAD_ANYDEPTH)
         return result
