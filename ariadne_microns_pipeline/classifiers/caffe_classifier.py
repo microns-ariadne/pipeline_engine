@@ -64,7 +64,7 @@ class CaffeClassifier(AbstractPixelClassifier):
                     saturation_level=self.saturation_level,
                     offset=self.offset)
     
-    def _setstate__(self, state):
+    def __setstate__(self, state):
         self.model_path = state["model_path"]
         self.proto_path = state["proto_path"]
         self.class_names = state["class_names"]
