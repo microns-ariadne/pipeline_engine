@@ -90,7 +90,7 @@ class ButterflyTarget(luigi.Target):
             raise HTTPError(
                 url, response.code, response.reason, response.headers, None)
         body = StringIO(response.body)
-        result = tifffile.imread(body)
+        result = tifffile.imread(body).astype(self.channel_target.data_type)
         return result
 
 class ButterflyChannelTarget(luigi.Target):
