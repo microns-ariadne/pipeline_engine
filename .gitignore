@@ -5,10 +5,10 @@
 ariadne_microns_pipeline.egg-info
 ariadne_microns_pipeline/algorithms/*.cpp
 build
-fc_dnn/src/run_dnn
-skeletonization/graph_extraction/main
-skeletonization/graph_extraction/LUT/LUT.txt
-skeletonization/graph_extraction/LUT/lutgen
+archived/fc_dnn/src/run_dnn
+archived/skeletonization/graph_extraction/main
+archived/skeletonization/graph_extraction/LUT/LUT.txt
+archived/skeletonization/graph_extraction/LUT/lutgen
 neuroproof/sparsehash/.deps/
 neuroproof/sparsehash/Makefile
 neuroproof/sparsehash/config.log
