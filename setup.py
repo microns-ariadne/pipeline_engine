@@ -3,7 +3,6 @@ import os
 import numpy as np
 
 from setuptools import setup, Extension
-import cython
 
 VERSION = "0.1.0"
 
@@ -22,9 +21,14 @@ setup(
     name='ariadne-microns-pipeline',
     version=VERSION,
     packages=["ariadne_microns_pipeline",
+              "ariadne_microns_pipeline.analysis",
+              "ariadne_microns_pipeline.algorithms",
+              "ariadne_microns_pipeline.classifiers",
+              "ariadne_microns_pipeline.ipc",
+              "ariadne_microns_pipeline.pipelines",
               "ariadne_microns_pipeline.targets",
-              "ariadne_microns_pipeline.tasks",
-              "ariadne_microns_pipeline.algorithms"],
+              "ariadne_microns_pipeline.tasks"
+              ],
     url="https://github.com/microns-ariadne/pipeline_engine",
     description="Connectome project's pipeline",
     long_description=README,
@@ -34,18 +38,28 @@ setup(
         "enum34>=1.0.0",
         "hungarian>=0.2.3",
         "mahotas",
-        "microns_skeletonization",
+        "matplotlib",
         "numpy>=1.9.3",
+        "opencv-python",
         "pandas>=0.15.0",
         "h5py>=2.5.0",
-        "rh_logger",
         "scipy>=0.14.0",
         "scikit-learn",
         "sqlalchemy>=1.0.0",
         "luigi>=2.1.1",
         "pyzmq",
-        "tifffile>=0.10.0"],
+        "tifffile>=0.10.0",
+        "rh_config",
+        "rh_logger",
+        "rh-fast64counter",        
+        "microns-skeletonization"],
     ext_modules=[watershed_ext],
+    dependency_links = [
+        'https://github.com/Rhoana/rh_config/archive/1.0.0.tar.gz#egg=rh_config-1.0.0',
+        'https://github.com/Rhoana/rh_logger/archive/2.0.0.tar.gz#egg=rh_logger-2.0.0',
+        'https://github.com/Rhoana/fast64counter/archive/v1.0.0.tar.gz#egg=rh-fast64counter-1.0.0',
+        'git+ssh://git@github.com/VCG/microns_skeletonization.git#egg=microns_skeletonization-0.1.0'
+        ],
     entry_points={
         "console_scripts": [
             "microns-ipc-broker = ariadne_microns_pipeline.ipc.ipcbroker:main",

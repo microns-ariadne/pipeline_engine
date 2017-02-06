@@ -1,5 +1,26 @@
 ## Installation
 
+### Python installation
+
+You should install the pipeline engine into a virtual environment, as provided
+by Virtualenv or Anaconda/Conda.
+
+To install the pipeline engine's Python dependency:
+
+    > virtualenv <path-to-my-new-environment>
+    > source activate <path-to-my-new-environment>/bin/activate
+    > pip install numpy
+    > pip install cython
+    > git clone https://github.com/microns-ariadne/pipeline_engine
+    > cd pipeline_engine
+    > git checkout use_luigi
+    > pip install --process-dependency-links --trusted-host github.com .
+    
+In addition, you will have to compile Neuroproof and install either the Keras
+or Caffe back-end.
+
+### Building stand alone version of Neuroproof
+
 The Python Luigi framework installs via standardized mechanisms, e.g.
 'pip install .' from the root directory. Some of the tasks run binaries
 as subprocesses. These are built with the makefile in the root directory.
@@ -25,6 +46,18 @@ flex
 bison
 gcc
 make
+
+### Keras installation
+
+The following installs Keras and Theano. (Note as of 2/6/2017, the Anaconda
+version of Keras is older than 1.2.1 and will not work). You should have the
+CUDA drivers and libraries pre-installed. Directions are on the NVidia website.
+
+    > source activate <path-to-my-new-environment>/bin/activate
+    > pip install keras>=1.2.1
+    > pip install theano>=0.8.2
+
+Follow directions for configuring Theano on their website.
 
 ### Caffe Installation
 
