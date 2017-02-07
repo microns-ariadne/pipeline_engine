@@ -15,7 +15,7 @@ from ariadne_microns_pipeline.classifiers import all_classifiers
 from ariadne_microns_pipeline.algorithms.normalize import NormalizeMethod
 
 help_url = "https://github.com/microns-ariadne/pipeline_engine/blob/" \
-    "use_luigi/ariadne_microns_pipeline/scripts/pickle_a_classifier.rst"
+    "use_luigi/ariadne_microns_pipeline/scripts/pickle_a_classifier.md"
 
 class XYZWidget(object):
     '''A widget with x, y and z values'''
