@@ -278,9 +278,81 @@ def go_aggregate(pane):
     badd.grid(row=0, column=1)
             
 def go_caffe(pane):
-    tkMessageBox.showinfo("Caffe currently unsupported",
-                          "Sorry, pickling Caffe models must be done manually "
-                          "at the current time.")
+    label = Tkinter.Label(pane, text="Model file")
+    label.grid(row=0, column=0)
+    model_file_widget = Tkinter.Entry(pane, width=40)
+    model_file_widget.grid(row=0, column=1)
+    model_file_button = Tkinter.Button(
+        pane, text="Select",
+        command = lambda: ask_filename(model_file_widget, 
+                                       filetypes=[("Model file", ".caffemodel"),
+                                                  ("All files", ".*")]))
+    model_file_button.grid(row=0, column=2)
+
+    label = Tkinter.Label(pane, text="Prototxt file")
+    label.grid(row=1, column=0)
+    prototxt_file_widget = Tkinter.Entry(pane, width=40)
+    prototxt_file_widget.grid(row=1, column=1)
+    prototxt_file_button = Tkinter.Button(
+        pane, text="Select",
+        command = lambda: ask_filename(
+            prototxt_file_widget, 
+            filetypes=[("Prototype file", ".prototxt"),
+                       ("All files", ".*")]))
+    prototxt_file_button.grid(row=1, column=2)
+
+    label = Tkinter.Label(pane, text="Padding")
+    label.grid(row=2, column=0)
+    padding_widget = XYZWidget(pane, "Padding")
+    padding_widget.grid(row=2, column=1, sticky="w")
+    
+    label = Tkinter.Label(pane, text="Class names")
+    label.grid(row=3, column=0)
+    class_name_widget = Tkinter.Entry(pane)
+    class_name_widget.configure(dict(width=40))
+    class_name_widget.grid(row=3, column=1)
+    
+    label = Tkinter.Label(pane, text="Normalize method")
+    label.grid(row=4, column=0)
+    normalize_kwds = [_.name for _ in NormalizeMethod]
+    normalization_widget = ttk.Combobox(
+        pane,
+        values = normalize_kwds,
+        state="readonly")
+    normalization_widget.grid(row=4, column=1)
+    normalization_widget.set(NormalizeMethod.NONE.name)
+    
+    def make_classifier():
+        from tkMessageBox import showerror
+        model_file = model_file_widget.get()
+        if not os.path.exists(model_file):
+            showerror("No such model file", "%s does not exist" % model_file)
+            return
+        prototxt_file = prototxt_file_widget.get()
+        if not os.path.exists(prototxt_file):
+            showerror("No such weights file", "%s does not exist" % prototxt_file)
+        if not padding_widget.validate():
+            return
+        caffe = all_classifiers["caffe"]
+        normalization = NormalizeMethod[normalization_widget.get()]
+        class_names = [_.strip() for _ in class_name_widget.get().split(",")]
+        classifier = caffe(model_path=model_file,
+                           proto_path=prototxt_file,
+                           xpad=padding_widget.x,
+                           ypad=padding_widget.y,
+                           zpad=padding_widget.z,
+                           normalize_method=normalization,
+                           class_names = class_names)
+        return classifier
+    
+    def save():
+        classifier = make_classifier()
+        with asksaveasfile(filetypes=[("Pickle file", ".pkl"),
+                                      ("All files", ".*")]) as fd:
+            cPickle.dump(classifier, fd)
+            
+    save = Tkinter.Button(pane, text="Save", command=save)
+    save.grid(row=5, column=2)
     
 if __name__=="__main__":
     main()

@@ -16,6 +16,7 @@ For synapse predictions
 * *synapse*: a single channel giving synapse probabilities
 
 or
+
 * *transmitter* and *receptor* for the presynaptic and postsynaptic parts
 of a synapse
 
@@ -61,6 +62,25 @@ output block.
 * Hit the "Save" button and enter a file name. Your classifier will be pickled
 to a .pkl file.
 
+## Pickling a Caffe model
+
+The Caffe models classify arbitrary volumes, so the only parameters that
+pertain to the model are the amount of padding needed for images (the
+difference between their input and output shapes) and the classes they produce.
+The pickle contains the pathnames of the .caffemodel file and .prototxt file.
+
+To pickle a Caffe model
+
+* Select "caffe" from the initial drop-down and press "Go"
+* Hit the "Select" button for the model file and pick your Caffe model file.
+* Hit the "Select" button for the prototxt prototype file and pick your
+Caffe prototxt file
+* Enter the x, y and z padding needed by the model
+* For each class, enter a class name. Class names are separated by commas.
+* Pick a normalization method
+* Hit the "Save" button and enter a file name. Your classifier will be
+pickled to a .pkl file.
+
 ## Pickling an aggregate classifier
 
 To combine two classifiers, pickle them together with the aggregate classifier.
@@ -80,7 +100,3 @@ by the classifier will appear below the file name.
 When you are done, press "Save" and enter your pickle file's name. Your
 aggregate classifier will be saved to the file you choose. If you make a 
 mistake, you can start over by pressing "Go" again.
-
-## Pickling a Caffe classifier
-
-(currently not supported)
