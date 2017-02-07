@@ -40,7 +40,6 @@ setup(
         "mahotas",
         "matplotlib",
         "numpy>=1.9.3",
-        "opencv-python",
         "pandas>=0.15.0",
         "h5py>=2.5.0",
         "scipy>=0.14.0",
@@ -65,7 +64,8 @@ setup(
             "microns-ipc-broker = ariadne_microns_pipeline.ipc.ipcbroker:main",
             "microns-ipc-worker = ariadne_microns_pipeline.ipc.ipcworker:main",
             "microns-ipc-echo = ariadne_microns_pipeline.ipc.ipcecho:main",
-            "microns-volume = ariadne_microns_pipeline.scripts.microns_volume:main"
+            "microns-volume = ariadne_microns_pipeline.scripts.microns_volume:main",
+            "pickle-a-classifier = ariadne_microns_pipeline.scripts.pickle_a_classifier:main"
             ]},
     zip_safe=False
 )

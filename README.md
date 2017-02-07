@@ -7,6 +7,7 @@ by Virtualenv or Anaconda/Conda.
 
 To install the pipeline engine's Python dependency:
 
+    > Install OpenCV (e.g. sudo apt-get install python-opencv or conda install opencv)
     > virtualenv <path-to-my-new-environment>
     > source activate <path-to-my-new-environment>/bin/activate
     > pip install numpy
