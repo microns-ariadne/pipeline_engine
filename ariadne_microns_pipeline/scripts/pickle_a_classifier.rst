@@ -1,4 +1,4 @@
-###Pickle A Classifier Help
+# Pickle A Classifier Help
 
 This page documents the pickle-a-classifier GUI application. The application
 creates a pickle file to be used by the Ariadne / Microns pipeline's classifier.
@@ -25,7 +25,7 @@ classifiers may be *keras* or *caffe*. So the workflow is to run
 pickle-a-classifier once for the segmentation, once for the synapse and once
 for the aggregate to combine the synapse and segmentation pickle files.
 
-### Pickling a Keras model
+## Pickling a Keras model
 
 Your classifier should have an input shape (the size of the image block
 going into your classifier) and an output shape (the size of the image block
@@ -61,7 +61,7 @@ output block.
 * Hit the "Save" button and enter a file name. Your classifier will be pickled
 to a .pkl file.
 
-### Pickling an aggregate classifier
+## Pickling an aggregate classifier
 
 To combine two classifiers, pickle them together with the aggregate classifier.
 Each classifier has its associated pickle file. The aggregate classifier
@@ -81,6 +81,6 @@ When you are done, press "Save" and enter your pickle file's name. Your
 aggregate classifier will be saved to the file you choose. If you make a 
 mistake, you can start over by pressing "Go" again.
 
-### Pickling a Caffe classifier
+## Pickling a Caffe classifier
 
 (currently not supported)

@@ -209,7 +209,7 @@ class KerasClassifier(AbstractPixelClassifier):
             self.classes = ["membrane"]
     
     def get_class_names(self):
-        return ["membrane"]
+        return self.classes
     
     def get_x_pad_ds(self):
         return self.xypad_size + self.xy_trim_size
