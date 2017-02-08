@@ -28,9 +28,14 @@ to add you to the project. Then do the following:
 
     > git clone https://github.com/microns_ariadne/pipeline_engine
     > cd pipeline_engine
+    > git checkout use_luigi
     > conda env create -f conda-install.yaml
     > source activate ariadne_microns_pipeline
     > pip install --process-dependency-links --editable .
+    > pip install keras>=1.2.1
+
+You may need to follow directions for configuring Theano on their website or
+see directions for configuring Theano below
 
 ### Building stand alone version of Neuroproof
 
@@ -71,6 +76,34 @@ CUDA drivers and libraries pre-installed. Directions are on the NVidia website.
     > pip install theano>=0.8.2
 
 Follow directions for configuring Theano on their website.
+
+### Theano installation
+
+You should follow directions on their website. But if you want a shortcut.
+
+* Make sure you have the CUDA and CUDNN installed (I will not help you there).
+* Make sure /usr/local/cuda/bin (or similar) is on your path.
+* Copy the following file to ~/.theanorc
+
+    [global]
+    device = gpu
+    mode=FAST_RUN
+    floatX=float32
+    optimizer_including = cudnn:conv3d_gemm:convgrad3d_gemm:convtransp3d_gemm
+    optimizer=fast_run
+    exception_verbosity=high
+
+    [lib]
+    cnmem=0.50
+
+    [dnn]
+    enabled=1
+
+    [dnn.conv]
+    algo_fwd = time_on_shape_change
+    algo_bwd_data = time_on_shape_change
+    algo_bwd_filter = time_on_shape_change
+
 
 ### Caffe Installation
 

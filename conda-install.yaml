@@ -15,6 +15,6 @@ dependencies:
 - sqlalchemy
 - luigi
 - pyzmq
+- scikit-image
 - tifffile
 - theano
-- keras
