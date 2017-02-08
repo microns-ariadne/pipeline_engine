@@ -1,0 +1,20 @@
+name: ariadne_microns_pipeline
+channels:
+- menpo
+dependencies:
+- numpy
+- cython
+- opencv
+- python-dateutil
+- enum34
+- mahotas
+- h5py
+- pandas
+- scipy
+- scikit-learn
+- sqlalchemy
+- luigi
+- pyzmq
+- tifffile
+- theano
+- keras

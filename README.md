@@ -13,12 +13,24 @@ To install the pipeline engine's Python dependency:
     > pip install numpy
     > pip install cython
     > git clone https://github.com/microns-ariadne/pipeline_engine
+    > git checkout use_luigi
     > cd pipeline_engine
     > git checkout use_luigi
     > pip install --process-dependency-links --trusted-host github.com .
     
 In addition, you will have to compile Neuroproof and install either the Keras
 or Caffe back-end.
+
+### Anaconda installation
+
+could not be simpler. Ask an admin of the vcg/microns_skeletonization project
+to add you to the project. Then do the following:
+
+    > git clone https://github.com/microns_ariadne/pipeline_engine
+    > cd pipeline_engine
+    > conda env create -f conda-install.yaml
+    > source activate ariadne_microns_pipeline
+    > pip install --process-dependency-links --editable .
 
 ### Building stand alone version of Neuroproof
 
