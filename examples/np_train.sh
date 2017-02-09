@@ -105,7 +105,7 @@ cat <<EOF > "$LUIGI_CONFIG_PATH"
 [core]
 no_configure_logging=True
 [resources]
-cpu_count = 2
+cpu_count = 4
 gpu_count = 1
 memory=30000000000
 EOF
