@@ -103,13 +103,11 @@ using gcc : 4.9.0 : $(CILKPLUS_CXX_COMPILER) ;
 endef
 export USER_CONFIG_JAM
 
-.PHONY: all np-merge fc_dnn all_sources cilkplus-sources clean
+.PHONY: all np-merge all_sources cilkplus-sources clean
 
-all: $(TOOLS_PREFIX)/sources neuroproof fc_dnn/src/run_dnn
+all: $(TOOLS_PREFIX)/sources neuroproof
 
 clean:
-	cd fc_dnn/src &&\
-	make clean &&\
 	cd neuroproof/MIT_agg/MIT_agg/neuroproof_agg/npclean &&\
 	make clean
 
@@ -139,23 +137,25 @@ all_sources: $(TOOLS_PREFIX)/sources/opencv-2.4.13.zip \
 		$(TOOLS_PREFIX)/sources/boost-1.61.0.tar.gz\
 		$(TOOLS_PREFIX)/sources/vigra-1.10.0-src.tar.gz
 
-$(TOOLS_PREFIX)/sources:
-	mkdir -p $@
-
 $(TOOLS_PREFIX)/sources/opencv-2.4.13.zip:
+	mkdir -p $(TOOLS_PREFIX)/sources && \
 	wget https://github.com/opencv/opencv/archive/2.4.13.zip -O $@
 #	wget http://downloads.sourceforge.net/project/opencvlibrary/opencv-unix/2.4.9/opencv-2.4.9.zip -O $@
 
 $(TOOLS_PREFIX)/sources/autoconf-2.64.tar.gz:
+	mkdir -p $(TOOLS_PREFIX)/sources
 	wget http://ftp.gnu.org/gnu/autoconf/autoconf-2.64.tar.gz -O $@
 
 $(TOOLS_PREFIX)/sources/boost-1.61.0.tar.gz:
+	mkdir -p $(TOOLS_PREFIX)/sources
 	wget http://downloads.sourceforge.net/project/boost/boost/1.61.0/boost_1_61_0.tar.gz -O $@
 
 $(TOOLS_PREFIX)/sources/vigra-1.10.0-src.tar.gz:
+	mkdir -p $(TOOLS_PREFIX)/sources
 	wget https://github.com/ukoethe/vigra/releases/download/Version-1-11-0/vigra-1.11.0-src.tar.gz -O $@
 
 $(TOOLS_PREFIX)/sources/jsoncpp-1.7.3.tar.gz:
+	mkdir -p $(TOOLS_PREFIX)/sources
 	wget https://github.com/open-source-parsers/jsoncpp/archive/1.7.3.tar.gz -O $@
 
 $(TOOLS_PREFIX)/autoconf/autoconf-install/bin/autoconf: $(TOOLS_PREFIX)/sources/autoconf-2.64.tar.gz
@@ -262,11 +262,4 @@ $(TOOLS_PREFIX)/vigra/vigra-install: $(TOOLS_PREFIX)/sources/vigra-1.10.0-src.ta
 	make && \
 	make install
 
-fc_dnn/src/run_dnn: $(TOOLS_PREFIX)/cilkplus/cilkplus-install/bin/g++ $(TOOLS_PREFIX)/opencv-2.4/opencv-install
-	cd fc_dnn/src &&\
-	CC=$(CILKPLUS_CXX_COMPILER) \
-	LD=$(CILKPLUS_LINKER) \
-	CILKPLUS_PREFIX=$(CILKPLUS_PREFIX)/cilkplus-install \
-	OPENCV_PREFIX=$(OPENCV_PREFIX)/opencv-install \
-	make
 
