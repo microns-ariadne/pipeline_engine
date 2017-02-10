@@ -1,35 +1,48 @@
-#! /bin/bash
+#!/bin/bash
 #
-# np_train.sh
+# pipeline.sh
 #
-# This script trains Neuroproof using a classifier and the ECS_train_images
-# dataset. You should have Neuroproof installed and should have the following
-# in your .rh-config.yaml file:
-#
-# neuroproof:
-#   neuroproof_graph_learn: <path-to-neuroproof-graph-learn>
-#   ld_library_path:
-#   - <path-to-boost-install-libs>
-#   - <path-to-cilkplus-install-libs>
-#   - <path-to-jsoncpp-install-libs>
-#   - <path-to-opencv-install-libs>
-#   - <path-to-vigra-install-libs>
-#
-# Intermediate files are written to /tmp/examples/nptrain.
+# This example demonstrates how to process a volume, creating a segmentation
+# and the index.json and synapse-connection.json files.
 #
 # Environment variables
 #
-# MICRONS_CLASSIFIER_PATH - path to your classifier's .pkl file
-# MICRONS_NP_CLASSIFIER_PATH - path for the neuroproof classifier .XML file
+# MICRONS_CLASSIFIER_PATH - path to the .pkl file containing both the
+#                           segmentation and synapse prediction classifiers.
 #
+# MICRONS_NP_CLASSIFIER_PATH - the path to your Neuroproof classifier
+#
+# MICRONS_SEGMENTATION_DIR - the global segmentation HDF5 file output by
+#                             the pipeline gets stored in this directory
+#
+# MICRONS_SYNAPSE_FILE - contains the detected pre- and post-synaptic
+#                        pairs along with the coordinates of the synapses.
+#
+# MICRONS_SEGMENTATION_STATISTICS_FILE - the path to the .csv file
+#                        containing block statistics comparing the segmentation
+#                        to ground-truth. A .pdf is also generated that displays
+#                        the results visually.
+#
+# MICRONS_SYNAPSE_STATISTICS_FILE - the path to the .json file that compares the
+#                        ground-truth synapse data to the detected.
+#
+
+#--------------------------------------------------
+#
+# Intermediate files are stored by default in /tmp/examples/pipeline,
+# but you can define MICRONS_DIR to put them elsewhere
+#
+#--------------------------------------------------
+
 if [ -z "$MICRONS_DIR" ]; then
-    MICRONS_DIR=/tmp/examples/nptrain
+    MICRONS_DIR=/tmp/examples/pipeline
 fi
 mkdir -p $MICRONS_DIR
 
 #---------------------------------------------------
 #
-# Where is Butterfly?
+# Where is Butterfly? You can use a local Butterfly by
+# redefining BUTTERFLY_API_URL
 #
 #---------------------------------------------------
 if [ -z "$BUTTERFLY_API_URL" ]; then
@@ -52,8 +65,8 @@ if [ -z "$MICRONS_DONT_START_IPC" ]; then
                        2>> $MICRONS_DIR/ipc-broker.err.log &
     MICRONS_IPC_BROKER_PID="$!"
     microns-ipc-worker \
-	>> $MICRONS_DIR/ipc-worker.log \
-	2>> $MICRONS_DIR/ipc-worker.err.log &
+        >> $MICRONS_DIR/ipc-worker.log \
+        2>> $MICRONS_DIR/ipc-worker.err.log &
     MICRONS_IPC_WORKER_PID="$!"
 fi
 
@@ -77,24 +90,11 @@ MICRONS_WIDTH=$((1496-$MICRONS_X_PAD-$MICRONS_X_PAD))
 MICRONS_HEIGHT=$((1496-$MICRONS_Y_PAD-$MICRONS_Y_PAD))
 MICRONS_DEPTH=$((97-$MICRONS_Z_PAD-$MICRONS_Z_PAD))
 
-#--------------------------------------------------
-#
-# These are the class names that the classifier produces.
-# You can always tell the classifier to save only some of them.
-#
-# The script creates a .json dictionary mapping
-# each class name to itself
-#
-#-------------------------------------------------
-
-python -c 'import cPickle;import json; print json.dumps(dict([(_,_) for _ in cPickle.load(open("'$MICRONS_CLASSIFIER_PATH'")).get_class_names()]))' > $MICRONS_DIR/MICRONS_CLASS_NAMES
-MICRONS_CLASS_NAMES=`cat $MICRONS_DIR/MICRONS_CLASS_NAMES`
-
 #-------------------------------------------------
 #
 # Luigi needs the following resources to run this
 #
-# cpu_count=4 (four CPUs to run neuroproof_graph_learn)
+# cpu_count=2 (two CPUs to run Neuroproof)
 # gpu_count=1 (one GPU to run the ClassifyTask)
 # memory=??? (enough memory to run the task. Memory is measured in bytes.)
 #
@@ -106,7 +106,7 @@ cat <<EOF > "$LUIGI_CONFIG_PATH"
 [core]
 no_configure_logging=True
 [resources]
-cpu_count = 4
+cpu_count = 2
 gpu_count = 1
 memory=30000000000
 EOF
@@ -118,8 +118,8 @@ EOF
 
 if [ -z "$MICRONS_DONT_RUN_LUIGID" ]; then
     luigid --logdir=$MICRONS_DIR \
-	   >> $MICRONS_DIR/luigid.log \
-	   2>> $MICRONS_DIR/luigid.err &
+           >> $MICRONS_DIR/luigid.log \
+           2>> $MICRONS_DIR/luigid.err &
     MICRONS_LUIGID_PID="$!"
 fi
 
@@ -132,9 +132,10 @@ set -x
 
 luigi --module ariadne_microns_pipeline.pipelines \
       ariadne_microns_pipeline.PipelineTask \
-      --experiment=ECS_train_images \
+      --experiment=ECS_iarpa_201610_gt_4x6x6 \
       --sample=neocortex \
       --dataset=sem \
+      --synapse-channel=synapses \
       --url=$BUTTERFLY_API_URL \
       --pixel-classifier-path=$MICRONS_CLASSIFIER_PATH \
       --neuroproof-classifier-path=$MICRONS_NP_CLASSIFIER_PATH \
@@ -142,8 +143,11 @@ luigi --module ariadne_microns_pipeline.pipelines \
       --temp-dirs='["'$MICRONS_DIR'"]' \
       --block-width=$MICRONS_WIDTH \
       --block-height=$MICRONS_HEIGHT \
-      --block-depth=$MICRONS_DEPTH \
-      --wants-neuroproof-learn
+      --wants-transmitter-receptor-synapse-maps \
+      --statistics-csv-path=$MICRONS_SEGMENTATION_STATISTICS_FILE \
+      --synapse-statistics-path=$MICRONS_SYNAPSE_STATISTICS_FILE \
+      --stitched-segmentation-location=$MICRONS_SEGMENTATION_DIR \
+      --synapse-connection-location=$MICRONS_SYNAPSE_FILE
 set +x
 #---------------------------------------------------
 #

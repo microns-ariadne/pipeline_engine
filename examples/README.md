@@ -56,3 +56,29 @@ The pipeline has quite a number of tuning parameters and these are set to
 their defaults. You might want to use this example as a jumping-off point
 for your own training script instead of assuming that it will give you a
 good classifier.
+
+## pipeline.sh
+
+This example runs a voxel classifier and a Neuroproof classifier on the
+ECS_test_images dataset using the pipeline. The data for the pipeline comes
+from the canonical ECS test dataset, *ECS_iarpa_201610_gt_4x6x6*.
+
+The pipeline classifier should be packaged with *pickle-a-classifier* or
+similar. The script expects to find a class named "membrane" which contains
+the membrane probabilities and classes named "transmitter" and "receptor" that
+are the pre-synaptic and post-synaptic probability maps. It also expects to
+have a neuroproof classifier trained on the membrane probabilities.
+
+The script takes the following parameters as environment variables:
+
+* *MICRONS_CLASSIFIER_PATH*: this is the path to your .pkl file
+* *MICRONS_NP_CLASSIFIER_PATH*: this is the path to your Neuroproof classifier
+* *MICRONS_SEGMENTATION_DIR*: this is the directory that will hold the global
+segmentation file.
+* *MICRONS_SYNAPSE_FILE*: this file contains the detected pre- and post-synaptic
+pairs along with the coordinates of the synapses.
+* *MICRONS_SEGMENTATION_STATISTICS_FILE*: this is the path to the .csv file
+containing block statistics comparing the segmentation to ground-truth. A .pdf
+is also generated that displays the results visually.
+* *MICRONS_SYNAPSE_STATISTICS_FILE*: this is the path to the .json file
+that compares the ground-truth synapse data to the detected.
