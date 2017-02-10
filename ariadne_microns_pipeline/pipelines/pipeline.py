@@ -165,7 +165,7 @@ class PipelineTaskMixin:
         default=2048)
     block_depth = luigi.IntParameter(
         description="Number of planes in a processing block",
-        default=2048)
+        default=50)
     np_x_pad = luigi.IntParameter(
         description="The size of the border region for the Neuroproof merge "
         "of blocks to the left and right. The value is the amount of padding"
