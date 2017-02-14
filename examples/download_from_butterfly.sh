@@ -17,7 +17,7 @@
 # The URL for the butterfly server's API
 #
 if [ -z "$BUTTERFLY_API_URL" ]; then
-   BUTTERFLY_API_URL=http://butterfly.rc.fas.harvard.edu:2001/api
+   BUTTERFLY_API_URL=https://butterfly.rc.fas.harvard.edu/api
 fi
 #
 # The coordinates to fetch
