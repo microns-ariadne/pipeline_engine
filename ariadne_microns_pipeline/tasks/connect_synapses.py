@@ -263,13 +263,28 @@ class ConnectSynapsesRunMixin:
                 neuron_1[flippers], neuron_2[flippers] = \
                     neuron_2[flippers], neuron_1[flippers]
             #
+            # Recompute the centroids of the synapses based on where they
+            # intersect the edge of neuron_1. This is closer to what people
+            # do when they annotate synapses.
+            #
+            edge_z, edge_y, edge_x = np.where(
+                (synapse != 0) & 
+                (grey_dilation(neuron, size=3) != grey_erosion(neuron, size=3)))
+            areas = np.bincount(synapse[edge_z, edge_y, edge_x])
+            xs, ys, zs = [np.bincount(synapse[edge_z, edge_y, edge_x], _)
+                          for _ in edge_x, edge_y, edge_z]
+            xc = xs[synapses] / areas[synapses]
+            yc = ys[synapses] / areas[synapses]
+            zc = zs[synapses] / areas[synapses]
+            #
+            #
             # Record the synapse coords. "synapse_centers" goes from 1 to
             # N so that is why we subtract 1 below.
             #
             synapse_center_dict = dict(
-                x=synapse_centers[2, synapses-1].tolist(),
-                y=synapse_centers[1, synapses-1].tolist(),
-                z=synapse_centers[0, synapses-1].tolist())
+                x=xc.tolist(),
+                y=yc.tolist(),
+                z=zc.tolist())
         else:
             neuron_1 = neuron_2 = synapses = np.zeros(0, int)
             score_1, score_2 = np.zeros(0)
