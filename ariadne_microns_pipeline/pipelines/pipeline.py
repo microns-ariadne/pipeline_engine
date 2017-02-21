@@ -2020,6 +2020,10 @@ class PipelineTaskMixin:
             for key in self.datasets:
                 self.datasets[key] = \
                     [(dict(k), v) for k, v in self.datasets[key].items()]
+            self.datasets["experiment"] = self.experiment
+            self.datasets["sample"] = self.sample
+            self.datasets["dataset"] = self.dataset
+            self.datasets["channel"] = self.channel
             json.dump(self.datasets, open(self.index_file_location, "w"))
 
 class PipelineTask(PipelineTaskMixin, PipelineRunReportMixin, luigi.Task):
