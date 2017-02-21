@@ -57,9 +57,13 @@ class Volume(object):
                y >= self.y and y < self.y1 and\
                z >= self.z and z < self.z1
     
-    def __repr__(self):
+    def __str__(self):
         return "Volume: x=%d:%d, y=%d:%d, z=%d:%d" % (
             self.x, self.x1, self.y, self.y1, self.z, self.z1)
+    
+    def __repr__(self):
+        return "Volume(x=%d, y=%d, z=%d, width=%d, height=%d, depth=%d)" % \
+               (self.x, self.y, self.z, self.width, self.height, self.depth)
     
     def __eq__(self, other):
         if isinstance(other, Volume):
@@ -102,9 +106,13 @@ class DatasetLocation(object):
         self.dataset_name = dataset_name
         self.pattern = pattern
     
-    def __repr__(self):
+    def __str__(self):
         return "DatasetLocation: [%s].%s (%s)" % (
             ",".join(self.roots), self.dataset_name, self.pattern)
+    
+    def __repr__(self):
+        return "DatasetLocation(roots=['%s'], dataset_name='%s', pattern='%s'"%\
+               ("'".join(self.roots), self.dataset_name, self.pattern)
     
     def to_dictionary(self):
         return dict(roots=self.roots,
