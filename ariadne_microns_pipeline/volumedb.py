@@ -43,8 +43,9 @@ class VolumeObj(Base):
     z1 = Column(sqlalchemy.Integer,
                 doc="The limit of the volume in the z direction")
     __table_args__ = (
-        sqlalchemy.Index("x0", "y0", "z0", "x1", "y1", "z1",
-              unique=True),
+        sqlalchemy.Index("volume_unique",
+                         "x0", "y0", "z0", "x1", "y1", "z1",
+                         unique=True),
         )
 
 class TaskObj(Base):
@@ -161,30 +162,6 @@ class DatasetSubvolumeObj(Base):
     volume = relationship(VolumeObj,
                           primaryjoin=volume_id==VolumeObj.volume_id)
 
-class SubvolumeVolumeLinkObj(Base):
-    '''find all the subvolumes needed to construct a given volume
-    
-    These links let a dependent task collect its subvolumes
-    '''
-    __tablename__ = "subvolume_volume_links"
-    subvolume_volume_link_id = Column(sqlalchemy.Integer, 
-                                        primary_key=True)
-    subvolume_id = Column(
-        sqlalchemy.Integer,
-        ForeignKey(DatasetSubvolumeObj.subvolume_id),
-        doc="A link to a dataset subvolume")
-    volume_id=Column("volume_id", sqlalchemy.Integer,
-                     ForeignKey(VolumeObj.volume_id),
-                     doc="A link to the volume being fetched")
-    __table_args__ = (
-            UniqueConstraint("subvolume_id", "volume_id"),
-        )
-    subvolume = relationship(
-        DatasetSubvolumeObj,
-        primaryjoin=subvolume_id == DatasetSubvolumeObj.subvolume_id)
-    volume = relationship(
-        VolumeObj, primaryjoin=volume_id == VolumeObj.volume_id)
-
  
 class SubvolumeLocationObj(Base):
     '''the location on disk of a subvolume'''
@@ -207,18 +184,82 @@ class SubvolumeLocationObj(Base):
         DatasetSubvolumeObj,
         primaryjoin=subvolume_id==DatasetSubvolumeObj.subvolume_id)
 
+class LoadingPlanObj(Base):
+    '''A plan for loading a dataset over a volume
+    
+    '''
+    
+    __tablename__ = "loading_plans"
+    
+    loading_plan_id = Column(sqlalchemy.Integer, primary_key=True)
+    task_id = Column(sqlalchemy.Integer, ForeignKey(TaskObj.task_id),
+                     doc="The task ID of the requesting task")
+    dataset_type_id = Column(sqlalchemy.Integer, 
+                             ForeignKey(DatasetTypeObj.dataset_type_id),
+                             doc="The dataset type link to dataset_name")
+    volume_id = Column(sqlalchemy.Integer,
+                       ForeignKey(VolumeObj.volume_id),
+                       doc="The volume being requested")
+    src_task_id = Column(sqlalchemy.Integer,
+                         ForeignKey(TaskObj.task_id),
+                         nullable=True,
+                         doc="The source task for the dataset, if any")
+    dataset_type = relation(
+        DatasetTypeObj,
+        primaryjoin=dataset_type_id == DatasetTypeObj.dataset_type_id)
+    volume = relation(
+        VolumeObj,
+        primaryjoin=volume_id == VolumeObj.volume_id)
+    task = relation(
+        TaskObj, primaryjoin=task_id == TaskObj.task_id)
+    src_task = relation(
+        TaskObj, primaryjoin=src_task_id == TaskObj.task_id)
+    
+class SubvolumeLinkObj(Base):
+    '''find all the subvolumes needed by a LoadingPlan
+    
+    These links let a dependent task collect its subvolumes
+    '''
+    __tablename__ = "subvolume_volume_links"
+    subvolume_volume_link_id = Column(sqlalchemy.Integer, 
+                                        primary_key=True)
+    subvolume_id = Column(
+        sqlalchemy.Integer,
+        ForeignKey(DatasetSubvolumeObj.subvolume_id),
+        doc="A link to a dataset subvolume")
+    loading_plan_id=Column("loading_plan_id", sqlalchemy.Integer,
+                           ForeignKey(LoadingPlanObj.loading_plan_id),
+                     doc="A link to the loading plan for loading the volume")
+    __table_args__ = (
+            UniqueConstraint(subvolume_id, loading_plan_id),
+        )
+    subvolume = relationship(
+        DatasetSubvolumeObj,
+        primaryjoin=subvolume_id == DatasetSubvolumeObj.subvolume_id)
+    loading_plan = relationship(
+        LoadingPlanObj, 
+        primaryjoin=loading_plan_id == LoadingPlanObj.loading_plan_id)
+
+LoadingPlanObj.subvolume_links = relationship(
+    SubvolumeLinkObj, 
+    primaryjoin=LoadingPlanObj.loading_plan_id == 
+    SubvolumeLinkObj.loading_plan_id)
+
 class DatasetDependentObj(Base):
     '''tasks that are dependent on a dataset'''
 
     __tablename__ = "dataset_dependents"
     
     dataset_dependent_id = Column(sqlalchemy.Integer, primary_key=True)
-    task_id = Column(sqlalchemy.Integer, ForeignKey(TaskObj.task_id))
+    load_plan_id = Column(sqlalchemy.Integer, 
+                          ForeignKey(LoadingPlanObj.loading_plan_id))
     dataset_id = Column(sqlalchemy.Integer, ForeignKey(DatasetObj.dataset_id))
     volume_id = Column(sqlalchemy.Integer, ForeignKey(VolumeObj.volume_id))
     __table_args__ = (UniqueConstraint("task_id", "dataset_id"),
         )
-    task = relationship(TaskObj, primaryjoin=task_id == TaskObj.task_id)
+    load_plan = relationship(
+        LoadPlanObj, 
+        primaryjoin=load_plan_id == LoadPlanObj.load_plan_id)
     dataset = relationship(DatasetObj,
                            primaryjoin=dataset_id == DatasetObj.dataset_id)
     volume = relationship(VolumeObj,
@@ -366,9 +407,8 @@ class VolumeDB(object):
         y1 = y0 + volume.height
         z0 = volume.z
         z1 = z0 + volume.depth
-        volume_objs = self.session.execute(
-            self.session.query(VolumeObj).filter_by(
-                x0=x0, x1=x1, y0=y0, y1=y1, z0=z0, z1=z1)).fetchall()
+        volume_objs = self.session.query(VolumeObj).filter_by(
+                x0=x0, x1=x1, y0=y0, y1=y1, z0=z0, z1=z1).all()
         if len(volume_objs) > 0:
             return volume_objs[0]
         volume_obj = VolumeObj(x0=x0, x1=x1, y0=y0, y1=y1, z0=z0, z1=z1)
@@ -377,7 +417,7 @@ class VolumeDB(object):
             self.session.commit()
         return volume_obj
             
-    def register_dataset(self, task, volume, dataset_name):
+    def register_dataset(self, task, dataset_name, volume):
         '''Register that a task will produce a dataset over a volume
         
         :param task: a Luigi task
@@ -412,33 +452,46 @@ class VolumeDB(object):
         y1 = y0 + volume.height
         z0 = volume.z
         z1 = z0 + volume.depth
+        #
+        # ">" operator not supported in sqlalchemy yet.
+        #
+        # VolumeObj.x1.op(">", is_comparison=True)(x0) evaluates to
+        # volume.x1 > x0
+        #
         dataset_objs = self.session.query(DatasetObj).filter(
-            DatasetObj.volume.any(
-                VolumeObj.x1 > x0 and
-                VolumeObj.y1 > y0 and
-                VolumeObj.z1 > z0 and
-                VolumeObj.x0 < x1 and
-                VolumeObj.y0 < y1 and
-                VolumeObj.z0 < z1))
-        return dataset_objs
+            sqlalchemy.and_(
+                DatasetObj.dataset_type_id == DatasetTypeObj.dataset_type_id,
+                DatasetTypeObj.name == dataset_name,
+                DatasetObj.volume_id == VolumeObj.volume_id,
+                VolumeObj.x1.op(">", is_comparison=True)(x0),
+                VolumeObj.y1.op(">", is_comparison=True)(y0),
+                VolumeObj.z1.op(">", is_comparison=True)(z0),
+                VolumeObj.x0.op("<", is_comparison=True)(x1),
+                VolumeObj.y0.op("<", is_comparison=True)(y1),
+                VolumeObj.z0.op("<", is_comparison=True)(z1)))
+        return dataset_objs.all()
     
-    def register_dataset_dependent(self, task, dataset_name, volume):
+    def register_dataset_dependent(self, task, dataset_name, volume, 
+                                   src_task = None):
         '''Register all dependencies of a task
         
         :param task: a task that has a dataset as a requirement
         :param dataset_name: the name of the dataset, e.g. "image"
         :param volume: the required volume from the dataset
+        :param src_task: the task that's the source of the dataset. By default,
+        any task will do, but if specified, make sure to choose only that one
+        for the case where there are overlapping datasets.
         '''
         task_obj = self.get_or_create_task(task)
         volume_obj = self.get_or_create_volume_obj(volume)
-        ddos = []
-        for dataset_obj in self.find_datasets_by_type_and_volume(
-            dataset_name, volume):
-            ddo = DatasetDependentObj(task=task,
-                                      dataset=dataset_obj,
-                                      volume=volume_obj)
-            ddos.append(ddo)
-        self.session.add_all(ddos)
+        dataset_type_obj = self.get_dataset_type(dataset_name)
+        loading_plan = LoadingPlanObj(
+            task = task_obj,
+            volume = volume_obj,
+            dataset_type = dataset_type_obj)
+        if src_task is not None:
+            src_task_obj = self.get_or_create_task(src_task)
+            loading_plan.src_task = src_task_obj
         self.session.commit()
     
     def compute_subvolumes(self):
@@ -450,6 +503,23 @@ class VolumeDB(object):
         requires 0:10, 0:10, 5:10, we shard the volume into two pieces:
         0:10, 0:10, 0:5 and 0:10, 0:10, 5:10.
         '''
+        for loading_plan in self.session.query(LoadingPlanObj):
+            volume = Volume(loading_plan.volume.x0,
+                            loading_plan.volume.y0,
+                            loading_plan.volume.z0,
+                            loading_plan.volume.x1 - loading_plan.volume.x0,
+                            loading_plan.volume.y1 - loading_plan.volume.y0,
+                            loading_plan.volume.z1 - loading_plan.volume.z0)
+            for dataset_obj in self.find_datasets_by_type_and_volume(
+                dataset_name, volume):
+                if loading_plan.src_task is not None and \
+                   loading_plan.src_task.task_id != dataset_obj.task.task_id:
+                    continue
+                ddo = DatasetDependentObj(task=task_obj,
+                                          dataset=dataset_obj,
+                                          volume_id=loading_plan.volume_id)
+                self.session.add(ddo)
+
         for dataset_obj in self.session.query(DatasetObj):
             assert isinstance(dataset_obj, DatasetObj)
             x0 = dataset_obj.volume.x0
@@ -509,28 +579,30 @@ class VolumeDB(object):
                             key = (x0b, x1b, y0b, y1b, z0b, z1b)
                             if x0a >= x0b and x1a <= x1b and \
                                y0a >= y0b and y1a <= y1b and \
-                               z0a >= z0b and z1a <= z1b and \
-                               key not in volumes:
-                                link = SubvolumeVolumeLinkObj(
+                               z0a >= z0b and z1a <= z1b:
+                                if key not in volumes:
+                                    link = SubvolumeVolumeLinkObj(
+                                        subvolume=subvolume,
+                                        volume=ddo.volume)
+                                    self.session.add(link)
+                                    volumes.add(key)
+                                self.session.add(SubvolumeDependentObj(
                                     subvolume=subvolume,
-                                    volume=ddo.volume)
-                                self.session.add(link)
-                                volumes.add(key)
-                            self.session.add(SubvolumeDependentObj(
-                                subvolume=subvolume,
-                                task=ddo.task))
+                                    task=ddo.task))
         #
         # Assign locations
         #
         for subvolume in self.session.query(DatasetSubvolumeObj):
             persistence = subvolume.dataset.dataset_type.persistence
+            dataset_name = subvolume.dataset.dataset_type.name
             if persistence == Persistence.Permanent:
                 root = self.target_dir
             else:
                 root = self.temp_dir
+            leaf_dir = "-".join((dataset_name, str(subvolume.subvolume_id)))
             location = os.path.join(
                 root, str(subvolume.volume.x0), str(subvolume.volume.y0),
-                str(subvolume.volume.z0))
+                str(subvolume.volume.z0), leaf_dir)
             self.session.add(SubvolumeLocationObj(
                 subvolume=subvolume,
                 location=location,
@@ -544,40 +616,96 @@ class VolumeDB(object):
         :returns: a sequence of the Luigi task IDs of the tasks that
         must be complete before this task can run
         '''
-        return self.session.query(TaskObj.luigi_id).filter(
-            sqlalchemy.sql.exists(
-                TaskObj.task_id == DatasetObj.task_id and
-                DatasetObj.dataset_id == DatasetDependentObj.dataset_id and
-                DatasetDependentObj.task.luigi_id == task.task_id))
+        task2 = sqlalchemy.alias(TaskObj)
+        stmt = self.session.query(TaskObj.luigi_id).filter(
+            sqlalchemy.and_(
+            TaskObj.task_id == DatasetObj.task_id,
+            DatasetObj.dataset_id == DatasetDependentObj.dataset_id,
+            DatasetDependentObj.task_id == task2.c.task_id,
+            task2.c.luigi_id == task.task_id))
+        return [_[0] for _ in stmt.all()]
     
-    def get_subvolume_locations(self, task, dataset_name):
+    def get_subvolume_locations(self, task, dataset_name, source_task_id=None):
         '''Get the locations and volumes of datasets needed by a task
         
         This might be called to assemble the volume targets for
         
         :param task: the task requesting its dependent
         :param dataset_name: the dataset type name of the dataset to fetch
+        :param source_task_id: only get datasets produced by this source task.
+                            Default is to get data from wherever.
         :returns: a list of two-tuples - location and volume of the
         subvolumes needed by the task.
         '''
         result = []
+        #
+        # This tests if there is a DatasetDependentObj with the task ID
+        # whose subvolume has the dataset_name and if there is a
+        # subvolume volume link object that matches the subvolume's volume
+        #
+        clauses = [
+            #
+            # Find a task that matches the dependent's task
+            #
+            TaskObj.luigi_id == task.task_id,
+            #
+            # Find the dataset dependent record
+            #
+            DatasetDependentObj.task_id == TaskObj.task_id,
+            #
+            # Find the subvolume
+            #
+            DatasetDependentObj.dataset_id == DatasetSubvolumeObj.dataset_id,
+            #
+            # Find the link to the dataset dependent's volume
+            #
+            DatasetSubvolumeObj.subvolume_id ==  
+            SubvolumeVolumeLinkObj.subvolume_id,
+            SubvolumeVolumeLinkObj.volume_id ==  DatasetDependentObj.volume_id,
+            #
+            # Find the parent dataset
+            #
+            DatasetSubvolumeObj.dataset_id == DatasetObj.dataset_id,
+            #
+            # See if the dataset's data type matches dataset_name
+            #
+            DatasetObj.dataset_type_id == DatasetTypeObj.dataset_type_id,
+            DatasetTypeObj.name == dataset_name
+            ]
+        if source_task is not None:
+            #
+            # Create an aliased task object and link it to the dataset and
+            # restrict it to have the source task's task_id
+            #
+            source_task_alias = sqlalchemy.alias(TaskObj)
+            clauses.append(DatasetObj.task_id == source_task_alias.task_id)
+            clauses.append(source_task_alias.luigi_id == source_task_id)
+        exists_stmt = sqlalchemy.sql.select([sqlalchemy.text("'x'")]).where(
+            sqlalchemy.and_(clauses))
         for location, volume in self.session.query(
-            SubvolumeLocationObj.location,
-            SubvolumeLocationObj.subvolume.volume).filter(
-                sqlalchemy.sql.exists(
-                    TaskObj.luigi_id == task.task_id and
-                    DatasetDependentObj.task_id == TaskObj.task_id and
-                    DatasetDependentObj.dataset_id == 
-                    SubvolumeLocationObj.subvolume.dataset_id and
-                    SubvolumeLocationObj.subvolume.dataset_type.dataset_name ==
-                    dataset_name)):
-            result.append((location, Volume(x=volume.x0,
-                                            y=volume.y0,
-                                            z=volume.z0,
-                                            width=volume.x1-volume.x0,
-                                            height=volume.y1-volume.y0,
-                                            depth=volume.z1-volume.z0)))
+            SubvolumeLocationObj, VolumeObj).filter(
+                sqlalchemy.and_(
+                    SubvolumeLocationObj.subvolume_id == 
+                    DatasetSubvolumeObj.subvolume_id,
+                    DatasetSubvolumeObj.volume_id == VolumeObj.volume_id,
+                    SubvolumeVolumeLinkObj.subvolume_id == DatasetSubvolumeObj.subvolume_id,
+                    sqlalchemy.exists(exists_stmt))):
+            result.append((location.location, 
+                           Volume(x=volume.x0,
+                                  y=volume.y0,
+                                  z=volume.z0,
+                                  width=volume.x1-volume.x0,
+                                  height=volume.y1-volume.y0,
+                                  depth=volume.z1-volume.z0),
+                           location.subvolume_id))
         return result
     
+    def get_src_subvolume_locations(self, task, dataset_name):
+        '''Get the subvolume locations for a task that produces a subvolume
         
+        :param task: the task that produced a subvolume
+        :param dataset_name: the dataset produced
+        :returns: a list of locations, volumes and subvolume IDs
+        '''
+    
 all = [VolumeDB, Persistence]
