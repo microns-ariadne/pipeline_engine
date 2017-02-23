@@ -5,8 +5,12 @@
 import collections
 import enum
 import luigi
+import numpy as np
 import os
+import rh_logger
 import sqlalchemy
+import tifffile
+import time
 from sqlalchemy import Column,ForeignKeyConstraint, UniqueConstraint, ForeignKey
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship, sessionmaker
@@ -97,6 +101,9 @@ class DatasetTypeObj(Base):
         sqlalchemy.Enum(Persistence),
         doc="Whether or not to keep a dataset of this type after dependent "
         "tasks have completed")
+    datatype = Column(
+        sqlalchemy.Text,
+        doc="A Numpy datatype, e.g. \"uint8\"")
     doc = Column(sqlalchemy.Text,
                  doc="A description of the data type, e.g. "
                  "\"The neuroproofed segmentation\".",
@@ -105,11 +112,29 @@ class DatasetTypeObj(Base):
             UniqueConstraint("name"),
         )
 
+class DatasetIDObj(Base):
+    '''A table that only contains dataset_ids for the datasets table
+    
+    There's a chicken and egg problem - you can't make a task without its
+    parameters, especially critically defining ones like which dataset it
+    produces. Thus the workflow is:
+    
+    * Get a dataset_id
+    * Create your task
+    * Create a dataset with that ID
+    '''
+    __tablename__ = "dataset_ids"
+    dataset_id = Column(sqlalchemy.Integer, primary_key=True)
+    
 class DatasetObj(Base):
     '''A dataset is the voxel data taken on a given channel'''
     
     __tablename__ = "datasets"
-    dataset_id = Column(sqlalchemy.Integer, primary_key=True)
+    dummy_id = Column(sqlalchemy.Integer, primary_key=True)
+    dataset_id = Column(sqlalchemy.Integer, 
+                        ForeignKey(DatasetIDObj.dataset_id),
+                        unique=True,
+                        index=True)
     dataset_type_id = Column(
         sqlalchemy.Integer,
         ForeignKey(DatasetTypeObj.dataset_type_id),
@@ -184,6 +209,16 @@ class SubvolumeLocationObj(Base):
         DatasetSubvolumeObj,
         primaryjoin=subvolume_id==DatasetSubvolumeObj.subvolume_id)
 
+class LoadingPlanIDObj(Base):
+    '''A table holding just loading_plan_id numbers
+    
+    You can't create a task with input volumes w/o having a loading plan ID
+    and you can't create a LoadingPlanObj without a task, so get the ID
+    first.
+    '''
+    __tablename__ = "loading_plan_ids"
+    loading_plan_id = Column(sqlalchemy.Integer, primary_key=True)
+
 class LoadingPlanObj(Base):
     '''A plan for loading a dataset over a volume
     
@@ -191,7 +226,11 @@ class LoadingPlanObj(Base):
     
     __tablename__ = "loading_plans"
     
-    loading_plan_id = Column(sqlalchemy.Integer, primary_key=True)
+    dummy_id = Column(sqlalchemy.Integer, primary_key=True)
+    loading_plan_id = Column(sqlalchemy.Integer, 
+                             ForeignKey(LoadingPlanIDObj.loading_plan_id),
+                             unique=True,
+                             index=True)
     task_id = Column(sqlalchemy.Integer, ForeignKey(TaskObj.task_id),
                      doc="The task ID of the requesting task")
     dataset_type_id = Column(sqlalchemy.Integer, 
@@ -204,15 +243,15 @@ class LoadingPlanObj(Base):
                          ForeignKey(TaskObj.task_id),
                          nullable=True,
                          doc="The source task for the dataset, if any")
-    dataset_type = relation(
+    dataset_type = relationship(
         DatasetTypeObj,
         primaryjoin=dataset_type_id == DatasetTypeObj.dataset_type_id)
-    volume = relation(
+    volume = relationship(
         VolumeObj,
         primaryjoin=volume_id == VolumeObj.volume_id)
-    task = relation(
+    task = relationship(
         TaskObj, primaryjoin=task_id == TaskObj.task_id)
-    src_task = relation(
+    src_task = relationship(
         TaskObj, primaryjoin=src_task_id == TaskObj.task_id)
     
 class SubvolumeLinkObj(Base):
@@ -246,24 +285,21 @@ LoadingPlanObj.subvolume_links = relationship(
     SubvolumeLinkObj.loading_plan_id)
 
 class DatasetDependentObj(Base):
-    '''tasks that are dependent on a dataset'''
+    '''Loading plans that are dependent on a dataset'''
 
     __tablename__ = "dataset_dependents"
     
     dataset_dependent_id = Column(sqlalchemy.Integer, primary_key=True)
-    load_plan_id = Column(sqlalchemy.Integer, 
+    loading_plan_id = Column(sqlalchemy.Integer, 
                           ForeignKey(LoadingPlanObj.loading_plan_id))
     dataset_id = Column(sqlalchemy.Integer, ForeignKey(DatasetObj.dataset_id))
-    volume_id = Column(sqlalchemy.Integer, ForeignKey(VolumeObj.volume_id))
-    __table_args__ = (UniqueConstraint("task_id", "dataset_id"),
+    __table_args__ = (UniqueConstraint(loading_plan_id, dataset_id),
         )
-    load_plan = relationship(
-        LoadPlanObj, 
-        primaryjoin=load_plan_id == LoadPlanObj.load_plan_id)
+    loading_plan = relationship(
+        LoadingPlanObj, 
+        primaryjoin=loading_plan_id == LoadingPlanObj.loading_plan_id)
     dataset = relationship(DatasetObj,
                            primaryjoin=dataset_id == DatasetObj.dataset_id)
-    volume = relationship(VolumeObj,
-                          primaryjoin=volume_id == VolumeObj.volume_id)
 
 DatasetObj.dependents = relationship(
     DatasetDependentObj,
@@ -338,6 +374,17 @@ class VolumeDB(object):
             Base.metadata.drop_all(self.engine)
             Base.metadata.create_all(self.engine)
 
+    def __enter__(self):
+        return self
+    
+    def __exit__(self, err_type, value, traceback):
+        if value is not None:
+            self.session.rollback()
+        else:
+            self.session.commit()
+        self.session.close()
+        return value is None
+    
     ######################################################
     #
     # Workflow items - the build process
@@ -352,10 +399,21 @@ class VolumeDB(object):
         '''Root directory for persistent items'''
         self.target_dir = target_dir
     
-    def register_dataset_type(self, dataset_name, persistence, doc=None):
-        '''Register a data type in the database'''
+    def register_dataset_type(self, dataset_name, persistence, datatype,
+                              doc=None):
+        '''Register a data type in the database
+        
+        :param dataset_name: the name of the data type, e.g. "image"
+        :param persistence: one of the Persistence enums indicating whether
+        the data should be ephemeral (possibly deleted after last use) or
+        persistent
+        :param datatype: the Numpy datatype, suitable for 
+        getattr(numpy, datatype) to retrieve the dataset's datatype
+        :param doc: documentation describing the "meaning" of the data type
+        '''
         dataset_type = DatasetTypeObj(name=dataset_name,
-                                      persistence=persistence)
+                                      persistence=persistence,
+                                      datatype=datatype)
         if doc is not None:
             dataset_type.doc=doc
         self.session.add(dataset_type)
@@ -375,11 +433,10 @@ class VolumeDB(object):
         :returns: a TaskObj representation of the task
         '''
         assert isinstance(task, luigi.Task)
-        task_objs = self.session.execute(
-            self.session.query(TaskObj).filter_by(luigi_id=task.task_id))\
-            .fetchall()
-        if len(task_objs) > 0:
-            return task_objs[0]
+        task_obj = self.session.query(TaskObj).filter_by(luigi_id=task.task_id)\
+            .first()
+        if task_obj is not None:
+            return task_obj
         task_obj = TaskObj(luigi_id=task.task_id,
                            task_class=task.task_family)
         self.session.add(task_obj)
@@ -416,10 +473,19 @@ class VolumeDB(object):
         if commit:
             self.session.commit()
         return volume_obj
+    
+    def get_dataset_id(self):
+        '''Get a dataset ID in preparation for registering a dataset'''
+        dataset_id_obj = DatasetIDObj()
+        self.session.add(dataset_id_obj)
+        self.session.commit()
+        return dataset_id_obj.dataset_id
             
-    def register_dataset(self, task, dataset_name, volume):
+    def register_dataset(self, dataset_id, task, dataset_name, volume):
         '''Register that a task will produce a dataset over a volume
         
+        :param dataset_id: the dataset ID for the dataset as fetched by
+        get_dataset_id()
         :param task: a Luigi task
         :param volume: a ariadne_microns_pipeline.parameters.Volume describing
                        the volume of the dataset
@@ -431,12 +497,14 @@ class VolumeDB(object):
         task_obj = self.get_or_create_task(task)
         volume_obj = self.get_or_create_volume_obj(volume)
         dataset_type_obj = self.get_dataset_type(dataset_name)
-        dataset_obj = DatasetObj(task=task_obj,
-                                 volume=volume_obj,
-                                 dataset_type=dataset_type_obj)
+        dataset_obj = DatasetObj(
+            dataset_id=dataset_id,
+            task=task_obj,
+            volume=volume_obj,
+            dataset_type=dataset_type_obj)
         self.session.add(dataset_obj)
         self.session.commit()
-        return dataset_obj
+        return dataset_obj.dataset_id
     
     def find_datasets_by_type_and_volume(self, dataset_name, volume):
         '''Find all datasets with a given type that intersect a given volume
@@ -471,28 +539,42 @@ class VolumeDB(object):
                 VolumeObj.z0.op("<", is_comparison=True)(z1)))
         return dataset_objs.all()
     
-    def register_dataset_dependent(self, task, dataset_name, volume, 
-                                   src_task = None):
+    def get_loading_plan_id(self):
+        '''Get a loading_plan_id in preparation for requesting a dataset
+        '''
+        loading_plan_id_obj = LoadingPlanIDObj()
+        self.session.add(loading_plan_id_obj)
+        self.session.commit()
+        return loading_plan_id_obj.loading_plan_id
+    
+    def register_dataset_dependent(
+        self, loading_plan_id, task, dataset_name, volume, src_task = None):
         '''Register all dependencies of a task
         
+        :loading_plan_id: the loading plan ID used to refer to the load plan
+        for retrieving the volume, e.g. as retrieved from get_loading_plan_id()
         :param task: a task that has a dataset as a requirement
         :param dataset_name: the name of the dataset, e.g. "image"
         :param volume: the required volume from the dataset
         :param src_task: the task that's the source of the dataset. By default,
         any task will do, but if specified, make sure to choose only that one
         for the case where there are overlapping datasets.
+        :returns: the loading plan ID which can be used to fetch the subvolumes
         '''
         task_obj = self.get_or_create_task(task)
         volume_obj = self.get_or_create_volume_obj(volume)
         dataset_type_obj = self.get_dataset_type(dataset_name)
         loading_plan = LoadingPlanObj(
+            loading_plan_id = loading_plan_id,
             task = task_obj,
             volume = volume_obj,
             dataset_type = dataset_type_obj)
         if src_task is not None:
             src_task_obj = self.get_or_create_task(src_task)
-            loading_plan.src_task = src_task_obj
+            loading_plan.src_task_id = src_task_obj.task_id
+        self.session.add(loading_plan)
         self.session.commit()
+        return loading_plan.loading_plan_id
     
     def compute_subvolumes(self):
         '''Figure out how to break datasets into subvolumes
@@ -511,13 +593,12 @@ class VolumeDB(object):
                             loading_plan.volume.y1 - loading_plan.volume.y0,
                             loading_plan.volume.z1 - loading_plan.volume.z0)
             for dataset_obj in self.find_datasets_by_type_and_volume(
-                dataset_name, volume):
+                loading_plan.dataset_type.name, volume):
                 if loading_plan.src_task is not None and \
                    loading_plan.src_task.task_id != dataset_obj.task.task_id:
                     continue
-                ddo = DatasetDependentObj(task=task_obj,
-                                          dataset=dataset_obj,
-                                          volume_id=loading_plan.volume_id)
+                ddo = DatasetDependentObj(dataset=dataset_obj,
+                                          loading_plan=loading_plan)
                 self.session.add(ddo)
 
         for dataset_obj in self.session.query(DatasetObj):
@@ -535,12 +616,13 @@ class VolumeDB(object):
             # Find the shard points
             #
             for ddo in dataset_obj.dependents:
-                x0a = ddo.volume.x0
-                x1a = ddo.volume.x1
-                y0a = ddo.volume.y0
-                y1a = ddo.volume.y1
-                z0a = ddo.volume.z0
-                z1a = ddo.volume.z1
+                volume = ddo.loading_plan.volume
+                x0a = volume.x0
+                x1a = volume.x1
+                y0a = volume.y0
+                y1a = volume.y1
+                z0a = volume.z0
+                z1a = volume.z1
                 if x0a > x0:
                     x.add(x0a)
                 if x1a < x1:
@@ -570,25 +652,25 @@ class VolumeDB(object):
                         self.session.add(subvolume)
                         volumes = set()
                         for ddo in dataset_obj.dependents:
-                            x0b = ddo.volume.x0
-                            x1b = ddo.volume.x1
-                            y0b = ddo.volume.y0
-                            y1b = ddo.volume.y1
-                            z0b = ddo.volume.z0
-                            z1b = ddo.volume.z1
+                            x0b = ddo.loading_plan.volume.x0
+                            x1b = ddo.loading_plan.volume.x1
+                            y0b = ddo.loading_plan.volume.y0
+                            y1b = ddo.loading_plan.volume.y1
+                            z0b = ddo.loading_plan.volume.z0
+                            z1b = ddo.loading_plan.volume.z1
                             key = (x0b, x1b, y0b, y1b, z0b, z1b)
                             if x0a >= x0b and x1a <= x1b and \
                                y0a >= y0b and y1a <= y1b and \
                                z0a >= z0b and z1a <= z1b:
                                 if key not in volumes:
-                                    link = SubvolumeVolumeLinkObj(
+                                    link = SubvolumeLinkObj(
                                         subvolume=subvolume,
-                                        volume=ddo.volume)
+                                        loading_plan_id=ddo.loading_plan_id)
                                     self.session.add(link)
                                     volumes.add(key)
                                 self.session.add(SubvolumeDependentObj(
                                     subvolume=subvolume,
-                                    task=ddo.task))
+                                    task_id=ddo.loading_plan.task_id))
         #
         # Assign locations
         #
@@ -599,7 +681,11 @@ class VolumeDB(object):
                 root = self.target_dir
             else:
                 root = self.temp_dir
-            leaf_dir = "-".join((dataset_name, str(subvolume.subvolume_id)))
+            leaf_dir = "%s_%09d-%09d_%09d-%09d_%09d-%09d_%d.tif" % (
+                dataset_name, subvolume.volume.x0, subvolume.volume.x1,
+                subvolume.volume.y0, subvolume.volume.y1,
+                subvolume.volume.z0, subvolume.volume.z1,
+                subvolume.subvolume_id)
             location = os.path.join(
                 root, str(subvolume.volume.x0), str(subvolume.volume.y0),
                 str(subvolume.volume.z0), leaf_dir)
@@ -621,91 +707,347 @@ class VolumeDB(object):
             sqlalchemy.and_(
             TaskObj.task_id == DatasetObj.task_id,
             DatasetObj.dataset_id == DatasetDependentObj.dataset_id,
-            DatasetDependentObj.task_id == task2.c.task_id,
+            DatasetDependentObj.loading_plan_id == 
+            LoadingPlanObj.loading_plan_id,
+            LoadingPlanObj.task_id == task2.c.task_id,
             task2.c.luigi_id == task.task_id))
         return [_[0] for _ in stmt.all()]
     
-    def get_subvolume_locations(self, task, dataset_name, source_task_id=None):
+    def get_subvolume_locations(self, task, dataset_name, src_task_id=None):
         '''Get the locations and volumes of datasets needed by a task
-        
-        This might be called to assemble the volume targets for
         
         :param task: the task requesting its dependent
         :param dataset_name: the dataset type name of the dataset to fetch
-        :param source_task_id: only get datasets produced by this source task.
+        :param src_task_id: only get datasets produced by this source task.
                             Default is to get data from wherever.
         :returns: a list of two-tuples - location and volume of the
         subvolumes needed by the task.
         '''
-        result = []
         #
-        # This tests if there is a DatasetDependentObj with the task ID
-        # whose subvolume has the dataset_name and if there is a
-        # subvolume volume link object that matches the subvolume's volume
-        #
+        # From subvolume location to subvolume to subvolume link to
+        # loading plan
+        # From subvolume to volume
+        # From loading plan to task, dataset type and source task
         clauses = [
-            #
-            # Find a task that matches the dependent's task
-            #
+            VolumeObj.volume_id == DatasetSubvolumeObj.volume_id,
+            
+            DatasetSubvolumeObj.subvolume_id == 
+            SubvolumeLinkObj.subvolume_id,
+            
+            SubvolumeLocationObj.subvolume_id == 
+            SubvolumeLinkObj.subvolume_id,
+            
+            SubvolumeLinkObj.loading_plan_id == LoadingPlanObj.loading_plan_id,
+            
+            LoadingPlanObj.task_id == TaskObj.task_id,
+            
             TaskObj.luigi_id == task.task_id,
-            #
-            # Find the dataset dependent record
-            #
-            DatasetDependentObj.task_id == TaskObj.task_id,
-            #
-            # Find the subvolume
-            #
-            DatasetDependentObj.dataset_id == DatasetSubvolumeObj.dataset_id,
-            #
-            # Find the link to the dataset dependent's volume
-            #
-            DatasetSubvolumeObj.subvolume_id ==  
-            SubvolumeVolumeLinkObj.subvolume_id,
-            SubvolumeVolumeLinkObj.volume_id ==  DatasetDependentObj.volume_id,
-            #
-            # Find the parent dataset
-            #
-            DatasetSubvolumeObj.dataset_id == DatasetObj.dataset_id,
-            #
-            # See if the dataset's data type matches dataset_name
-            #
-            DatasetObj.dataset_type_id == DatasetTypeObj.dataset_type_id,
+            
+            LoadingPlanObj.dataset_type_id == DatasetTypeObj.dataset_type_id, 
+            
             DatasetTypeObj.name == dataset_name
-            ]
-        if source_task is not None:
-            #
-            # Create an aliased task object and link it to the dataset and
-            # restrict it to have the source task's task_id
-            #
-            source_task_alias = sqlalchemy.alias(TaskObj)
-            clauses.append(DatasetObj.task_id == source_task_alias.task_id)
-            clauses.append(source_task_alias.luigi_id == source_task_id)
-        exists_stmt = sqlalchemy.sql.select([sqlalchemy.text("'x'")]).where(
-            sqlalchemy.and_(clauses))
-        for location, volume in self.session.query(
-            SubvolumeLocationObj, VolumeObj).filter(
-                sqlalchemy.and_(
-                    SubvolumeLocationObj.subvolume_id == 
-                    DatasetSubvolumeObj.subvolume_id,
-                    DatasetSubvolumeObj.volume_id == VolumeObj.volume_id,
-                    SubvolumeVolumeLinkObj.subvolume_id == DatasetSubvolumeObj.subvolume_id,
-                    sqlalchemy.exists(exists_stmt))):
-            result.append((location.location, 
-                           Volume(x=volume.x0,
-                                  y=volume.y0,
-                                  z=volume.z0,
-                                  width=volume.x1-volume.x0,
-                                  height=volume.y1-volume.y0,
-                                  depth=volume.z1-volume.z0),
-                           location.subvolume_id))
+        ]
+        if src_task_id is not None:
+            src_task_alias = sqlalchemy.alias(TaskObj)
+            clauses.append(
+                src_task_alias.c.task_id == LoadingPlanObj.src_task_id)
+            clauses.append(src_task_alias.c.luigi_id == src_task_id)
+        return self._make_location_volume_result(clauses)
+    
+    def get_subvolume_locations_by_loading_plan_id(self, loading_plan_id):
+        '''Fetch locations for loading via the loading plan
+        
+        :param loading_plan_id: the loading_plan_id, e.g. as returned by
+        register_dataset_dependent
+        '''
+        clauses = [
+            VolumeObj.volume_id == DatasetSubvolumeObj.volume_id,
+            
+            DatasetSubvolumeObj.subvolume_id == 
+            SubvolumeLinkObj.subvolume_id,
+            
+            SubvolumeLocationObj.subvolume_id == 
+            SubvolumeLinkObj.subvolume_id,
+            
+            SubvolumeLinkObj.loading_plan_id == loading_plan_id]
+        result = self._make_location_volume_result(clauses)
+        return result
+
+    def _make_location_volume_result(self, clauses):
+        '''Issue a query over subvolume_locations and volume
+        
+        Given clauses to a "where" clause, extract joined rows from the
+        subvolume_locations and volumes tables and package them into
+        two-tuples of locations and volumes
+        
+        :param clauses: a list of boolean clauses that make up the join
+        selecting the rows
+        
+        '''
+        result = []
+        for subvolume_location, volume in \
+            self.session.query(SubvolumeLocationObj, VolumeObj).filter(
+                sqlalchemy.and_(*clauses)):
+            result.append((subvolume_location.location,
+                           Volume(volume.x0, volume.y0, volume.z0,
+                                  volume.x1-volume.x0,
+                                  volume.y1-volume.y0,
+                                  volume.z1-volume.z0)))
         return result
     
-    def get_src_subvolume_locations(self, task, dataset_name):
-        '''Get the subvolume locations for a task that produces a subvolume
+    def get_subvolume_locations_by_dataset_id(self, dataset_id):
+        '''Fetch locations for writing via the dataset
         
-        :param task: the task that produced a subvolume
-        :param dataset_name: the dataset produced
-        :returns: a list of locations, volumes and subvolume IDs
+        :param dataset_id: the dataset ID of the volume to be written, e.g.
+        from the call to register_dataset()
+        :returns: a list of locations and volumes
         '''
+        #
+        # Go from dataset_id to subvolume to subvolume location
+        #
+        clauses = [
+            DatasetSubvolumeObj.dataset_id == dataset_id,
+            
+            DatasetSubvolumeObj.volume_id == VolumeObj.volume_id,
+           
+            SubvolumeLocationObj.subvolume_id == 
+            DatasetSubvolumeObj.subvolume_id
+        ]
+        return self._make_location_volume_result(clauses)
     
+    def imread(self, loading_plan_id):
+        '''Read a volume, using a loading plan
+        
+        :param loading_plan_id: the ID of a loading plan, e.g. from
+        register_dataset_dependent
+        '''
+        t0 = time.time()
+        loading_plan = self.session.query(LoadingPlanObj).filter(
+            LoadingPlanObj.loading_plan_id == loading_plan_id).first()
+        assert isinstance(loading_plan, LoadingPlanObj)
+        x0 = loading_plan.volume.x0
+        x1 = loading_plan.volume.x1
+        y0 = loading_plan.volume.y0
+        y1 = loading_plan.volume.y1
+        z0 = loading_plan.volume.z0
+        z1 = loading_plan.volume.z1
+        rh_logger.logger.report_event(
+            "Loading %s: %d:%d, %d:%d, %d:%d" % (
+                loading_plan.dataset_type.name,
+                x0, x1, y0, y1, z0, z1))
+
+        result = None
+        datatype = getattr(np, loading_plan.dataset_type.datatype)
+        
+        clauses = [
+            VolumeObj.volume_id == DatasetSubvolumeObj.volume_id,
+            
+            DatasetSubvolumeObj.subvolume_id == 
+            SubvolumeLinkObj.subvolume_id,
+            
+            SubvolumeLocationObj.subvolume_id == 
+            SubvolumeLinkObj.subvolume_id,
+            
+            SubvolumeLinkObj.loading_plan_id == loading_plan_id]
+        
+        for subvolume_location, svolume in self.session.query(
+            SubvolumeLocationObj, VolumeObj).filter(
+                sqlalchemy.and_(*clauses)):
+            tif_path = subvolume_location.location
+            if svolume.x0 >= x1 or\
+               svolume.y0 >= y1 or\
+               svolume.z0 >= z1 or \
+               svolume.x1 <= x0 or \
+               svolume.y1 <= y0 or \
+               svolume.z1 <= z0:
+                rh_logger.logger.report_event(
+                    "Ignoring block %d:%d, %d:%d, %d:%d from load plan" %
+                (svolume.x0, svolume.x1, svolume.y0, svolume.y1,
+                 svolume.z0, svolume.z1))
+                continue
+                
+            with tifffile.TiffFile(tif_path) as fd:
+                block = fd.asarray()
+                if svolume.x0 == x0 and \
+                   svolume.x1 == x1 and \
+                   svolume.y0 == y0 and \
+                   svolume.y1 == y1 and \
+                   svolume.z0 == z0 and \
+                   svolume.z1 == z1:
+                    # Cheap win, return the block
+                    rh_logger.logger.report_metric("Dataset load time (sec)",
+                                                       time.time() - t0)
+                    return block.astype(datatype)
+                if result is None:
+                    result = np.zeros((z1-z0, y1-y0, x1-x0), datatype)
+                #
+                # Defensively trim the block to within x0:x1, y0:y1, z0:z1
+                #
+                if svolume.z0 < z0:
+                    block = block[z0-svolume.z0:]
+                    sz0 = z0
+                else:
+                    sz0 = svolume.z0
+                if svolume.z1 > z1:
+                    block = block[:z1 - sz0]
+                    sz1 = z1
+                else:
+                    sz1 = svolume.z1
+                if svolume.y0 < y0:
+                    block = block[:, y0-svolume.y0:]
+                    sy0 = y0
+                else:
+                    sy0 = svolume.y0
+                if svolume.y1 > y1:
+                    block = block[:, :y1 - sy0]
+                    sy1 = y1
+                else:
+                    sy1 = svolume.y1
+                if svolume.x0 < x0:
+                    block = block[:, :, x0-svolume.x0:]
+                    sx0 = x0
+                else:
+                    sx0 = svolume.x0
+                if svolume.x1 > x1:
+                    block = block[:, :, :x1 - sx0]
+                    sx1 = x1
+                else:
+                    sx1 = svolume.x1
+                result[sz0 - z0:sz1 - z0,
+                       sy0 - y0:sy1 - y0,
+                       sx0 - x0:sx1 - x0] = block
+        rh_logger.logger.report_metric("Dataset load time (sec)",
+                                       time.time() - t0)
+        return result
+    
+    def imwrite(self, dataset_id, data, compression=0):
+        '''Write the block of data to the dataset
+        
+        :param dataset_id: The ID of the dataset to be written
+        :param data: a 3d Numpy array to be written
+        '''
+        t0 = time.time()
+        dataset = self.session.query(DatasetObj).filter(
+            DatasetObj.dataset_id == dataset_id).first()
+        assert isinstance(dataset, DatasetObj)
+        x0 = dataset.volume.x0
+        x1 = dataset.volume.x1
+        y0 = dataset.volume.y0
+        y1 = dataset.volume.y1
+        z0 = dataset.volume.z0
+        z1 = dataset.volume.z1
+        datatype = getattr(np, dataset.dataset_type.datatype)
+        
+        rh_logger.logger.report_event(
+            "Writing %s: %d:%d, %d:%d, %d:%d" %
+            (dataset.dataset_type.name, x0, x1, y0, y1, z0, z1))
+        
+        clauses = [
+            DatasetSubvolumeObj.dataset_id == dataset_id,
+            
+            DatasetSubvolumeObj.volume_id == VolumeObj.volume_id,
+           
+            SubvolumeLocationObj.subvolume_id == 
+            DatasetSubvolumeObj.subvolume_id
+        ]
+        for subvolume_location, svolume in self.session.query(
+            SubvolumeLocationObj, VolumeObj).filter(
+                sqlalchemy.and_(*clauses)):
+            tif_path = subvolume_location.location
+            sx0 = svolume.x0
+            sx1 = svolume.x1
+            sy0 = svolume.y0
+            sy1 = svolume.y1
+            sz0 = svolume.z0
+            sz1 = svolume.z1
+            tif_dir = os.path.dirname(tif_path)
+            if not os.path.isdir(tif_dir):
+                os.makedirs(tif_dir)
+            with tifffile.TiffWriter(tif_path, bigtiff=True) as fd:
+                metadata = dict(x0=sx0, x1=sx1, y0=sy0, y1=sy1, z0=sz0, z1=sz1,
+                                dataset_name = dataset.dataset_type.name,
+                                dataset_id = dataset_id)
+                block = data[sz0 - z0: sz1 - z0,
+                             sy0 - y0: sy1 - y0,
+                             sx0 - x0: sx1 - x0].astype(datatype)
+                fd.save(block, 
+                        photometric='minisblack',
+                        compress=compression,
+                        description=dataset.dataset_type.name,
+                        metadata=metadata)
+        rh_logger.logger.report_metric("Dataset store time (sec)",
+                                       time.time() - t0)
+    
+    def get_dataset_path(self, dataset_id):
+        '''Get the canonical path to the dataset's "done" file'''
+        dataset = self.session.query(DatasetObj).filter(
+            DatasetObj.dataset_id == dataset_id).first()
+        return _get_dataset_path_by_dataset(self, dataset)
+    
+    def _get_dataset_path_by_dataset(self, dataset):
+        persistence = dataset.dataset_type.persistence
+        dataset_name = dataset.dataset_type.name
+        if persistence == Persistence.Permanent:
+            root = self.target_dir
+        else:
+            root = self.temp_dir
+        leaf_dir = "%s_%09d-%09d_%09d-%09d_%09d-%09d_%d.done" % (
+            dataset_name, dataset.volume.x0, dataset.volume.x1,
+            dataset.volume.y0, dataset.volume.y1,
+            dataset.volume.z0, dataset.volume.z1,
+            dataset.dataset_id)
+        location = os.path.join(
+            root, str(dataset.volume.x0), str(dataset.volume.y0),
+            str(dataset.volume.z0), leaf_dir)
+        return location
+    
+    def get_dataset_volume(self, dataset_id):
+        '''Get the volume encompassed by this dataset
+        
+        :param dataset_id: the ID of the dataset to be retrieved
+        :returns: a ariadne_microns_pipeline.parameters.volume
+        '''
+        volume = self.session.query(VolumeObj).filter(
+            DatasetObj.dataset_id == dataset_id and 
+            VolumeObj.volume_id = DatasetObj.volume_id)
+        return Volume(volume.x0, volume.y0, volume.z0,
+                      volume.x1 - volume.x0,
+                      volume.y1 - volume.y0,
+                      volume.z1 - volume.z0)
+    
+    def get_dataset_paths_by_loading_plan_id(self, loading_plan_id):
+        '''Get the .done file locations for a loading plan's datasets
+        
+        :param loading_plan_id: the loading plan for the dataset
+        :returns: a list of .done file locations
+        '''
+        datasets = self.session.query(DatasetObj).filter(
+            sqlalchemy.exists(
+                DatasetObj.dataset_id == DatasetDependentObj.dataset_id and
+                DatasetDependentObj.loading_plan_id == loading_plan_id)).all()
+        return map(self.__get_dataset_path_by_dataset, datasets)
+    
+    def get_loading_plan_volume(self, loading_plan_id):
+        '''Get the volume for a loading plan
+        
+        :param loading_plan_id: the loading plan for loading a dataset
+        :returns: a ariadne_microns_pipeline.parameters.Volume describing
+        the dataset's extent
+        '''
+        volume = self.session.query(VolumeObj).filter(
+            VolumeObj.volume_id == LoadingPlanObj.volume_id and
+            LoadingPlanObj.loading_plan_id == loading_plan_id)
+        return Volume(volume.x0, volume.y0, volume.z0,
+                          volume.x1 - volume.x0,
+                          volume.y1 - volume.y0,
+                          volume.z1 - volume.z0)
+    
+    def get_loading_plan_dataset_ids(self, loading_plan_id):
+        '''Get the dataset_ids for the datasets referenced by a loading plan
+        
+        :param loading_plan_id: the ID of the loading plan for reading a  volume
+        '''
+        return self.session.query(DatasetDependentObj.dataset_id).filter(
+            DatasetDependentObj.loading_plan_id == loading_plan_id).all()
+
 all = [VolumeDB, Persistence]
