@@ -5,30 +5,25 @@ import luigi
 import numpy as np
 from scipy.sparse import coo_matrix
 
-from ..parameters import DatasetLocationParameter, VolumeParameter
-from ..targets.factory import TargetFactory
-from .utilities import RunMixin, RequiresMixin, SingleThreadedMixin
+from .utilities import RunMixin, RequiresMixin, SingleThreadedMixin, \
+     DatasetMixin
+from ..targets import DestVolumeReader
 
 class MatchNeuronsTaskMixin:
     
-    volume = VolumeParameter(
-        description="The volume being analyzed")
-    gt_location = DatasetLocationParameter(
+    gt_load_plan_path = luigi.Parameter(
         description="The location on disk of the ground-truth segmentation")
-    detected_location = DatasetLocationParameter(
+    detected_load_plan_path = luigi.Parameter(
         description="The location on disk of the result of automatic "
         "segmentation")
     output_location = luigi.Parameter(
-        description="The location of the .json file containing the "
-                    "correspondences between gt and detected neurons")
+        description="The location on disk of the .json file describing "
+        "the correspondence between gt and detected neurons")
     
     def input(self):
-        yield TargetFactory().get_volume_target(
-            volume=self.volume,
-            location=self.gt_location)
-        yield TargetFactory().get_volume_target(
-            volume=self.volume,
-            location=self.detected_location)
+        for load_plan in self.gt_load_plan_path, self.detected_load_plan_path:
+            for tgt in DestVolumeReader(load_plan).get_source_targets():
+                yield tgt
     
     def output(self):
         return luigi.LocalTarget(self.output_location)
@@ -37,17 +32,11 @@ class MatchNeuronsRunMixin:
     
     def ariadne_run(self):
         '''Record the gt neuron with the maximal overlap to detected'''
-        inputs = self.input()
-        gt_tgt = inputs.next()
-        d_tgt = inputs.next()
+        gt_tgt = DestVolumeReader(self.gt_load_plan_path)
+        d_tgt = DestVolumeReader(self.detected_load_plan_path)
 
         result = {}
-        result["volume"] = dict(x=self.volume.x,
-                                y=self.volume.y,
-                                z=self.volume.z,
-                                width=self.volume.width,
-                                height=self.volume.height,
-                                depth=self.volume.depth)
+        result["volume"] = gt_tgt.volume.to_dictionary()
         #
         # Get flattened versions of the ground-truth and detected space.
         # The pixel-pixel correlations are still maintained and we don't

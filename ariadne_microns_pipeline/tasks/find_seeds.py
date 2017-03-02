@@ -6,9 +6,9 @@ from scipy.ndimage import gaussian_filter, label, distance_transform_edt
 from scipy.ndimage import grey_dilation, grey_erosion
 
 from ..algorithms.morphology import parallel_distance_transform
-from ..parameters import VolumeParameter, DatasetLocationParameter
-from ..targets.factory import TargetFactory
-from .utilities import RequiresMixin, RunMixin, SingleThreadedMixin
+from ..targets import DestVolumeReader
+from .utilities import RequiresMixin, RunMixin, SingleThreadedMixin, \
+     DatasetMixin
 
 
 class SeedsMethodEnum(enum.Enum):
@@ -59,21 +59,14 @@ class Shape(enum.Enum):
     
 class FindSeedsTaskMixin:
     
-    volume = VolumeParameter(
-        description="The volume being segmented")
-    prob_location = DatasetLocationParameter(
+    prob_loading_plan_path = luigi.Parameter(
         description="The location of the membrane probabilities")
-    seeds_location = DatasetLocationParameter(
-        description="The location of the volume with seed labels")
     
     def input(self):
-        yield TargetFactory().get_volume_target(
-            location=self.prob_location, volume=self.volume)
+        for tgt in DestVolumeReader(self.prob_loading_plan_path) \
+            .get_source_targets():
+            yield tgt
     
-    def output(self):
-        return TargetFactory().get_volume_target(
-            location=self.seeds_location, volume=self.volume)
-
     def estimate_memory_usage(self):
         '''Return an estimate of bytes of memory required by this task'''
         v1 = np.prod([1416, 1888, 70])
@@ -89,7 +82,7 @@ class FindSeedsTaskMixin:
         return int(A * v + B)
 
 
-class FindSeedsRunMixin:
+class FindSeedsRunMixin(DatasetMixin):
     
     dimensionality=luigi.EnumParameter(
         enum=Dimensionality,
@@ -233,7 +226,7 @@ class FindSeedsRunMixin:
         return labels
         
     def ariadne_run(self):
-        prob_target = self.input().next()
+        prob_target = DestVolumeReader(self.prob_loading_plan_path)
         probs = prob_target.imread()
         if self.method == SeedsMethodEnum.Smoothing:
             if self.dimensionality == Dimensionality.D2:

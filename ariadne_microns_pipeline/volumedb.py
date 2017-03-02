@@ -20,6 +20,11 @@ Base = declarative_base()
 
 PATTERN="{x:09d}_{y:09d}_{z:09d}_{dataset_name:s}"
 
+UINT8 = "uint8"
+UINT16 = "uint16"
+UINT32 = "uint32"
+UINT64 = "uint64"
+
 class Persistence(enum.Enum):
     '''Whether a data item should persist if no longer needed
     
@@ -423,6 +428,28 @@ class VolumeDB(object):
         '''Get a dataset type from the database'''
         return self.session.query(DatasetTypeObj).filter(
             DatasetTypeObj.name==dataset_name).first()
+    
+    def get_dataset_name_by_dataset_id(self, dataset_id):
+        '''Get the the dataset's type name from the dataset
+        
+        :param dataset_id: the dataset_id of the dataset to fetch
+        :returns: the name for the dataset's dataset_type
+        '''
+        return self.session.query(DatasetTypeObj.name).filter(
+            DatasetTypeObj.dataset_type_id == DatasetObj.dataset_type_id and
+            DatasetObj.dataset_id == dataset_id).first()[0]
+    
+    def get_dataset_dtype_by_dataset_id(self, dataset_id):
+        '''Get the Numpy dtype of a dataset via the dataset_id of the record
+        
+        :param dataset_id: the dataset_id of the dataset being written
+        :returns: the name of the Numpy dtype, suitable for getattr(np, dtype)
+        to fetch it, e.g. "uint8"
+        '''
+        datatype = self.session.query(DatasetTypeObj.datatype).filter(
+            DatasetTypeObj.dataset_type_id == DatasetObj.dataset_type_id and
+            DatasetObj.dataset_id == dataset_id).first()[0]
+        return datatype
     
     def get_or_create_task(self, task, commit=True):
         '''Register a task with the database
@@ -1009,7 +1036,7 @@ class VolumeDB(object):
         '''
         volume = self.session.query(VolumeObj).filter(
             DatasetObj.dataset_id == dataset_id and 
-            VolumeObj.volume_id = DatasetObj.volume_id)
+            VolumeObj.volume_id == DatasetObj.volume_id)
         return Volume(volume.x0, volume.y0, volume.z0,
                       volume.x1 - volume.x0,
                       volume.y1 - volume.y0,
@@ -1041,6 +1068,26 @@ class VolumeDB(object):
                           volume.x1 - volume.x0,
                           volume.y1 - volume.y0,
                           volume.z1 - volume.z0)
+    
+    def get_loading_plan_dataset_name(self, loading_plan_id):
+        '''Get the loading plan's dataset name, e.g. "image"
+        
+        :param loading_plan_id: the ID of the loading plan record
+        '''
+        return self.session.query(DatasetTypeObj.name).filter(
+            DatasetTypeObj.dataset_type_id == LoadingPlanObj.dataset_type_id and
+            LoadingPlanObj.loading_plan_id == loading_plan_id
+            ).first()[0]
+    
+    def get_loading_plan_dataset_type(self, loading_plan_id):
+        '''Get the loading plan's Numpy dtype, e.g. "uint8"
+        
+        :param loading_plan_id: the ID of the loading plan record
+        '''
+        return self.session.query(DatasetTypeObj.datatype).filter(
+            DatasetTypeObj.dataset_type_id == LoadingPlanObj.dataset_type_id and
+            LoadingPlanObj.loading_plan_id == loading_plan_id
+            ).first()[0]
     
     def get_loading_plan_dataset_ids(self, loading_plan_id):
         '''Get the dataset_ids for the datasets referenced by a loading plan

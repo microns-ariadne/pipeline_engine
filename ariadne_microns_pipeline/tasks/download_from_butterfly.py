@@ -2,7 +2,7 @@
 
 import luigi
 import numpy as np
-from .utilities import RunMixin
+from .utilities import RunMixin, DatasetMixin
 from ..targets.butterfly_target \
      import ButterflyChannelTarget, get_butterfly_plane_from_channel
 from ..targets.factory import TargetFactory
@@ -19,10 +19,6 @@ class DownloadFromButterflyTaskMixin:
         description="The name of the volume that was imaged")
     channel = luigi.Parameter(
         description="The name of the channel from which we take data")
-    volume=VolumeParameter(
-        description="The volume to download")
-    destination=DatasetLocationParameter(
-        description="The destination for the dataset.")
     url = luigi.Parameter(
         default="http://localhost:2001/api",
         description="URL of the REST endpoint of the Butterfly server")
@@ -30,10 +26,6 @@ class DownloadFromButterflyTaskMixin:
         default=0,
         description="The MIPMAP resolution of the image to be retrieved.")
     
-    def output(self):
-        return TargetFactory().get_volume_target(
-            self.destination, self.volume)
-
     def estimate_memory_usage(self):
         '''Return an estimate of bytes of memory required by this task'''
         v1 = np.prod([1928, 1928, 102]) / 2**(self.resolution*2)
@@ -53,11 +45,11 @@ class DownloadFromButterflyTaskMixin:
             v = v * 4
         return int(A * v + B)
 
-class DownloadFromButterflyRunMixin:
+class DownloadFromButterflyRunMixin(DatasetMixin):
     '''Perform the aggregation of butterfly planes into a volume'''
     
     def ariadne_run(self):
-        '''Copy data from the Butterfly planes to the HDF5 target'''
+        '''Copy data from the Butterfly planes to the target'''
         
         haz_volume = False
         inputs = self.input()
@@ -78,7 +70,6 @@ class DownloadFromButterflyRunMixin:
             volume[z - self.volume.z] = img
         
         self.output().imwrite(volume)
-
 
 class DownloadFromButterflyTask(DownloadFromButterflyRunMixin,
                                 DownloadFromButterflyTaskMixin,

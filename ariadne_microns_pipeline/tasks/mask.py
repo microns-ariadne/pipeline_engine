@@ -2,26 +2,18 @@ import luigi
 import numpy as np
 from scipy.ndimage import gaussian_filter
 
-from ..targets.factory import TargetFactory
-from ..parameters import VolumeParameter, DatasetLocationParameter
-from utilities import RequiresMixin, RunMixin
+from .utilities import RequiresMixin, RunMixin, DatasetMixin
+from ..targets import DestVolumeReader
 
 
-class MaskBorderTaskMixin:
-    volume = VolumeParameter(
-        description="The volume to mask")
-    prob_location = DatasetLocationParameter(
+class MaskBorderTaskMixin(DatasetMixin):
+    prob_loading_plan_path = luigi.Parameter(
         description="The location of the probability files")
-    mask_location = DatasetLocationParameter(
-        description="The location of the mask files to be output")
     
     def input(self):
-        yield TargetFactory().get_volume_target(
-            self.prob_location, self.volume)
-    
-    def output(self):
-        return TargetFactory().get_volume_target(
-            self.mask_location, self.volume)
+        for tgt in DestVolumeReader(self.prob_loading_plan_path) \
+            .get_source_targets():
+            yield tgt
     
     def estimate_memory_usage(self):
         '''Return an estimate of bytes of memory required by this task'''
@@ -57,7 +49,7 @@ class MaskBorderRunMixin:
         description="Smoothing in the Z direction")
     def ariadne_run(self):
         '''Create the mask of pixels to watershed'''
-        prob = self.input().next().imread()
+        prob = DestVolumeReader(self.prob_loading_plan_path).imread()
         if self.smoothing_xy != 0 or self.smoothing_z != 0:
             prob = gaussian_filter(prob.astype(float32),
                                    sigma=(self.smoothing_z,

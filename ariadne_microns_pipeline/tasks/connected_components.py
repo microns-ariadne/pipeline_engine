@@ -14,11 +14,9 @@ from scipy.sparse import coo_matrix
 from scipy.sparse.csgraph import connected_components
 
 from .utilities import RequiresMixin, RunMixin, SingleThreadedMixin
-from ..parameters import DatasetLocation, Volume
-from ..parameters import VolumeParameter, DatasetLocationParameter
-from ..parameters import MultiVolumeParameter
-from ..targets.factory import TargetFactory
-from ..targets.volume_target import VolumeTarget
+from ..targets import DestVolumeReader
+from ..parameters import Volume
+from ..parameters import VolumeParameter
 from .utilities import to_hashable
 
 class LogicalOperation(enum.Enum):
@@ -38,26 +36,20 @@ class JoiningMethod(enum.Enum):
     PAIRWISE_MULTIMATCH = 2
 
 class ConnectedComponentsTaskMixin:
-    
-    volume1 = VolumeParameter(
-        description="The volume for the first of the two segmentations")
-    location1 = DatasetLocationParameter(
-        description="The location of the first of the two segmentations")
-    volume2 = VolumeParameter(
-        description="The volume for the second of the two segmentations")
-    location2 = DatasetLocationParameter(
-        description="The location of the second of the two segmentations")
-    overlap_volume = VolumeParameter(
-        description="Look at the concordance between segmentations "
-        "in this volume")
+
+    loading_plan1_path = luigi.Parameter(
+        description="The file path to the loading plan for cutout #1")
+    loading_plan2_path = luigi.Parameter(
+        description="The file path to the loading plan for cutout #2")
     output_location = luigi.Parameter(
         description=
         "The location for the JSON file containing the concordances")
 
     def input(self):
-        tf = TargetFactory()
-        yield tf.get_volume_target(self.location1, self.volume1)
-        yield tf.get_volume_target(self.location2, self.volume2)
+        for path in self.loading_plan1_path, self.loading_plan2_path:
+            reader = DestVolumeReader(path)
+            for tgt in reader.get_source_targets():
+                yield(tgt)
     
     def output(self):
         return luigi.LocalTarget(self.output_location)
@@ -119,17 +111,9 @@ class ConnectedComponentsRunMixin:
         that appear together at the same voxel for the voxels in the
         overlap volume.
         '''
-        volume1, volume2 = list(self.input())
-        seg1, seg2 = [_.imread() for _ in  volume1, volume2]
-        cutout1 = seg1[
-            self.overlap_volume.z - volume1.z:self.overlap_volume.z1-volume1.z,
-            self.overlap_volume.y - volume1.y:self.overlap_volume.y1-volume1.y,
-            self.overlap_volume.x - volume1.x:self.overlap_volume.x1-volume1.x]
+        cutout1 = DestVolumeReader(self.loading_plan1_path).imread()
+        cutout2 = DestVolumeReader(self.loading_plan2_path).imread()
         
-        cutout2 = seg2[
-            self.overlap_volume.z - volume2.z:self.overlap_volume.z1-volume2.z,
-            self.overlap_volume.y - volume2.y:self.overlap_volume.y1-volume2.y,
-            self.overlap_volume.x - volume2.x:self.overlap_volume.x1-volume2.x]
         if self.joining_method == JoiningMethod.PAIRWISE_MULTIMATCH:
             connections, counts = self.pairwise_multimatch(cutout1, cutout2)
         else:
@@ -400,7 +384,7 @@ class ConnectedComponentsTask(ConnectedComponentsTaskMixin,
                               luigi.Task):
     '''This task finds the connections between the segmentations of two volumes
     
-    Given segmentation #1 and segmentation #2 and an overlapping volume
+    Given segmentation #1 and segmentation #2 and an overlapping volume,
     look at the labels in segmentation #1 and #2 at each pixel. These are
     the labels that are connected between the volumes. This task finds the
     unique labels between the segmentations and stores them in a JSON file.
@@ -408,6 +392,9 @@ class ConnectedComponentsTask(ConnectedComponentsTaskMixin,
     The connected components of the whole volume can be found by loading
     all of the JSON files and assigning each block's labels to a global
     label that may be shared between segments.
+    
+    To use the ConnectedComponentsTask, create loading plans for an overlapping
+    region in each of the two segmentations.
     '''
     
     task_namespace = 'ariadne_microns_pipeline'
@@ -638,7 +625,6 @@ class VolumeRelabelingRunMixin:
                                   self.output_volume.width),
                                  np.uint32)
         output_volume_target = self.output()
-        assert isinstance(output_volume_target, VolumeTarget)
         x0 = output_volume_target.x
         x1 = x0 + output_volume_target.width
         y0 = output_volume_target.y

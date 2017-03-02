@@ -11,10 +11,12 @@ from ..tasks.nplearn import StrategyEnum
 from ..targets.classifier_target import PixelClassifierTarget
 from ..targets.hdf5_target import HDF5FileTarget
 from ..targets.butterfly_target import ButterflyChannelTarget
-from ..parameters import Volume, VolumeParameter, DatasetLocation
-from ..parameters import EMPTY_DATASET_LOCATION, is_empty_dataset_location
+from ..parameters import Volume, VolumeParameter
+from ..parameters import EMPTY_LOCATION, EMPTY_DATASET_ID, is_empty_dataset_id
+from ..parameters import DEFAULT_LOCATION
 from ..tasks.utilities import to_hashable
 from ..pipelines.synapse_gt_pipeline import SynapseGtTask
+from ..volumedb import VolumeDB, Persistence, UINT8, UINT16, UINT32
 import json
 import numpy as np
 import os
@@ -69,9 +71,6 @@ NP_DATASET = "neuroproof"
 '''The name of the ground-truth dataset for statistics computation'''
 GT_DATASET = "gt"
 
-'''The name of the sub-block ground-truth dataset'''
-GT_BLOCK_DATASET = "gt-block"
-
 '''The name of the synapse gt dataset'''
 SYN_GT_DATASET = "synapse-gt"
 
@@ -80,9 +79,6 @@ GT_MASK_DATASET = "gt-mask"
 
 '''The name of the segmentation of the synapse gt dataset'''
 SYN_SEG_GT_DATASET = "synapse-gt-segmentation"
-
-'''The name of the predicted segmentation for statistics computation'''
-PRED_DATASET = "pred"
 
 '''The name of the skeleton directory'''
 SKEL_DIR_NAME = "skeleton"
@@ -149,11 +145,23 @@ class PipelineTaskMixin:
     z_nm = luigi.FloatParameter(
         default=30.0,
         description="The size of a voxel in the z direction")
+    temp_dir = luigi.Parameter(
+        description="The root directory for ephemeral and intermediate data")
+    root_dir = luigi.Parameter(
+        description="The root directory for data to be saved")
     #########
     #
     # Optional parameters
     #
     #########
+    datatypes_to_keep = luigi.ListParameter(
+        default=[],
+        description="Names of the datasets (e.g. \"neuroproof\") to store "
+        "under the root directory.")
+    volume_db_url = luigi.Parameter(
+        default=DEFAULT_LOCATION,
+        description="The sqlalchemy URL to use to connect to the volume "
+        "database")
     resolution = luigi.IntParameter(
         default=0,
         description="The MIPMAP resolution of the volume to be processed.")
@@ -188,9 +196,6 @@ class PipelineTaskMixin:
     np_cores = luigi.IntParameter(
         description="The number of cores used by a Neuroproof process",
         default=2)
-    temp_dirs = luigi.ListParameter(
-        description="The base location for intermediate files",
-        default=(tempfile.gettempdir(),))
     membrane_class_name = luigi.Parameter(
         description="The name of the pixel classifier's membrane class",
         default="membrane")
@@ -284,9 +289,9 @@ class PipelineTaskMixin:
         description="The minimum distance allowed between seed in the z dir")
     statistics_csv_path = luigi.Parameter(
         description="The path to the CSV statistics output file.",
-        default="/dev/null")
+        default=EMPTY_LOCATION)
     synapse_statistics_path = luigi.Parameter(
-        default="/dev/null",
+        default=EMPTY_LOCATION,
         description=
         "The path to the .json synapse connectivity statistics file")
     wants_skeletonization = luigi.BoolParameter(
@@ -307,15 +312,15 @@ class PipelineTaskMixin:
         default=100,
         description="Break objects with less than this number of area overlap")
     connectivity_graph_location = luigi.Parameter(
-        default="/dev/null",
+        default=EMPTY_LOCATION,
         description="The location of the all-connected-components connectivity"
                     " .json file. Default = do not generate it.")
     
     stitched_segmentation_location = luigi.Parameter(
-        default="/dev/null",
+        default=EMPTY_LOCATION,
         description="The location for the final stitched segmentation")
     index_file_location = luigi.Parameter(
-        default="/dev/null",
+        default=EMPTY_LOCATION,
         description="A JSON file that maps volumes to datasets")
     #
     # NB: minimum synapse area in AC3 was 561, median was ~5000
@@ -372,7 +377,7 @@ class PipelineTaskMixin:
                     "to consider joining neuron to synapse",
         default=25)
     synapse_connection_location = luigi.Parameter(
-        default="/dev/null",
+        default=EMPTY_LOCATION,
         description="The location for the JSON file containing the global "
                     "IDs of the neuron partners for each synapse and the "
                     "coordinates of that synapse.")
@@ -462,19 +467,11 @@ class PipelineTaskMixin:
                              str(y),
                              str(z)) for temp_dir in self.temp_dirs]
     
-    def get_pattern(self, dataset_name):
-        return "{x:09d}_{y:09d}_{z:09d}_"+dataset_name
-    
-    def get_dataset_location(self, volume, dataset_name):
-        return DatasetLocation(self.get_dirs(volume.x, volume.y, volume.z),
-                               dataset_name,
-                               self.get_pattern(dataset_name))
-    
     @property
     def wants_connectivity(self):
         '''True if we are doing a connectivity graph'''
-        return self.connectivity_graph_location != "/dev/null" or \
-            self.stitched_segmentation_location != "/dev/null" or \
+        return self.connectivity_graph_location != EMPTY_LOCATION or \
+            self.stitched_segmentation_location != EMPTY_LOCATION or \
             self.wants_neuron_statistics or \
             self.wants_synapse_statistics or \
             self.wants_neuroproof_learn
@@ -482,18 +479,86 @@ class PipelineTaskMixin:
     @property
     def wants_neuron_statistics(self):
         '''True if we want to calculate neuron segmentation accuracy'''
-        return self.statistics_csv_path != "/dev/null"
+        return self.statistics_csv_path != EMPTY_LOCATION
     
     @property
     def wants_synapse_statistics(self):
         '''True if we are scoring synapses against ground truth'''
-        return self.synapse_statistics_path != "/dev/null"
+        return self.synapse_statistics_path != EMPTY_LOCATION
     
     @property
     def has_annotation_mask(self):
         '''True if there is a mask of the ground-truth annotated volume'''
         return self.gt_mask_channel != NO_CHANNEL
-    
+
+    def register_datatype(self, name, datatype, doc):
+        '''Register a datatype with the VolumeDB
+        
+        :param name: the name of the datatype, e.g. "neuroproof"
+        :param datatype: the Numpy datatype of the dataset, e.g. "uint8"
+        :param doc: a short description of what the datatype is
+        '''
+        if name in self.datatypes_to_keep:
+            persistence = Persistence.Permanent
+        else:
+            persistence = Persistence.Temporary
+        self.volume_db.register_dataset_type(name, persistence, datatype, doc)
+        
+    def init_db(self):
+        '''Initialize the volume DB'''
+        if self.volume_db_url == DEFAULT_LOCATION:
+            self.volume_db_url = "sqlite:///%s/volume.db" % self.root_dir
+        rh_logger.logger.report_event("Creating volume DB at URL %s" %
+                                      self.volume_db_url)
+        self.volume_db = VolumeDB(self.volume_db_url, "w")
+        #
+        # Define the datatypes
+        #
+        rh_logger.logger.report_event("Creating data types in the volume DB")
+        self.register_datatype(SEG_DATASET, UINT32, 
+                               "An oversegmentation, before Neuroproof")
+        self.register_datatype(
+            SYN_SEG_DATASET, UINT16,
+            "A segmentation of a synapse")
+        self.register_datatype(
+            FILTERED_SYN_SEG_DATASET, UINT16,
+            "The segmentation of synapses after running a filtering algorithm "
+            "to remove false positives")
+        self.register_dataset(SEEDS_DATASET, UINT32,
+                              "The seeds for a watershed segmentation")
+        self.register_datatype(MASK_DATASET, UINT8,
+                              "The mask of the extra-cellular space")
+        self.register_datatype(IMG_DATASET, UINT8,
+                              "The initial raw image data")
+        self.register_datatype(MEMBRANE_DATASET, UINT8,
+                              "Membrane probabilities")
+        self.register_datatype(X_AFFINITY_DATASET, UINT8,
+                               "Probabilities of connecting pixels in the "
+                               "X direction")
+        self.register_datatype(Y_AFFINITY_DATASET, UINT8,
+                                   "Probabilities of connecting pixels in the "
+                                   "Y direction")
+        self.register_datatype(Z_AFFINITY_DATASET, UINT8,
+                                   "Probabilities of connecting pixels in the "
+                                   "Z direction")
+        self.register_datatype(SYNAPSE_DATASET, UINT8,
+                               "Probability of a voxel being in a synapse")
+        self.register_datatype(SYNAPSE_TRANSMITTER_DATASET, UINT8,
+                               "Probability of a voxel being in the "
+                               "presynaptic partner of a synapse")
+        self.register_datatype(SYNAPSE_RECEPTOR_DATASET, UINT8,
+                               "Probability of a voxel being in the "
+                               "postsynaptic partner of a synapse")
+        self.register_datatype(NP_DATASET, UINT32,
+                               "The neuroproofed segmentation")
+        self.register_datatype(GT_DATASET, UINT32,
+                               "The ground-truth segmentation")
+        self.register_datatype(SYN_GT_DATASET, UINT8, 
+                               "The markup for synapse ground-truth")
+        self.register_datatype(SYN_SEG_GT_DATASET, UINT32,
+                               "The ground-truth synapse segmentation")
+        
+        
     def compute_extents(self):
         '''Compute various block boundaries and padding
         
@@ -1529,7 +1594,7 @@ class PipelineTaskMixin:
                             task.output().dataset_location
                         sctask.set_requirement(task)
                     self.synapse_connectivity_tasks[zi, yi, xi] = sctask
-        if self.synapse_connection_location != "/dev/null":
+        if self.synapse_connection_location != EMPTY_LOCATION:
             #
             # Generate the task that combines all of the synapse connection
             # files.
@@ -1700,7 +1765,7 @@ class PipelineTaskMixin:
         '''Get the location of the AllConnectedComponentsTask output
         
         '''
-        if self.connectivity_graph_location != "/dev/null":
+        if self.connectivity_graph_location != EMPTY_LOCATION:
             return self.connectivity_graph_location
         elif self.wants_connectivity:
             return os.path.join(self.temp_dirs[0],
@@ -1865,7 +1930,9 @@ class PipelineTaskMixin:
             self.requirements = []
             self.datasets = {}
             try:
-                self.factory = AMTaskFactory()
+                self.init_db()
+                self.factory = AMTaskFactory(self.volume_db_url, 
+                                             self.volume_db)
                 rh_logger.logger.report_event(
                     "Loading pixel classifier")
                 self.pixel_classifier = PixelClassifierTarget(
@@ -1975,7 +2042,7 @@ class PipelineTaskMixin:
                 #
                 # Step 13: write out the stitched segmentation
                 #
-                if self.stitched_segmentation_location != "/dev/null":
+                if self.stitched_segmentation_location != EMPTY_LOCATION:
                     rh_logger.logger.report_event("Stitching segments")
                     self.generate_stitched_segmentation_task()
                     self.requirements.append(self.stitched_segmentation_task)
@@ -2016,7 +2083,7 @@ class PipelineTaskMixin:
         
     def ariadne_run(self):
         '''Write the optional index file'''
-        if self.index_file_location != "/dev/null":
+        if self.index_file_location != EMPTY_LOCATION:
             for key in self.datasets:
                 self.datasets[key] = \
                     [(dict(k), v) for k, v in self.datasets[key].items()]

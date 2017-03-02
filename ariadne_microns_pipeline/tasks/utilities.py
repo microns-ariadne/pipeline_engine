@@ -7,6 +7,10 @@ import rh_logger
 import sys
 import time
 
+from ..parameters import VolumeParameter
+from ..volumedb import VolumeDB
+from ..targets.volume_target import SrcVolumeTarget
+
 
 MEMSTATS_KEYS = ["VmPeak", "VmSwap", "VmHWM"]
 def get_memstats():
@@ -46,6 +50,19 @@ class RequiresMixin:
             return []
         return self.requirements
 
+class DatasetMixin:
+    '''This mixin provides a standardized way to produce a dataset
+    
+    '''
+    storage_plan = luigi.Parameter(
+        description="The plan file for writing the dataset using "
+        "a SrcVolumeTarget")
+    
+    def output(self):
+        '''Return a target for the dataset'''
+        return SrcVolumeTarget(self.storage_plan)
+            
+        
 class RunMixin:
     '''This mixin provides a standardized run() method for a task
     

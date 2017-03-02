@@ -65,7 +65,8 @@ setup(
             "microns-ipc-worker = ariadne_microns_pipeline.ipc.ipcworker:main",
             "microns-ipc-echo = ariadne_microns_pipeline.ipc.ipcecho:main",
             "microns-volume = ariadne_microns_pipeline.scripts.microns_volume:main",
-            "pickle-a-classifier = ariadne_microns_pipeline.scripts.pickle_a_classifier:main"
+            "pickle-a-classifier = ariadne_microns_pipeline.scripts.pickle_a_classifier:main",
+            "create-storage-plan = ariadne_microns_pipeline.scripts.create_storage_plan:main"
             ]},
     zip_safe=False
 )

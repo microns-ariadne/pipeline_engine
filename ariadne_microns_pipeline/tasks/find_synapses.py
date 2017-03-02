@@ -4,57 +4,43 @@ import luigi
 import numpy as np
 import rh_logger
 
-from .utilities import RequiresMixin, RunMixin, SingleThreadedMixin
+from .utilities import RequiresMixin, RunMixin, SingleThreadedMixin, \
+     DatasetMixin
 from ..algorithms.segmentation import segment_vesicle_style
 from ..algorithms.morphology import erode_segmentation
-from ..parameters import VolumeParameter, DatasetLocationParameter
-from ..parameters import EMPTY_DATASET_LOCATION, is_empty_dataset_location
-from ..targets.factory import TargetFactory
+from ..parameters import EMPTY_LOCATION
+from ..targets import DestVolumeReader
 
 class FindSynapsesTaskMixin:
     
-    volume = VolumeParameter(
-        description="The volume to be segmented")
     wants_dual_probability_maps = luigi.BoolParameter(
         description="Set this if both a transmitter and receptor probability "
                     "map are provided. Otherwise a single synapse probability "
                     "map is used.")
-    synapse_map_location = DatasetLocationParameter(
-        default = EMPTY_DATASET_LOCATION,
+    synapse_map_loading_plan_path = luigi.Parameter(
+        default = EMPTY_LOCATION,
         description="The location of the synapse probability map")
-    transmitter_map_location = DatasetLocationParameter(
-        default = EMPTY_DATASET_LOCATION,
+    transmitter_map_loading_plan_path = luigi.Parameter(
+        default = EMPTY_LOCATION,
         description = "The location of the synapse transmitter probability map")
-    receptor_map_location = DatasetLocationParameter(
-        default = EMPTY_DATASET_LOCATION,
+    receptor_map_loading_plan = luigi.Parameter(
+        default = EMPTY_LOCATION,
         description = "The location of the synapse receptor probability map")
-    neuron_segmentation = DatasetLocationParameter(
-        default=EMPTY_DATASET_LOCATION,
+    neuron_segmentation_loading_plan = luigi.Parameter(
+        default=EMPTY_LOCATION,
         description="The location of the segmented neurons.")
-    output_location = DatasetLocationParameter(
-        description="The location for the segmentation")
     
     def input(self):
         if self.wants_dual_probability_maps:
-            yield TargetFactory().get_volume_target(
-                location=self.transmitter_map_location,
-                volume=self.volume)
-            yield TargetFactory().get_volume_target(
-                location=self.receptor_map_location,
-                volume=self.volume)
+            loading_plans = [self.transmitter_map_loading_plan_path,
+                             self.receptor_map_loading_plan]
         else:
-            yield TargetFactory().get_volume_target(
-                location=self.synapse_map_location,
-                volume=self.volume)
-        if not is_empty_dataset_location(self.neuron_segmentation):
-            yield TargetFactory().get_volume_target(
-                location=self.neuron_segmentation,
-                volume = self.volume)
-    
-    def output(self):
-        return TargetFactory().get_volume_target(
-            location = self.output_location,
-            volume = self.volume)
+            loading_plans = [self.synapse_map_loading_plan_path]
+        if not is_empty_dataset_location(self.neuron_segmentation_loading_plan):
+            loading_plans.append(self.neuron_segmentation_loading_plan)
+        for loading_plan in loading_plans:
+            for tgt in DestVolumeReader(loading_plan).get_source_targets():
+                yield tgt
     
     def estimate_memory_usage(self):
         '''Return an estimate of bytes of memory required by this task'''
@@ -111,17 +97,22 @@ class FindSynapsesRunMixin:
         description="Exclude areas within neurons")
     
     def ariadne_run(self):
-        inputs = self.input()
         if self.wants_dual_probability_maps:
             # Take the sum of the transmitter and receptor probabilities
-            volume = inputs.next().imread() + inputs.next().imread()
+            volume = \
+                DestVolumeReader(
+                    self.transmitter_map_loading_plan_path).imread() + \
+                DestVolumeReader(
+                    self.receptor_map_loading_plan_path).imread()
         else:
-            volume = inputs.next().imread()
+            volume = DestVolumeReader(self.synapse_map_loading_plan_path) \
+                .imread()
         if self.erode_with_neurons:
             #
             # Exclude the innards of the neuron from consideration
             #
-            neuron_segmentation = inputs.next().imread()
+            neuron_segmentation = DestVolumeReader(
+                self.neuron_segmentation_loading_plan_path).imread()
             strel = np.ones((self.erosion_z * 2 + 1,
                              self.erosion_xy * 2 + 1,
                              self.erosion_xy * 2 + 1), bool)

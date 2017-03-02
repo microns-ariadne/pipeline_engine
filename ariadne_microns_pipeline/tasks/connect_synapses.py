@@ -7,48 +7,42 @@ import rh_logger
 from scipy.ndimage import grey_dilation, grey_erosion, center_of_mass
 from scipy.sparse import coo_matrix
 
-from ..parameters import VolumeParameter, DatasetLocationParameter, \
-     EMPTY_DATASET_LOCATION, Volume, is_empty_dataset_location
-from ..targets.factory import TargetFactory
+from ..parameters import VolumeParameter, EMPTY_LOCATION
+from ..targets import DestVolumeReader
 from .utilities import RequiresMixin, RunMixin, SingleThreadedMixin
 from .connected_components import ConnectivityGraph
 
 class ConnectSynapsesTaskMixin:
     
-    volume = VolumeParameter(
-        description="The volume to search for connections")
-    neuron_seg_location = DatasetLocationParameter(
-        description="The location of the segmented neuron dataset")
-    synapse_seg_location = DatasetLocationParameter(
-        description="The location of the segmented synapses")
-    transmitter_probability_map_location = DatasetLocationParameter(
-        default=EMPTY_DATASET_LOCATION,
-        description="The location of the voxel probabilities of being "
+    neuron_seg_load_plan_path = luigi.Parameter(
+        description="The load plan for the segmentation of the neuron volume")
+    synapse_seg_load_plan_path = luigi.Parameter(
+        description="The load plan for the synapse segmentation")
+    transmitter_probability_map_load_plan_path = luigi.Parameter(
+        default=EMPTY_LOCATION,
+        description="The load plan for probability of a voxel being "
                     "the transmitter side of a synapse")
-    receptor_probability_map_location = DatasetLocationParameter(
-        default=EMPTY_DATASET_LOCATION,
-        description="The location of the voxel probabilities of being "
-                    "the receptor side of a synapse")
+    receptor_probability_map_load_plan_path = luigi.Parameter(
+        default=EMPTY_LOCATION,
+        description="The load plan for probability of a voxel being "
+            "the receptor side of a synapse")
     output_location = luigi.Parameter(
         description="Where to write the .json file containing the triplets")
     
     def input(self):
-        tf = TargetFactory()
-        yield tf.get_volume_target(
-            location=self.neuron_seg_location,
-            volume = self.volume)
-        yield tf.get_volume_target(
-            location=self.synapse_seg_location,
-            volume = self.volume)
-        if self.transmitter_probability_map_location != EMPTY_DATASET_LOCATION:
-            yield tf.get_volume_target(
-                location=self.transmitter_probability_map_location,
-                volume=self.volume)
-            assert self.receptor_probability_map_location !=\
-                   EMPTY_DATASET_LOCATION
-            yield tf.get_volume_target(
-                location=self.receptor_probability_map_location,
-                volume=self.volume)
+        load_plans = [self.neuron_seg_load_plan_path,
+                      self.synapse_seg_load_plan_path]
+        if self.transmitter_probability_map_load_plan_path != EMPTY_LOCATION:
+            assert self.receptor_probability_map_load_plan_path != \
+                   EMPTY_LOCATION
+            load_plans += [self.transmitter_probability_map_load_plan_path,
+                           self.receptor_probability_map_load_plan_path]
+        else:
+            assert self.receptor_probability_map_load_plan_path == \
+                   EMPTY_LOCATION
+        for load_plan in load_plans:
+            for tgt in DestVolumeReader(load_plan).get_source_targets():
+                yield tgt
     
     def output(self):
         return luigi.LocalTarget(self.output_location)
@@ -115,15 +109,16 @@ class ConnectSynapsesRunMixin:
         # Synapses are sparse - we can perform a naive dilation of them
         # without worrying about running two of them together.
         #
-        inputs = self.input()
-        neuron_target = inputs.next()
-        synapse_target = inputs.next()
-        if self.transmitter_probability_map_location == EMPTY_DATASET_LOCATION:
+        neuron_target = DestVolumeReader(self.neuron_seg_load_plan_path)
+        synapse_target = DestVolumeReader(self.synapse_seg_load_plan_path)
+        if self.transmitter_probability_map_location == EMPTY_LOCATION:
             transmitter_target = None
             receptor_target = None
         else:
-            transmitter_target = inputs.next()
-            receptor_target = inputs.next()
+            transmitter_target = DestVolumeReader(
+                self.transmitter_probability_map_load_plan_path)
+            receptor_target = DestVolumeReader(
+                self.receptor_probability_map_load_plan_path)
         synapse = synapse_target.imread()
         #
         # get the centers of the synapses for reference

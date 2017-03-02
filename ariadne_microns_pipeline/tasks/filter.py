@@ -6,34 +6,25 @@ import luigi
 import numpy as np
 import rh_logger
 
-from .utilities import RequiresMixin, RunMixin, SingleThreadedMixin
-from ..parameters import DatasetLocationParameter, VolumeParameter
-from ..targets.factory import TargetFactory
+from .utilities import RequiresMixin, RunMixin, SingleThreadedMixin, \
+     DatasetMixin
+from ..targets import DestVolumeReader
 
 class FilterSegmentationTaskMixin:
-    volume = VolumeParameter(
-        description = "The volume to be filtered in the global space")
-    input_location = DatasetLocationParameter(
+    input_loading_plan_path = luigi.Parameter(
         description = "The location of the input segmentation")
-    output_location = DatasetLocationParameter(
-        description = "The location for the output segmentation")
     
     def input(self):
-        yield TargetFactory().get_volume_target(
-            location = self.input_location,
-            volume = self.volume)
+        for tgt in DestVolumeReader(self.input_loading_plan_path) \
+            .get_source_targets():
+            yield tgt
     
-    def output(self):
-        return TargetFactory().get_volume_target(
-            location = self.output_location,
-            volume = self.volume)
-
-class FilterSegmentationRunMixin:
+class FilterSegmentationRunMixin(DatasetMixin):
     min_area = luigi.IntParameter(
         description="The minimum area for a segment")
     
     def ariadne_run(self):
-        segmentation = self.input().next().imread()
+        segmentation = DestVolumeReader(self.input_loading_plan_path).imread()
         #
         # Get the # of voxels per segment
         #

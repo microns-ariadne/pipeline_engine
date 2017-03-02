@@ -33,6 +33,7 @@ from .skeletonize import SkeletonizeTask
 from .stitch_segmentation import StitchSegmentationTask, Compression
 from .synapse_statistics import SynapseStatisticsTask
 from .utilities import to_hashable
+from ..volumedb import VolumeDB
 
 class AMTaskFactory(object):
     '''Factory for creating Ariadne/Microns tasks
@@ -44,6 +45,17 @@ class AMTaskFactory(object):
     
     The return value is the task that performs the action
     '''
+    
+    def __init__(self, volume_db_url, volume_db):
+        '''Initialize the task factory
+        
+        :param volume_db_url: location of the volume DB for this pipeline. A
+        URL suitable for a sqlalchemy engine.
+        :param volume_db: the actual volume database, open for writing
+        '''
+        self.volume_db_url = volume_db_url
+        assert isinstance(volume_db, VolumeDB)
+        self.volume_db = volume_db
    
     def gen_get_volume_task(self,
                             experiment,
@@ -52,7 +64,7 @@ class AMTaskFactory(object):
                             channel,
                             url,
                             volume,
-                            location,
+                            dataset_name,
                             resolution=0):
         '''Get a 3d volume
         
@@ -63,21 +75,21 @@ class AMTaskFactory(object):
         :param url: the URL of the butterfly server
         :param volume: the volume to fetch
         :type volume: :py:class:`ariadne_microns_pipeline.parameters.Volume`
-        :param location: the location on disk to write the volume data
-        :type location: 
-            :py:class:`ariadne_microns_pipeline.parameters.DatasetLocation`
+        :param dataset_name: the name of the dataset's type, e.g. "image"
         :param resolution: the MIPMAP resolution of the volume
         :returns: A task that outputs a volume target.
         '''
-        
-        return DownloadFromButterflyTask(experiment=experiment,
+        dataset_id = self.volume_db.get_dataset_id()
+        task = DownloadFromButterflyTask(experiment=experiment,
                                          sample=sample,
                                          dataset=dataset,
                                          channel=channel,
                                          url=url,
                                          volume=volume,
-                                         destination=location,
+                                         db_url=self.volume_db_url,
+                                         dataset_id=dataset_id,
                                          resolution=resolution)
+        task.register_dataset(self.volume_db, dataset_name)
 
     def gen_classify_task(
         self, paths, datasets, pattern, img_volume, img_location,

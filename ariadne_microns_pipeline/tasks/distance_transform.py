@@ -5,9 +5,10 @@ import rh_logger
 
 from ..algorithms.morphology import parallel_distance_transform
 from ..algorithms.morphology import erode_segmentation
-from ..parameters import VolumeParameter, DatasetLocationParameter
-from ..targets.factory import TargetFactory
-from .utilities import RequiresMixin, RunMixin, MultiprocessorMixin
+from ..parameters import VolumeParameter
+from ..targets import DestVolumeReader, SrcVolumeTarget
+from .utilities import RequiresMixin, RunMixin, MultiprocessorMixin, \
+     DatasetMixin
 
 class DistanceTransformInputType(enum.Enum):
     '''The input is a binary mask
@@ -30,17 +31,13 @@ class DistanceTransformInputType(enum.Enum):
     '''
     Segmentation=3
     
-class DistanceTransformTaskMixin:
+class DistanceTransformTaskMixin(DatasetMixin):
     
-    volume = VolumeParameter(
-        description="The volume to be processed")
-    input_location = DatasetLocationParameter(
-        description="The location of the input dataset")
+    input_loading_plan = luigi.Parameter(
+        description="The location of the input dataset's load plan")
     input_type = luigi.EnumParameter(
         enum=DistanceTransformInputType,
         description="The type of data being processed")
-    output_location = DatasetLocationParameter(
-        description="The location for the output dataset")
     #
     # Optional parameters
     #
@@ -81,17 +78,14 @@ class DistanceTransformTaskMixin:
         "uint32")
     
     def input(self):
-        yield TargetFactory().get_volume_target(self.input_location,
-                                                self.volume)
+        for tgt in DestVolumeReader(self.input_loading_plan) \
+            .get_source_targets():
+            yield tgt
     
-    def output(self):
-        return TargetFactory().get_volume_target(self.output_location,
-                                                 self.volume)
-
 class DistanceTransformRunMixin:
     
     def ariadne_run(self):
-        volume = self.input().next().imread()
+        volume = DestVolumeReader(self.input_loading_plan).imread()
         if self.input_type == DistanceTransformInputType.ProbabilityMap:
             volume = volume < self.threshold
         elif self.input_type == DistanceTransformInputType.Segmentation:

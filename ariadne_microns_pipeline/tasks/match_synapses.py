@@ -7,9 +7,8 @@ import numpy as np
 
 from ..algorithms.evaluation import match_synapses_by_distance
 from ..algorithms.evaluation import match_synapses_by_overlap
-from ..parameters import VolumeParameter, DatasetLocationParameter,\
-     EMPTY_DATASET_LOCATION, is_empty_dataset_location
-from ..targets.factory import TargetFactory
+from ..parameters import EMPTY_LOCATION
+from ..targets import DestVolumeReader
 from .utilities import RunMixin, RequiresMixin, SingleThreadedMixin
 
 class MatchMethod(enum.Enum):
@@ -22,33 +21,28 @@ class MatchMethod(enum.Enum):
 
 class MatchSynapsesTaskMixin:
     
-    volume = VolumeParameter(
-        description="Volume containing gt and detected synapses to be matched")
-    gt_location = DatasetLocationParameter(
+    gt_loading_plan_path = luigi.Parameter(
         description="Location of the ground truth on disk")
-    detected_location = DatasetLocationParameter(
+    detected_loading_plan_path = luigi.Parameter(
         description="Location of the synapse detections on disk")
-    mask_location = DatasetLocationParameter(
-        default=EMPTY_DATASET_LOCATION,
+    mask_loading_plan_path = luigi.Parameter(
+        default=EMPTY_LOCATION,
         description="Location of the mask of the annotated volume")
     output_location = luigi.Parameter(
         description=
         "Location for the .json file containing the synapse matches")
     
     def has_mask(self):
-        return not is_empty_dataset_location(self.mask_location)
+        return self.mask_location != EMPTY_LOCATION
     
     def input(self):
-        yield TargetFactory().get_volume_target(
-            location=self.gt_location,
-            volume=self.volume)
-        yield TargetFactory().get_volume_target(
-            location=self.detected_location,
-            volume=self.volume)
-        if self.has_mask():
-            yield TargetFactory().get_volume_target(
-                location = self.mask_location,
-                volume=self.volume)
+        loading_plans = [self.gt_loading_plan_path, 
+                         self.detected_loading_plan_path]
+        if self.has_mask:
+            loading_plans.append(self.mask_loading_plan_path)
+        for loading_plan in loading_plans:
+            for tgt in DestVolumeReader(loading_plan).get_source_targets():
+                yield tgt
     
     def output(self):
         return luigi.LocalTarget(self.output_location)
@@ -76,8 +70,7 @@ class MatchSynapsesRunMixin:
         "to be considered a match.")
     
     def ariadne_run(self):
-        inputs = self.input()
-        gt_tgt = inputs.next()
+        gt_tgt = DestVolumeReader(self.gt_loading_plan_path)
         d_tgt = inputs.next()
         gt = gt_tgt.imread()
         d = d_tgt.imread()

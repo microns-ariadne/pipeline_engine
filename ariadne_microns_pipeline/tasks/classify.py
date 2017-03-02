@@ -1,4 +1,5 @@
 import cPickle
+import json
 import rh_config
 import rh_logger
 import luigi
@@ -6,11 +7,11 @@ import zmq
 
 from ..targets.classifier_target\
      import PixelClassifierTarget
-from ..targets.factory import TargetFactory
-from ..parameters import VolumeParameter, DatasetLocationParameter
-from ..parameters import Volume, DatasetLocation
+from ..targets.volume_target import DestVolumeReader, SrcVolumeTarget
+from ..parameters import VolumeParameter
+from ..parameters import Volume
 from ..ipc.protocol import *
-from .utilities import RequiresMixin, RunMixin
+from .utilities import RequiresMixin, RunMixin, DatasetMixin
 
 
 class ClassifyTaskMixin:
@@ -24,26 +25,26 @@ class ClassifyTaskMixin:
     
     classifier_path=luigi.Parameter(
         description="Location of the pickled classifier file")
-    volume = VolumeParameter(
-        description="The volume of the input image")
-    image_location = DatasetLocationParameter(
-        description="The location of the input image volume")
-    prob_roots = luigi.ListParameter(
-        description="The paths of the sharded root directories "
-        "for the probability map files.")
+    image_loading_plan = luigi.Parameter(
+        description="The filename of the dataset loading plan for the image "
+                    "to be classified")
+    prob_plans = luigi.DictParameter(
+        description="A dictionary of dataset name to storage plan.")
     class_names = luigi.DictParameter(
         description="The class names to save. The classifier is interrogated "
         "for the probability map for each class and only the named classes "
         "are saved. Keys are the names of the classes and values are the "
         "names of the datasets to be created.")
-    pattern = luigi.Parameter(
-        description="A filename pattern for str.format(). See one of the "
-        "volume targets for details.")
+    done_file = luigi.Parameter(
+        description="The touchfile that's written after all datasets have "
+        "been written to disk.")
     
     def input(self):
         yield self.get_classifier_target()
-        yield TargetFactory().get_volume_target(self.image_location,
-                                                self.volume)
+        reader = DestVolumeReader(self.image_loading_plan)
+        for tgt in reader.get_source_targets():
+            yield(tgt)
+
     def get_classifier_target(self):
         if not hasattr(self, "__classifier_target"):
             self.__classifier_target = \
@@ -104,14 +105,8 @@ class ClassifyTaskMixin:
                       self.out_width, self.out_height, self.out_depth)
     
     def output(self):
-        volume = Volume(self.out_x, self.out_y, self.out_z,
-                        self.out_width, self.out_height, self.out_depth)
-        return TargetFactory().get_multivolume_target(
-            roots=self.prob_roots,
-            channels=self.class_names.values(),
-            pattern=self.pattern,
-            volume=volume)
-
+        return luigi.LocalTarget(self.done_file)
+    
 class ClassifyTaskRunner(object):
     '''A class that can be used to simply reconstruct and run the classify task
     
@@ -176,6 +171,8 @@ class ClassifyRunMixin:
             context.term()
         else:
             self()
+        with self.output().open("w") as fd:
+            json.dump(self.prob_plans, fd)
     
     def __call__(self):
         classifier_target, image_target = list(self.input())
@@ -204,25 +201,13 @@ class ClassifyShimTask(RequiresMixin, luigi.Task):
     
     task_namespace = "ariadne_microns_pipeline"
     
-    mv_roots = luigi.ListParameter(
-        description="The paths of the sharded root directories "
-        "for the multivolume produced by the classifier.")
-    mv_class_names = luigi.DictParameter(
-        description="The multivolume class name mapping")
-    mv_pattern = luigi.Parameter(
-        description="The multivolume's filename pattern")
-    volume = VolumeParameter(
-        description="The output volume of the classifier")
     dataset_name = luigi.Parameter(
-        description="The name of one of the ClassifyTask outputs")
+         description="The name of the desired dataset")
     
     @staticmethod
     def make_shim(classify_task, dataset_name):
-        shim = ClassifyShimTask(mv_roots=classify_task.prob_roots,
-                                 mv_class_names=classify_task.class_names,
-                                 mv_pattern=classify_task.pattern,
-                                 volume=classify_task.output_volume,
-                                 dataset_name=dataset_name)
+        shim = ClassifyShimTask(dataset_name=dataset_name,
+                                classify_task.output().path)
         shim.set_requirement(classify_task)
         return shim
     
@@ -230,16 +215,12 @@ class ClassifyShimTask(RequiresMixin, luigi.Task):
         yield self.requirements[0].output()
     
     def output(self):
-        mv = self.input().next()
-        return mv.get_channel(self.dataset_name)
+        with self.input().next().open("r") as fd:
+            d = json.load(fd)
+        storage_plan_path = d[self.dataset_name]
+        return SrcVolumeTarget(storage_plan_path)
     
     @property
     def output_volume(self):
-        return self.requirements[0].output_volume
+        return self.requirements[0].output().volume
     
-    @property
-    def output_location(self):
-        channel = self.requirements[0].output().get_channel(self.dataset_name)
-        return DatasetLocation(channel.paths,
-                               self.dataset_name,
-                               channel.pattern)

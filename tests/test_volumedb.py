@@ -201,6 +201,32 @@ class TestVolumeDB(unittest.TestCase):
         self.assertEqual(len(dependencies), 1)
         self.assertEqual(dependencies[0], task2.task_id)
         
+    def test_01_09_get_dataset_name_by_dataset_id(self):
+        self.db.set_target_dir("/tmp/foo")
+        self.db.set_temp_dir("/tmp/bar")
+        task1 = DummyTask(my_parameter="left")
+        self.db.register_dataset_type("image", Persistence.Permanent, "uint8",
+                                          "Raw image data volume")
+        volume = Volume(0, 0, 0, 1024, 1024, 128)
+        dataset_id = self.db.get_dataset_id()
+        self.db.register_dataset(
+                dataset_id, task1, "image", volume)
+        self.assertEqual(self.db.get_dataset_name_by_dataset_id(dataset_id),
+                         "image")
+        
+    def test_01_10_get_dtype_by_dataset_id(self):
+        self.db.set_target_dir("/tmp/foo")
+        self.db.set_temp_dir("/tmp/bar")
+        task1 = DummyTask(my_parameter="left")
+        self.db.register_dataset_type("image", Persistence.Permanent, "uint8",
+                                          "Raw image data volume")
+        volume = Volume(0, 0, 0, 1024, 1024, 128)
+        dataset_id = self.db.get_dataset_id()
+        self.db.register_dataset(
+                dataset_id, task1, "image", volume)
+        self.assertEqual(self.db.get_dataset_dtype_by_dataset_id(dataset_id),
+                         "uint8")
+
     def test_02_01_simple_compute_subvolumes(self):
         task = DummyTask(my_parameter="foo")
         self.db.register_dataset_type("image", Persistence.Permanent, "uint8",

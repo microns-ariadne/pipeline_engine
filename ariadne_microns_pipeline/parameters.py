@@ -99,127 +99,27 @@ class VolumeParameter(luigi.Parameter):
                  depth=x.depth)
         return json.dumps(d)    
 
-class DatasetLocation(object):
-    '''A dataset location (see DatasetLocationParameter)'''
-    def __init__(self, roots, dataset_name, pattern):
-        self.roots = roots
-        self.dataset_name = dataset_name
-        self.pattern = pattern
-    
-    def __str__(self):
-        return "DatasetLocation: [%s].%s (%s)" % (
-            ",".join(self.roots), self.dataset_name, self.pattern)
-    
-    def __repr__(self):
-        return "DatasetLocation(roots=['%s'], dataset_name='%s', pattern='%s'"%\
-               ("'".join(self.roots), self.dataset_name, self.pattern)
-    
-    def to_dictionary(self):
-        return dict(roots=self.roots,
-                    dataset_name=self.dataset_name,
-                    pattern=self.pattern)
-
-'''A dataset location for a dataset that doesn't exist
+'''A dataset ID for a dataset that doesn't exist
 
 If a dataset is optional, use this to signify that the user doesn't
 want it.
 '''
-EMPTY_DATASET_LOCATION = DatasetLocation([], "None", "")
+EMPTY_DATASET_ID = 0
 
-def is_empty_dataset_location(location):
+EMPTY_LOADING_PLAN_ID = 0
+
+def is_empty_dataset_id(dataset_id):
     '''Check to see if a dataset location is the empty dataset'''
-    return len(location.roots) == 0
+    return dataset_id == 0
 
-class DatasetLocationParameter(luigi.Parameter):
-    '''The particulars necessary for describing the location of a volume
-    
-    A volume on disk can be sharded across multiple drives. Its name
-    has three parts: a root (which is the sharded path), a dataset
-    (which is a subdirectory of the root for planes and is the dataset
-    name for HDF5 datasets) and a pattern which is used for naming files.
-    
-    The pattern for volumes uses str.format(x=x, y=y, z=z) for formatting.
-    A typical pattern might be "{x:09d}_{y:09d}_{z:09d}"
-    
-    The format is a JSON dictionary with keys of "roots", "dataset_name" and
-    "pattern"
-    '''
-    
-    def parse(self, x):
-        d = json.loads(x)
-        return DatasetLocation(d["roots"], d["dataset_name"], d["pattern"])
-    
-    def serialize(self, x):
-        d = dict(roots=tuple(x.roots), 
-                 dataset_name=x.dataset_name, 
-                 pattern=x.pattern)
-        return json.dumps(d)
+'''A default location on disk
 
-class MultiVolumeParameter(luigi.Parameter):
-    '''A parameter representing a number of volumes taken together
-    
-    This is useful when merging or considering adjacent or overlapping volumes.
-    The MultiVolumeParameter represents a number of volumes that act as
-    inputs for some merging operation. The serialization format is a list
-    of dictionaries with keys, "volume" and "location" giving the Volume
-    and DatasetLocation of some input volume.
-    '''
-    
-    def parse(self, x):
-        l = json.loads(x)
-        result = []
-        for d in l:
-            dv = d["volume"]
-            dl = d["location"]
-            result.append(dict(
-                volume=Volume(x=dv["x"],
-                              y=dv["y"],
-                              z=dv["z"],
-                              width=dv["width"],
-                              height=dv["height"],
-                              depth=dv["depth"]),
-                location=DatasetLocation(roots=dl["roots"], 
-                                         dataset_name=dl["dataset_name"], 
-                                         pattern=dl["pattern"])))
-        return result
-    
-    def serialize(self, x):
-        l = []
-        for d in x:
-            volume = d["volume"]
-            location = d["location"]
-            l.append(dict(volume=dict(x=volume.x,
-                                      y=volume.y,
-                                      z=volume.z,
-                                      width=volume.width,
-                                      height=volume.height,
-                                      depth=volume.depth),
-                          location=dict(roots=location.roots,
-                                        dataset_name=location.dataset_name,
-                                        pattern=location.pattern)))
-        return json.dumps(l)
+e.g. one that's synthesized from a root + a suffix.
+'''
+DEFAULT_LOCATION = ":DEFAULT_LOCATION:"
 
-class MultiDatasetLocationParameter(luigi.Parameter):
-    '''A parameter representing an indeterminate number of datasets
-    
-    This is useful when aggregating a number of datasets that are defined
-    over the same volume.
-    '''
-    def parse(self, x):
-        l = json.loads(x)
-        result = []
-        for d in l:
-            result.append(DatasetLocation(roots=d["roots"],
-                                          dataset_name=d["dataset_name"],
-                                          pattern=d["pattern"]))
-    
-    def serialize(self, x):
-        result = []
-        for dataset_location in x:
-            result.append(dict(roots=dataset_location.roots,
-                               dataset_name=dataset_location.dataset_name,
-                               pattern=dataset_location.pattern))
-        return json.dumps(result)
-    
-all = [Volume, VolumeParameter, DatasetLocation, DatasetLocationParameter,
-       MultiVolumeParameter]
+'''A location indicating an unused element, e.g. don't produce this file'''
+EMPTY_LOCATION = "/dev/null"
+
+all = [Volume, VolumeParameter, EMPTY_DATASET_ID, is_empty_dataset_id,
+       DEFAULT_LOCATION, EMPTY_LOCATION]
