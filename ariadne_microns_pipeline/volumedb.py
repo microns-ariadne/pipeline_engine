@@ -25,6 +25,46 @@ UINT16 = "uint16"
 UINT32 = "uint32"
 UINT64 = "uint64"
 
+def get_storage_plan_path(root, dataset_id, volume, dataset_name):
+    '''Get the canonical path to a storage plan
+    
+    This lets you anticipate the location of the storage plan before it's
+    actually created.
+    
+    :param root: the root directory of the storage hierarchy
+    :param dataset_id: the dataset_id of the dataset being saved
+    :param volume: a Volume object giving the volume being written
+    :param dataset_name: the name of the dataset, e.g. "image"
+    '''
+    leaf_dir = "%s_%09d-%09d_%09d-%09d_%09d-%09d_%d.storage.plan" % (
+        dataset_name, volume.x, volume.x1,
+        volume.y, volume.y1,
+        volume.z, volume.z1,
+        dataset_id)
+    location = os.path.join(
+        root, str(volume.x), str(volume.y),
+        str(volume.z), leaf_dir)
+    return location
+
+def get_loading_plan_path(root, loading_plan_id, volume, dataset_name):
+    '''Get the canonical path to a loading plan
+    
+    :param root: the root directory of the storage hierarchy
+    :param loading_plan_id: the loading_plan_id of the dataset being loaded
+    :param volume: a Volume object giving the volume being written
+    :param dataset_name: the name of the dataset, e.g. "image"
+    '''
+    leaf_dir = "%s_%09d-%09d_%09d-%09d_%09d-%09d_%d.loading.plan" % (
+        dataset_name, volume.x, volume.x1,
+        volume.y, volume.y1,
+        volume.z, volume.z1,
+        dataset_id)
+    location = os.path.join(
+        root, str(volume.x), str(volume.y),
+        str(volume.z), leaf_dir)
+    return location
+
+
 class Persistence(enum.Enum):
     '''Whether a data item should persist if no longer needed
     
@@ -423,6 +463,20 @@ class VolumeDB(object):
             dataset_type.doc=doc
         self.session.add(dataset_type)
         self.session.commit()
+    
+    def get_datatype_root(self, dataset_name):
+        '''Given a dataset's name, return the root of its file system
+        
+        Based on how it was registered, a dataset type will be stored in the
+        temporary or permanent filesystem hierarchy, so retreive one or the
+        other based on the dataset_name
+        
+        :param dataset_name: the name of the dataset, e.g. "image"
+        '''
+        persistence = self.session.query(DatasetTypeObj.persistence).filter(
+            DatasetTypeObj.name == dataset_name).first()[0]
+        return self.target_dir if persistence == Persistence.Permanent \
+               else self.temp_dir
     
     def get_dataset_type(self, dataset_name):
         '''Get a dataset type from the database'''
@@ -1018,16 +1072,13 @@ class VolumeDB(object):
             root = self.target_dir
         else:
             root = self.temp_dir
-        leaf_dir = "%s_%09d-%09d_%09d-%09d_%09d-%09d_%d.done" % (
-            dataset_name, dataset.volume.x0, dataset.volume.x1,
-            dataset.volume.y0, dataset.volume.y1,
-            dataset.volume.z0, dataset.volume.z1,
-            dataset.dataset_id)
-        location = os.path.join(
-            root, str(dataset.volume.x0), str(dataset.volume.y0),
-            str(dataset.volume.z0), leaf_dir)
-        return location
-    
+        volume = Volume(dataset.volume.x0, dataset.volume.y0, dataset.volume.z0,
+                        dataset.volume.x1 - datset.volume.x0,
+                        dataset.volume.y1 - dataset.volume.y0,
+                        dataset.volume.z1 - dataset.volume.z0)
+        return get_storage_plan_path(root, dataset.dataset_id, volume, 
+                                    dataset_name)
+
     def get_dataset_volume(self, dataset_id):
         '''Get the volume encompassed by this dataset
         
@@ -1097,4 +1148,4 @@ class VolumeDB(object):
         return self.session.query(DatasetDependentObj.dataset_id).filter(
             DatasetDependentObj.loading_plan_id == loading_plan_id).all()
 
-all = [VolumeDB, Persistence]
+all = [VolumeDB, Persistence, get_loading_plan_path, get_storage_plan_path]

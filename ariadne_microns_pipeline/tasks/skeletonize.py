@@ -13,24 +13,21 @@ import rh_config
 from microns_skeletonization import skeletonize, write_swc
 import zipfile
 
-from ..parameters import VolumeParameter, DatasetLocationParameter
-from ..targets.factory import TargetFactory
+from ..targets import DestVolumeReader
 from .utilities import RequiresMixin, RunMixin, CILKCPUMixin
 
 
 class SkeletonizeTaskMixin:
     
-    volume=VolumeParameter(
-        description="The volume to skeletonize, in global coordinates")
-    segmentation_location=DatasetLocationParameter(
+    segmentation_loading_plan_path=luigi.Parameter(
         description="The location of the input segmentation")
     skeleton_location=luigi.Parameter(
         description="The location for the skeleton")
     
     def input(self):
-        yield TargetFactory().get_volume_target(
-            location=self.segmentation_location,
-            volume=self.volume)
+        for tgt in DestVolumeReader(self.segmentation_loading_plan_path) \
+            .get_source_targets():
+            yield tgt
     
     def output(self):
         if self.skeleton_location.endswith(".zip"):
@@ -84,7 +81,7 @@ class SkeletonizeRunMixin:
             self.skeletonize_using_microns()
     
     def skeletonize_using_microns(self):
-        seg = self.input().next().imread()
+        seg = DestVolumeReader(self.segmentation_loading_plan_path).imread()
 
         result = skeletonize(seg, self.xy_nm, self.z_nm, self.decimation_factor,
                     self.cpu_count, too_big=self.too_big)
@@ -132,11 +129,9 @@ class SkeletonizeRunMixin:
         # output:
         #   Dictionary of label to .swc file to write
         #
-        seg_target = self.input().next()
-        #
         # Find the labels we should write
         #
-        seg = seg_target.imread()
+        seg = DestVolumeReader(self.segmentation_loading_plan_path).imread()
         areas = np.bincount(seg.ravel())
         areas[0] = 0
         labels = np.where(areas > 0)[0]

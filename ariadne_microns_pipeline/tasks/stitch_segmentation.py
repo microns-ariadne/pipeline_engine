@@ -11,11 +11,8 @@ import rh_logger
 import multiprocessing
 import time
 
-from ..parameters import VolumeParameter, DatasetLocationParameter
-from ..parameters import Volume, DatasetLocation
-from ..parameters import MultiVolumeParameter
-from ..targets.factory import TargetFactory
 from .utilities import RunMixin, RequiresMixin, SingleThreadedMixin, to_hashable
+from ..targets import DestVolumeReader
 
 class Compression(enum.Enum):
     '''Compression types for HDF5'''
@@ -25,26 +22,17 @@ class Compression(enum.Enum):
 
 class StitchSegmentationTaskMixin:
     
-    input_volumes=MultiVolumeParameter(
-        default=[],
-        description="The input segmentation volumes")
     connected_components_location=luigi.Parameter(
         description="The output file from AllConnectedComponentsTask "
             "that gives the local <-> global label correspondences")
     output_volume=VolumeParameter(
         description="The volume of the output")
-    output_location=DatasetLocationParameter(
+    output_location=luigi.Parameter(
         description="The location of the HDF5 file")
     
     def input(self):
-        tf = TargetFactory()
         yield luigi.LocalTarget(self.connected_components_location)
         
-        for d in self.input_volumes:
-            volume = d["volume"]
-            location = d["location"]
-            yield tf.get_volume_target(location, volume)
-    
     def output(self):
         return luigi.LocalTarget(self.output_location)
 
@@ -108,14 +96,11 @@ class StitchSegmentationRunMixin:
             # This is a map of volume to local/global labelings
             #
             volume_map = dict(cc["volumes"])
-            if len(self.input_volumes) == 0:
-                # Get input volumes from connected components
-                #
-                inputs = []
-                for volume, location in cc["locations"]:
-                    inputs.append(TargetFactory().get_volume_target(
-                        DatasetLocation(**location),
-                        Volume(**volume)))
+            # Get input volumes from connected components
+            #
+            inputs = []
+            for volume, location in cc["locations"]:
+                inputs.append(DestVolumeReader(location))
             #
             # Loop over each volume
             #

@@ -13,7 +13,8 @@ import time
 from scipy.sparse import coo_matrix
 from scipy.sparse.csgraph import connected_components
 
-from .utilities import RequiresMixin, RunMixin, SingleThreadedMixin
+from .utilities import RequiresMixin, RunMixin, SingleThreadedMixin, \
+     DatasetMixin
 from ..targets import DestVolumeReader
 from ..parameters import Volume
 from ..parameters import VolumeParameter
@@ -37,16 +38,25 @@ class JoiningMethod(enum.Enum):
 
 class ConnectedComponentsTaskMixin:
 
-    loading_plan1_path = luigi.Parameter(
+    volume1 = VolumeParameter(
+        description="The voxel volume for the whole of segmentation #1")
+    cutout_loading_plan1_path = luigi.Parameter(
         description="The file path to the loading plan for cutout #1")
-    loading_plan2_path = luigi.Parameter(
+    segmentation_loading_plan1_path = luigi.Parameter(
+        description="The file path for the entire segmentation #1")
+    volume2 = VolumeParameter(
+        description="The voxel volume for the whole of segmentation #2")
+    cutout_loading_plan2_path = luigi.Parameter(
         description="The file path to the loading plan for cutout #2")
+    segmentation_loading_plan2_path = luigi.Parameter(
+        description="The file path for the entire segmentation #2")
     output_location = luigi.Parameter(
         description=
         "The location for the JSON file containing the concordances")
 
     def input(self):
-        for path in self.loading_plan1_path, self.loading_plan2_path:
+        for path in self.cutout_loading_plan1_path, \
+            self.cutout_loading_plan2_path:
             reader = DestVolumeReader(path)
             for tgt in reader.get_source_targets():
                 yield(tgt)
@@ -111,8 +121,9 @@ class ConnectedComponentsRunMixin:
         that appear together at the same voxel for the voxels in the
         overlap volume.
         '''
-        cutout1 = DestVolumeReader(self.loading_plan1_path).imread()
-        cutout2 = DestVolumeReader(self.loading_plan2_path).imread()
+        cutout1_tgt = DestVolumeReader(self.cutout_loading_plan1_path)
+        cutout2_tgt = DestVolumeReader(self.cutout_loading_plan2_path)
+        cutout1, cutout2 = [_.imread() for _ in cutout1_tgt, cutout2_tgt]
         
         if self.joining_method == JoiningMethod.PAIRWISE_MULTIMATCH:
             connections, counts = self.pairwise_multimatch(cutout1, cutout2)
@@ -121,7 +132,7 @@ class ConnectedComponentsRunMixin:
         d = dict(connections=connections, counts=counts)
         for volume, name in ((self.volume1, "1"),
                              (self.volume2, "2"),
-                             (self.overlap_volume, "overlap")):
+                             (cutout1_tgt.volume, "overlap")):
             d[name] = dict(x=volume.x,
                            y=volume.y,
                            z=volume.z,
@@ -137,13 +148,13 @@ class ConnectedComponentsRunMixin:
         areas = areas[unique]
         d["1"]["labels"] = unique.tolist()
         d["1"]["areas"] = areas.tolist()
-        d["1"]["location"] = volume1.dataset_location.to_dictionary()
+        d["1"]["location"] = self.segmentation_loading_plan1_path
         areas = np.bincount(seg2.ravel())
         unique = np.where(areas)[0]
         unique = unique[unique != 0]
         d["2"]["labels"] = unique.tolist()
         d["2"]["areas"] = areas.tolist()
-        d["2"]["location"] = volume2.dataset_location.to_dictionary()
+        d["2"]["location"] = self.segmentation_loading_plan2_path
         with self.output().open("w") as fd:
             json.dump(d, fd)
 
@@ -544,13 +555,14 @@ class FakeAllConnectedComponentsTaskMixin:
     
     volume = VolumeParameter(
         description="The volume of the segmentation")
-    location = DatasetLocationParameter(
+    loading_plan = luigi.Parameter(
         description="The location of the segmentation")
     output_location = luigi.Parameter(
         description="The location of the connectivity graph")
     
     def input(self):
-        yield TargetFactory().get_volume_target(self.location, self.volume)
+        for tgt in DestVolumeReader(self.loading_plan).get_source_targets():
+            yield tgt
     
     def output(self):
         return luigi.LocalTarget(self.output_location)
@@ -560,8 +572,7 @@ class FakeAllConnectedComponentsRunMixin:
     def ariadne_run(self):
         '''Create a connection graph for a single volume'''
         
-        tgt = self.input().next()
-        seg = tgt.imread()
+        seg = DestVolumeReader(self.loading_plan).imread()
         components = np.where(np.bincount(seg.flatten()) != 0)[0]
         if components[0] == 0:
             components = components[1:]
@@ -590,65 +601,55 @@ class FakeAllConnectedComponentsTask(FakeAllConnectedComponentsTaskMixin,
     
     task_namespace = "ariadne_microns_pipeline"
 
-class VolumeRelabelingTaskMixin:
+class VolumeRelabelingTaskMixin(DatasetMixin):
     
-    input_volumes = MultiVolumeParameter(
+    input_volumes = luigi.ListParameter(
         description="Input volumes to be composited together")
     relabeling_location = luigi.Parameter(
         description=
         "The location of the output file from AllConnectedComponentsTask "
         "that gives the local/global relabeling of the segmentation")
-    output_volume = VolumeParameter(
-        description="The volume of the output segmentation")
-    output_location = DatasetLocationParameter(
-        description="The location of the output segmentation")
     
     def input(self):
         '''Return the volumes to be assembled'''
         yield luigi.LocalTarget(self.relabeling_location)
-        tf = TargetFactory()
-        for d in self.input_volumes:
-            yield tf.get_volume_target(d["location"], d["volume"])
+        for loading_plan in self.input_volumes:
+            for tgt in DestVolumeReader(loading_plan).get_source_targets():
+                yield tgt
     
-    def output(self):
-        '''Return the volume target that will be written'''
-        tf = TargetFactory()
-        return tf.get_volume_target(self.output_location, self.output_volume)
-
-
 class VolumeRelabelingRunMixin:
     
     def ariadne_run(self):
         '''Composite and relabel each of the volumes'''
-        output_result = np.zeros((self.output_volume.depth,
-                                  self.output_volume.height,
-                                  self.output_volume.width),
-                                 np.uint32)
         output_volume_target = self.output()
-        x0 = output_volume_target.x
-        x1 = x0 + output_volume_target.width
-        y0 = output_volume_target.y
-        y1 = y0 + output_volume_target.height
-        z0 = output_volume_target.z
-        z1 = z0 + output_volume_target.depth
-        generator = self.input()
+        output_result = np.zeros((output_volume_target.volume.depth,
+                                  output_volume_target.volume.height,
+                                  output_volume_target.volume.width),
+                                 np.uint32)
+        x0 = output_volume_target.volume.x
+        x1 = output_volume_target.volume.x1
+        y0 = output_volume_target.volume.y
+        y1 = output_volume_target.volume.y1
+        z0 = output_volume_target.volume.z
+        z1 = output_volume_target.volume.z1
         #
         # Read the local->global mappings
         #
-        with generator.next().open("r") as fd:
+        with open(self.relabeling_Location, "r") as fd:
             mappings = json.load(fd)
         #
         # Make a dictionary of all the candidate volumes
         #
         volumes = {}
-        for volume in generator:
-            key = to_hashable(dict(x=volume.x,
-                                   y=volume.y,
-                                   z=volume.z,
-                                   width=volume.width,
-                                   height=volume.height,
-                                   depth=volume.depth))
-            volumes[key] = volume
+        for loading_plan in self.input_volumes:
+            tgt = DestVolumeReader(loading_plan)
+            key = to_hashable(dict(x=tgt.volume.x,
+                                   y=tgt.volume.y,
+                                   z=tgt.volume.z,
+                                   width=tgt.volume.width,
+                                   height=tgt.volume.height,
+                                   depth=tgt.volume.depth))
+            volumes[key] = tgt
         #
         # For each volume in the mappings, map local->global 
         for volume, mapping in mappings["volumes"]:
@@ -666,15 +667,18 @@ class VolumeRelabelingRunMixin:
                vz0 >= vz1:
                 continue
             input_volume_target = volumes[volume]
+            volume = Volume(**volume)
             mapping_idxs = np.array(mapping, np.uint32)
             mapping_xform = np.zeros(mapping_idxs[:, 0].max()+1, np.uint32)
             mapping_xform[mapping_idxs[:, 0]] = mapping_idxs[:, 1]
-            labels = input_volume_target.imread_part(
-                vx0, vy0, vz0,
-                vx1-vx0, vy1 - vy0, vz1 - vz0)
+            labels = input_volume_target.imread()[vz0-volume.z:vz1-volume.z,
+                                                  vy0-volume.y:vy1-volume.y,
+                                                  vx0-volume.x:vx1-volume.x]
             labels = mapping_xform[labels]
-            output_volume_target.imwrite_part(labels, vx0, vy0, vz0)
-        output_volume_target.finish_volume()
+            output_result[vz0-z0:vz1-z0,
+                          vy0-y0:vy1-y0,
+                          vx0-x0:vx1-x0] = labels
+        output_volume_target.imwrite(output_result)
 
 class VolumeRelabelingTask(VolumeRelabelingTaskMixin,
                            VolumeRelabelingRunMixin,
@@ -727,9 +731,10 @@ class ConnectivityGraph(object):
         return t[segmentation]
     
     def get_tgt(self, volume):
-        location = DatasetLocation(
+        '''Return a DestVolumeReader covering the volume passed
+        
+        '''
+        location = DestVolumeReader(
             **self.locations[to_hashable(volume.to_dictionary())])
-        return TargetFactory().get_volume_target(
-            location=location,
-            volume=volume)
+        return location
         

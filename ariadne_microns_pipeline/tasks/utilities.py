@@ -61,8 +61,7 @@ class DatasetMixin:
     def output(self):
         '''Return a target for the dataset'''
         return SrcVolumeTarget(self.storage_plan)
-            
-        
+      
 class RunMixin:
     '''This mixin provides a standardized run() method for a task
     

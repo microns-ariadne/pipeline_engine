@@ -33,7 +33,7 @@ from .skeletonize import SkeletonizeTask
 from .stitch_segmentation import StitchSegmentationTask, Compression
 from .synapse_statistics import SynapseStatisticsTask
 from .utilities import to_hashable
-from ..volumedb import VolumeDB
+from ..volumedb import VolumeDB, get_storage_plan_path, get_loading_plan_path
 
 class AMTaskFactory(object):
     '''Factory for creating Ariadne/Microns tasks
@@ -80,42 +80,92 @@ class AMTaskFactory(object):
         :returns: A task that outputs a volume target.
         '''
         dataset_id = self.volume_db.get_dataset_id()
+        root = self.volume_db.get_datatype_root(dataset_name)
+        storage_plan = get_storage_plan_path(root, dataset_id, volume, 
+                                            dataset_name)
         task = DownloadFromButterflyTask(experiment=experiment,
                                          sample=sample,
                                          dataset=dataset,
                                          channel=channel,
                                          url=url,
                                          volume=volume,
-                                         db_url=self.volume_db_url,
-                                         dataset_id=dataset_id,
-                                         resolution=resolution)
-        task.register_dataset(self.volume_db, dataset_name)
+                                         resolution=resolution,
+                                         storage_plan=storage_plan)
+        self.volume_db.register_dataset(dataset_id, task, dataset_name, volume)
+        return task
 
     def gen_classify_task(
-        self, paths, datasets, pattern, img_volume, img_location,
+        self, datasets, img_volume, output_volume, dataset_name, 
         classifier_path):
         '''Classify a volume
 
-        :param paths: the root paths to use for sharding
         :param datasets: a dictionary with keys of the class indexes or names
              produced by the classifier and values of the names of the
              datasets to be stored (not all datasets from the classifier need
              be stored)
-        :param pattern: the pattern to use for naming files.
-        :param img_volume: the image to be classified
+        :param img_volume: the voxel volume to be classified - the volume
+        for the *input* of the classifier.
+        :param output_volume: the voxel volume after classification, likely
+        cropped at the borders.
+        :param dataset_name: the name of the dataset type, e.g. "image"
         :param classifier_path: path to a pickled classifer
         '''
         datasets = to_hashable(datasets)
-        
-        return ClassifyTask(classifier_path=classifier_path,
-                            volume=img_volume,
-                            image_location=img_location,
-                            prob_roots=paths,
+        #
+        # Make the loading plan
+        #
+        loading_plan_id = self.volume_db.get_loading_plan_id()
+        root = self.volume_db.get_datatype_root(dataset_name)
+        loading_plan = get_loading_plan_path(
+            root, loading_plan_id, img_volume, 
+            dataset_name)
+        #
+        # Make a storage plan for each output channel
+        #
+        prob_plans = { }
+        prob_dataset_ids = {}
+        for prob_dataset_name in datasets.values():
+            root = self.volume_db.get_datatype_root(prob_dataset_name)
+            dataset_id = self.volume_db.get_dataset_id()
+            prob_dataset_ids[prob_dataset_name] = dataset_id
+            storage_plan = get_storage_plan_path(
+                root, dataset_id, output_volume, prob_dataset_name)
+            prob_plans[prob_dataset_name] = storage_plan
+        #
+        # Cons up a done-file name
+        #
+        done_file_location = os.path.join(
+            self.volume_db.target_dir, str(output_volume.x), 
+            str(output_volume.y), str(output_volume.z),
+            "%09d-%09d_%09d-%09d_%09d-%09d_%s.done" %
+            (output_volume.x, output_volume.x1,
+             output_volume.y, output_volume.y1,
+             output_volume.z, output_volume.z1,
+             "-".join(datasets.values())))
+        #
+        # Create the task
+        #
+        task = ClassifyTask(classifier_path=classifier_path,
+                            image_loading_plan=loading_plan,
+                            prob_plans=prob_plans,
                             class_names=datasets,
-                            pattern=pattern)
+                            done_file=done_file_location)
+        #
+        # Register the loading plan
+        #
+        self.volume_db.register_dataset_dependent(
+            loading_plan_id, task, dataset_name, img_volume)
+        #
+        # Register the datasets
+        #
+        for prob_dataset_name in datasets.values():
+            self.volume_db.register_dataset(
+                prob_dataset_ids[prob_dataset_name], task, prob_dataset_name,
+                output_volume)
+        return task
     
     def gen_find_seeds_task(
-        self, volume, prob_location, seeds_location,
+        self, volume, prob_dataset_name, seeds_dataset_name,
         dimensionality=Dimensionality.D3, method=SeedsMethodEnum.Smoothing,
         sigma_xy=3, sigma_z=.4, threshold=1, minimum_distance_xy=5,
         minimum_distance_z=1.5, distance_threshold=5):
@@ -124,8 +174,9 @@ class AMTaskFactory(object):
         This task produces seeds for watershedding.
         
         :param volume: the volume in which to find the seeds
-        :param prob_location: the location of the input probability dataset
-        :param seeds_location: the location for the seed labels
+        :param prob_dataset_name: the name of the probability map, 
+                                  e.g. "membrane"
+        :param seeds_dataset_name: the name of the output dataset
         :param dimensionality: whether to find seeds per-plane or globally
              within the 3d space
         :param method: the algorithm to use to find seeds
@@ -138,9 +189,25 @@ class AMTaskFactory(object):
         :param distance_threshold: the minimum distance from the membrane
             of a seed, for the distance method.
         '''
-        return FindSeedsTask(volume=volume,
-                             prob_location=prob_location,
-                             seeds_location=seeds_location,
+        #
+        # Get the loading plan for the probability map
+        #
+        loading_plan_id = self.volume_db.get_loading_plan_id()
+        root = self.volume_db.get_datatype_root(prob_dataset_name)
+        loading_plan_path = get_loading_plan_path(
+            root, loading_plan_id, volume, prob_dataset_name)
+        #
+        # Get the storage plan for the seeds
+        #
+        dataset_id = self.volume_db.get_dataset_id()
+        root = self.volume_db.get_datatype_root(seeds_dataset_name)
+        storage_plan = get_storage_plan_path(
+            root, dataset_id, volume, seeds_dataset_name)
+        #
+        # Create the task
+        #
+        task = FindSeedsTask(prob_loading_plan_path=loading_plan_path,
+                             storage_plan=storage_plan,
                              dimensionality=dimensionality,
                              method=method,
                              sigma_xy=sigma_xy,
@@ -149,10 +216,22 @@ class AMTaskFactory(object):
                              minimum_distance_xy=minimum_distance_xy,
                              minimum_distance_z=minimum_distance_z,
                              distance_threshold=distance_threshold)
+        #
+        # Register the loading plan
+        #
+        self.volume_db.register_dataset_dependent(
+            loading_plan_id, task, prob_dataset_name, volume)
+        #
+        # Register the storage plan
+        #
+        self.volume_db.register_dataset(
+            dataset_id, task, seeds_dataset_name, volume)
+        return task
     
     def gen_segmentation_task(
-        self, volume, prob_location, seeds_location, mask_location,
-        seg_location, sigma_xy, sigma_z, dimensionality):
+        self, volume, prob_dataset_name, seeds_dataset_name, 
+        mask_dataset_name, seg_dataset_name,
+        sigma_xy, sigma_z, dimensionality):
         '''Generate a segmentation task
 
         Generate a segmentation task.  The task takes a probability map of
@@ -162,23 +241,64 @@ class AMTaskFactory(object):
         the seeds for the watershed, then performs a 3d watershed.
 
         :param volume: the volume to be segmented in global coordinates
-        :param prob_location: where to find the membrane probability volume
-        :param mask_location: where to find the mask location
-        :param seeds_location: where to find the seeds for the watershed
-        :param seg_location: where to put the segmentation
+        :param prob_dataset_name: The name of the probability dataset,
+                                  e.g. "membrane"
+        :param mask_dataset_name: The name of the mask dataset, e.g. "mask"
+        :param seeds_dataset_name: The name of the seeds dataset
+        :param seg_dataset_name: the name of the output segmentation
         :param sigma_xy: the sigma of the smoothing gaussian in the X and Y
         directions
         :param sigma_z: the sigma of the smoothing gaussian in the Z direction
         :param dimensionality: Whether to do 2D or 3D segmentation
         '''
-        return SegmentTask(volume=volume, 
-                           prob_location=prob_location,
-                           mask_location=mask_location,
-                           seed_location=seeds_location,
-                           output_location=seg_location,
+        #
+        # Get the load plans for the inputs
+        #
+        prob_load_plan_id, mask_load_plan_id, seeds_load_plan_id = [
+            self.volume_db.get_loading_plan_id() for _ in range(3)]
+        prob_root, mask_root, seeds_root = [
+            self.volume_db.get_datatype_root(dataset_name)
+            for dataset_name in prob_dataset_name, mask_dataset_name,
+            seeds_dataset_name]
+        prob_load_plan_path, mask_load_plan_path, seeds_load_plan_path = [
+            get_loading_plan_path(root, loading_plan_id, volume, dataset_name)
+            for root, loading_plan_id, dataset_name in (
+                (prob_root, prob_loading_plan_id, prob_dataset_name),
+                (mask_root, mask_loading_plan_id, mask_dataset_name),
+                (seeds_root, seeds_load_plan_id, seeds_dataset_name))]
+        #
+        # Get the storage plan for the segmentation
+        #
+        root = self.volume_db.get_datatype_root(seg_dataset_name)
+        dataset_id = self.volume_db.get_dataset_id()
+        storage_plan = get_storage_plan_path(root, dataset_id, volume, 
+                                             seg_dataset_name)
+        #
+        # Create the task
+        #
+        task = SegmentTask(volume=volume, 
+                           prob_loading_plan_path=prob_load_plan_path,
+                           mask_loading_plan_path=mask_load_plan_path,
+                           seed_loading_plan_path=seeds_load_plan_path,
+                           storage_plan=storage_plan,
                            sigma_xy=sigma_xy,
                            sigma_z=sigma_z,
                            dimensionality=dimensionality)
+        #
+        # Register the load plans
+        #
+        self.volume_db.register_dataset_dependent(
+             prob_load_plan_id, task, prob_dataset_name, volume)
+        self.volume_db.register_dataset_dependent(
+                mask_load_plan_id, task, mask_dataset_name, volume)
+        self.volume_db.register_dataset_dependent(
+                seeds_load_plan_id, task, seeds_dataset_name, volume)        
+        #
+        # Register the storage plan
+        #
+        self.volume_db.register_dataset(
+            dataset_id, task, seg_dataset_name, volume)
+        return task
     
     def gen_cc_segmentation_task(
         self, volume, prob_location, mask_location, seg_location, threshold,

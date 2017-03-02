@@ -13,26 +13,20 @@ from scipy.ndimage import grey_erosion, grey_dilation
 
 from ..algorithms.evaluation import segmentation_metrics, Rand, f_info
 from ..algorithms.vi import split_vi, bits_to_nats
-from ..parameters import VolumeParameter, DatasetLocationParameter
-from ..targets.factory import TargetFactory
+from ..targets import DestVolumeReader
+from ..parameters import EMPTY_LOCATION
 from .connected_components import ConnectivityGraph
 from .utilities import RequiresMixin, RunMixin
 
 
 class SegmentationStatisticsTaskMixin:
     
-    volume = VolumeParameter(
-        description="The volume on which to run the statistics")
-    test_location = DatasetLocationParameter(
+    test_loading_plan_path = luigi.Parameter(
         description="The location of the test dataset")
-    test_volume = VolumeParameter(
-        description="The volume of the test dataset")
-    ground_truth_location = DatasetLocationParameter(
+    ground_truth_loading_plan_path = luigi.Parameter(
         description="The location of the ground truth dataset")
-    ground_truth_volume = VolumeParameter(
-        description="The volume of the ground-truth dataset")
     connectivity = luigi.Parameter(
-        default="/dev/null",
+        default=EMPTY_LOCATION,
         description="The connectivity graph .json file that is the output "
                     "of the AllConnectedComponentsTask. If not present, "
                     "then statistics are done on the local label IDs.")
@@ -40,11 +34,11 @@ class SegmentationStatisticsTaskMixin:
         description="The path to the JSON output file.")
     
     def input(self):
-        tf = TargetFactory()
-        yield tf.get_volume_target(self.test_location, self.test_volume)
-        yield tf.get_volume_target(self.ground_truth_location, 
-                                   self.ground_truth_volume)
-        if self.connectivity != "/dev/null":
+        for loading_plan in self.test_loading_plan_path, \
+            self.ground_truth_loading_plan_path:
+            for tgt in DestVolumeReader(loading_plan).get_source_targets():
+                yield tgt
+        if self.connectivity != EMPTY_LOCATION:
             yield luigi.LocalTarget(self.connectivity)
     
     def output(self):
@@ -78,38 +72,19 @@ class SegmentationStatisticsRunMixin:
                grey_dilation(seg, footprint=strel)
         seg[~ mask] = 0
 
-    def cutout(self, segmentation, volume):
-        '''Limit the segmentation to the task's volume
-        
-        :param segmentation: the input segmentation
-        :param volume: the global location of the segmentation
-        
-        returns the segmentation restricted to the task's volume
-        '''
-        x0 = max(0, self.volume.x - volume.x)
-        x1 = min(volume.width - x0, self.volume.x1 - volume.x)
-        y0 = max(0, self.volume.y - volume.y)
-        y1 = min(volume.height - y0, self.volume.y1 - volume.y)
-        z0 = max(0, self.volume.z - volume.z)
-        z1 = min(volume.depth - z0, self.volume.z1 - volume.z)
-        return segmentation[z0:z1, y0:y1, x0:x1]
-    
     def ariadne_run(self):
         '''Run the segmentation_metrics on the test and ground truth'''
         
-        inputs = self.input()
-        test_volume = inputs.next()
-        gt_volume = inputs.next()
-        test_labels = self.cutout(test_volume.imread(), test_volume.volume)
+        test_volume = DestVolumeReader(self.test_loading_plan_path)
+        gt_volume = DestVolumeReader(self.gt_loading_plan_path)
+        test_labels = test_volume.imread()
         self.erode_seg(test_labels)
-        gt_labels = self.cutout(gt_volume.imread(), gt_volume.volume)
+        gt_labels = gt_volume.imread()
         self.erode_seg(gt_labels)
-        try:
-            with inputs.next().open("r") as fd:
+        if self.connectivity != EMPTY_LOCATION:
+            with open(self.connectivity, "r") as fd:
                 c = ConnectivityGraph.load(fd)
                 test_labels = c.convert(test_labels, test_volume.volume)
-        except StopIteration:
-            pass
         d = segmentation_metrics(gt_labels, test_labels, per_object=True)
         rand = d["Rand"]
         F_Info = d["F_Info"]

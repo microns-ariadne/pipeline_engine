@@ -71,14 +71,14 @@ class MatchSynapsesRunMixin:
     
     def ariadne_run(self):
         gt_tgt = DestVolumeReader(self.gt_loading_plan_path)
-        d_tgt = inputs.next()
+        d_tgt = DestVolumeReader(self.detected_loading_plan_path)
         gt = gt_tgt.imread()
         d = d_tgt.imread()
         if self.has_mask():
             #
             # Erase any synapse outside of the annotated volume
             #
-            mask_tgt = inputs.next()
+            mask_tgt = DestVolumeReader(self.mask_loading_plan_path)
             mask = mask_tgt.imread()
             d[mask == 0] = 0
             gt[mask == 0] = 0

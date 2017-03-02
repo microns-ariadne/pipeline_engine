@@ -10,10 +10,7 @@ import subprocess
 import tempfile
 
 from .utilities import RequiresMixin, RunMixin, CILKCPUMixin
-from ..targets.factory import TargetFactory
-from ..parameters import VolumeParameter, DatasetLocationParameter
-from ..parameters import MultiDatasetLocationParameter
-
+from ..targets import DestVolumeReader
 
 class StrategyEnum(enum.Enum):
     misclassified=1
@@ -27,16 +24,14 @@ class StrategyEnum(enum.Enum):
     simulating=9
 
 class NeuroproofLearnTaskMixin:
-    volume = VolumeParameter(
-        description="Volume of the ground truth, probabilities & segmentation")
-    prob_location = DatasetLocationParameter(
+    prob_loading_plan_path = luigi.Parameter(
         description="Location of the probability prediction volume")
-    additional_locations = MultiDatasetLocationParameter(
+    additional_locations = luigi.ListParameter(
         default=[],
         description="Additional probability map locations for Neuroproof")
-    seg_location = DatasetLocationParameter(
+    seg_loading_plan_path = luigi.Parameter(
         description="Location of the pipeline's watershed segmentation")
-    gt_location = DatasetLocationParameter(
+    gt_loading_plan_path = luigi.Parameter(
         description="Location of the ground truth segmentation")
     output_location = luigi.Parameter(
         description="Location for the classifier file. Use an .xml extension "
@@ -44,16 +39,12 @@ class NeuroproofLearnTaskMixin:
         "to use the Vigra random forest classifier")
     
     def input(self):
-        tf = TargetFactory()
-        yield tf.get_volume_target(location=self.prob_location,
-                                   volume=self.volume)
-        yield tf.get_volume_target(location=self.seg_location,
-                                   volume=self.volume)
-        yield tf.get_volume_target(location=self.gt_location,
-                                   volume=self.volume)
-        for location in self.additional_locations:
-            yield tf.get_volume_target(location=location,
-                                       volume=self.volume)
+        loading_plans = [self.prob_loading_plan_path,
+                         self.seg_loading_plan_path,
+                         self.gt_loading_plan_path] + self.additional_locations
+        for loading_plan in loading_plans:
+            for tgt in DestVolumeReader(loading_plan).get_source_targets():
+                yield tgt
     
     def output(self):
         return luigi.LocalTarget(self.output_location)
@@ -90,11 +81,11 @@ class NeuroproofLearnRunMixin:
         #
         # gt.h5 contains a stack dataset
         #
-        inputs = self.input()
-        prob_target = inputs.next()
-        seg_target = inputs.next()
-        gt_target = inputs.next()
-        additional_map_targets = list(inputs)
+        prob_target = DestVolumeReader(self.prob_loading_plan_path)
+        seg_target = DestVolumeReader(self.seg_loading_plan_path)
+        gt_target = DestVolumeReader(self.gt_loading_plan_path)
+        additional_map_targets = [DestVolumeReader[_]
+                                  for _ in self.additional_locations]
         task_name = self.task_name()
         tempdir = tempfile.mkdtemp()
         rh_logger.logger.report_event(

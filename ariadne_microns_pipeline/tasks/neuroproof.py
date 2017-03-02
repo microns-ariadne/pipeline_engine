@@ -13,42 +13,30 @@ import os
 import subprocess
 import tempfile
 
-from ..parameters import VolumeParameter, DatasetLocationParameter
-from ..parameters import MultiDatasetLocationParameter
-from ..targets.factory import TargetFactory
-from utilities import RequiresMixin, RunMixin, CILKCPUMixin
+from .utilities import RequiresMixin, RunMixin, CILKCPUMixin, DatasetMixin
+from ..targets import DestVolumeReader
 
-class NeuroproofTaskMixin:
+class NeuroproofTaskMixin(DatasetMixin):
     
-    volume = VolumeParameter(
-        description="The extents of the volume being neuroproofed")
-    prob_location = DatasetLocationParameter(
+    prob_loading_plan_path = luigi.Parameter(
         description="Location of the membrane probability dataset. "
         "Note: the probabilities can't be sharded.")
-    additional_locations = MultiDatasetLocationParameter(
+    additional_locations = luigi.Parameter(
         default=[],
         description="Locations of additional probability maps "
         "to aid Neuroproof")
-    input_seg_location = DatasetLocationParameter(
-        description="Location of the input segmentation dataset. "
-        "Note: the segmentation can't be sharded.")
-    output_seg_location = DatasetLocationParameter(
-        description="Location of the output segmentation dataset")
+    input_seg_loading_plan_path = luigi.Parameter(
+        description="Location of the input segmentation dataset.")
     
     def input(self):
         '''Yield the probability volume target and segmentation volume target'''
-        tf = TargetFactory()
-        yield tf.get_volume_target(self.prob_location, self.volume)
-        yield tf.get_volume_target(self.input_seg_location, 
-                                   self.volume)
-        for location in self.additional_locations:
-            yield tf.get_volume_target(location, self.volume)
-    
-    def output(self):
-        '''Return the output segmentation'''
-        tf = TargetFactory()
-        return tf.get_volume_target(self.output_seg_location, self.volume)
-    
+        loading_plans = [self.input_seg_loading_plan_path,
+                         self.prob_loading_plan_path
+                         ] + self.additional_locations
+        for loading_plan in loading_plans:
+            for tgt in DestVolumeReader(loading_plan):
+                yield tgt
+                
     def estimate_memory_usage(self):
         '''Return an estimate of bytes of memory required by this task'''
         v1 = np.prod([2048, 2048, 100])
@@ -92,6 +80,10 @@ class NeuroproofRunMixin:
     
     def ariadne_run(self):
         '''Run the neuroproof subprocess'''
+        #
+        # TODO: hack Neuroproof to read .tif stacks
+        #
+        assert False
         #
         # The arguments for neuroproof_graph_predict:
         #

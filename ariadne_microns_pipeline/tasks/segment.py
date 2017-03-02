@@ -7,42 +7,34 @@ from scipy.sparse import coo_matrix
 from .find_seeds import Dimensionality
 from ..algorithms import watershed
 from ..algorithms.morphology import parallel_distance_transform
-from ..targets.factory import TargetFactory
-from ..parameters import \
-     VolumeParameter, DatasetLocationParameter, is_empty_dataset_location
-from utilities import RequiresMixin, RunMixin, SingleThreadedMixin
+from ..parameters import EMPTY_LOCATION
+from ..targets import DestVolumeReader
+from .utilities import RequiresMixin, RunMixin, SingleThreadedMixin, \
+     DatasetMixin
 
-class SegmentTaskMixin:
+class SegmentTaskMixin(DatasetMixin):
     '''Segment a 3d volume
     
     Given a probability map, find markers and perform a segmentation on
     that volume.
     '''
-    volume = VolumeParameter(
-        description="The volume to segment")
-    prob_location = DatasetLocationParameter(
+    prob_loading_plan_path = luigi.Parameter(
         description="The location of the probability volume")
-    seed_location = DatasetLocationParameter(
+    seed_loading_plan_path = luigi.Parameter(
         description="The location of the seeds for the watershed")
-    mask_location = DatasetLocationParameter(
+    mask_loading_plan_path = luigi.Parameter(
         description="The location of the mask volume")
-    output_location = DatasetLocationParameter(
-        description="The location for the output segmentation")
     dimensionality = luigi.EnumParameter(
         enum=Dimensionality,
         description="Do either a 2D or 3D watershed, depending on this param")
 
     def input(self):
-        yield TargetFactory().get_volume_target(
-            location=self.prob_location, volume=self.volume)
-        yield TargetFactory().get_volume_target(
-            location=self.seed_location, volume=self.volume)
-        yield TargetFactory().get_volume_target(
-            location=self.mask_location,
-            volume=self.volume)
-    def output(self):
-        return TargetFactory().get_volume_target(
-            location=self.output_location, volume=self.volume)
+        loading_plans = [self.prob_loading_plan_path, 
+                         self.seed_loading_plan_path,
+                         self.mask_loading_plan_path]
+        for loading_plan in loading_plans:
+            for tgt in DestVolumeReader(loading_plan).get_source_targets():
+                yield tgt
     
     def estimate_memory_usage(self):
         '''Return an estimate of bytes of memory required by this task'''
@@ -96,7 +88,11 @@ class SegmentRunMixin:
         description="Z block size for parallel distance transform")
 
     def ariadne_run(self):
-        prob_volume, seed_volume, mask_volume = list(self.input())
+        prob_volume, seed_volume, mask_volume = [
+            DestVolumeReader(_) for _ in
+            self.prob_loading_plan_path,
+            self.seed_loading_plan_path,
+            self.mask_loading_plan_path]
         seg_volume = self.output()
         prob = prob_volume.imread()
         labels = seed_volume.imread()
@@ -132,16 +128,13 @@ class SegmentTask(SegmentTaskMixin, SegmentRunMixin, RequiresMixin,
     
     task_namespace = "ariadne_microns_pipeline"
 
-class SegmentCCTaskMixin:
+class SegmentCCTaskMixin(DatasetMixin):
     
-    volume = VolumeParameter(
-        description="The volume to be segmented")
-    prob_location = DatasetLocationParameter(
+    prob_loading_plan_path = luigi.Parameter(
         description="The location of the probability volume")
-    mask_location = DatasetLocationParameter(
+    mask_loading_plan_path = luigi.Parameter(
+        default=EMPTY_LOCATION,
         description="The location of the mask volume")
-    output_location = DatasetLocationParameter(
-        description="The location for the output segmentation")
     threshold = luigi.IntParameter(
         default=190,
         description="The probability threshold (from 0-255) to use as a"
@@ -155,18 +148,12 @@ class SegmentCCTaskMixin:
         description="True if the foreground is > threshold")
     
     def input(self):
-        yield TargetFactory().get_volume_target(
-            location = self.prob_location,
-            volume = self.volume)
-        if not is_empty_dataset_location(self.mask_location):
-            yield TargetFactory().get_volume_target(
-                location = self.mask_location,
-                volume = self.volume)
-    
-    def output(self):
-        return TargetFactory().get_volume_target(
-            location = self.output_location,
-            volume = self.volume)
+        loading_plans = [self.prob_loading_plan_path]
+        if self.mask_loading_plan_path != EMPTY_LOCATION:
+            loading_plans.append(self.mask_loading_plan_path)
+        for loading_plan in loading_plans:
+            for tgt in DestVolumeReader(loading_plan).get_source_targets():
+                yield tgt
     
     def apply_threshold(self, volume):
         '''Apply the threshold to the volume to get a binary volume
@@ -190,15 +177,15 @@ class SegmentCC2DRunMixin:
         description="Smoothing sigma of Gaussian applied prior to segmentation")
     
     def ariadne_run(self):
-        tgts = list(self.input())
-        prob_target = tgts[0]
-        if len(tgts) == 2:
-            mask_target = tgts[1]
+        prob_target = DestVolumeReader(self.prob_loading_plan_path)
+        if self.mask_loading_plan_path != EMPTY_LOCATION:
+            mask_target = DestVolumeReader(self.mask_loading_plan_path)
         else:
             mask_target = None
         threshold = self.threshold
         if self.sigma > 0:
-            prob = gaussian_filter(prob, (0, self.sigma, self.sigma))
+            prob = gaussian_filter(prob_target.imread(),
+                                   (0, self.sigma, self.sigma))
         fg = self.apply_threshold(volume)
         del prob
         if mask_target is not None:
@@ -226,7 +213,7 @@ class SegmentCC2DTask(SegmentCCTaskMixin,
     using non-membrane as the foreground.
     '''
 
-class SegmentCC3DRunMixin:    
+class SegmentCC3DRunMixin: 
     xy_sigma = luigi.FloatParameter(
         default=0.0,
         description="Smooothing sigma in the x and y direction "
@@ -236,10 +223,9 @@ class SegmentCC3DRunMixin:
         description="Smoothing sigma applied in the z direction")
     
     def ariadne_run(self):
-        tgts = list(self.input())
-        prob_target = tgts[0]
-        if len(tgts) == 2:
-            mask_target = tgts[1]
+        prob_target = DestVolumeReader(self.prob_loading_plan_path)
+        if self.mask_loading_plan_path != EMPTY_LOCATION:
+            mask_target = DestVolumeReader(self.mask_loading_plan_path)
         else:
             mask_target = None
         prob = prob_target.imread()
@@ -265,24 +251,15 @@ class SegmentCC3DTask(SegmentCCTaskMixin,
     on the foreground using a 6-connected structuring element.
     '''
 
-class UnsegmentTaskMixin:
-    volume = VolumeParameter(
-        description="The volume to be unsegmented")
-    input_location = DatasetLocationParameter(
+class UnsegmentTaskMixin(DatasetMixin):
+    input_loading_plan_path = DatasetLocationParameter(
         description="The location for the input segmentation")
-    output_location = DatasetLocationParameter(
-        description="The location for the output segmentation")
     
     def input(self):
-        yield TargetFactory().get_volume_target(
-            location = self.input_location,
-            volume = self.volume)
+        for tgt in DestVolumeReader(self.input_loading_plan_path) \
+            .get_source_targets():
+            yield tgt
     
-    def output(self):
-        return TargetFactory().get_volume_target(
-            location = self.output_location,
-            volume = self.volume)
-
 class UnsegmentRunMixin:
     use_min_contact = luigi.BoolParameter(
         default=False,
@@ -300,7 +277,7 @@ class UnsegmentRunMixin:
     
     def break_at_min_contact(self):
         '''Break objects in the Z direction at points of minimum contact'''
-        stack = self.input().next().imread()
+        stack = DestVolumeReader(self.input_loading_plan_path).imread()
         plane1 = stack[0]
         #
         # The offset for new objects
@@ -398,29 +375,23 @@ class UnsegmentTask(UnsegmentTaskMixin,
     
     task_namespace = "ariadne_microns_pipeline"
     
-class ZWatershedTaskMixin:
+class ZWatershedTaskMixin(DatasetMixin):
     
     volume=VolumeParameter(
          description="The volume to be segmented")
-    x_prob_location=DatasetLocationParameter(
+    x_prob_loading_plan_path=luigi.Parameter(
         description="Location of the x probability map")
-    y_prob_location=DatasetLocationParameter(
+    y_prob_loading_plan_path=luigi.Parameter(
         description="Location of the y probability map")
-    z_prob_location=DatasetLocationParameter(
+    z_prob_loading_plan_path=luigi.Parameter(
         description="Location of the z probability map")
-    output_location=DatasetLocationParameter(
-        description="Location for the segmentation output")
-    
-    def input(self):
-        tf = TargetFactory()
-        yield tf.get_volume_target(self.x_prob_location, self.volume)
-        yield tf.get_volume_target(self.y_prob_location, self.volume)
-        yield tf.get_volume_target(self.z_prob_location, self.volume)
-    
-    def output(self):
-        tf = TargetFactory()
-        return tf.get_volume_target(self.output_location, self.volume)
 
+    def input(self):
+        for loading_plan in self.x_prob_loading_plan_path,\
+            self.y_prob_loading_plan_path, self.z_prob_loading_plan_path:
+            for tgt in DestVolumeReader(loading_plan).get_source_targets():
+                yield tgt
+    
     def estimate_memory_usage(self):
         '''Return an estimate of bytes of memory required by this task'''
         v1 = np.prod([1408, 1408, 40])
@@ -445,16 +416,17 @@ class ZWatershedRunMixin:
     def ariadne_run(self):
         import zwatershed
         
-        xtgt, ytgt, ztgt = self.input()
+        xtgt, ytgt, ztgt = [
+            DestVolumeReader(loading_plan) for loading_plan in
+            self.x_prob_loading_plan_path, self.y_prob_loading_plan_path,
+            self.z_prob_loading_plan_path]
         volume = np.zeros((3,
-                           self.volume.depth,
-                           self.volume.height,
-                           self.volume.width), np.float32)
+                           xtgt.volume.depth,
+                           xtgt.volume.height,
+                           xtgt.volume.width), np.float32)
         for i, tgt in enumerate((ztgt, ytgt, xtgt)):
-            volume[i] = tgt.imread_part(
-            self.volume.x, self.volume.y, self.volume.z,
-            self.volume.width, self.volume.height, self.volume.depth)
-        result = zwatershed.zwatershed(volume / 255, [self.threshold])[0]
+            volume[i] = tgt.imread().astype(np.float32) / 255
+        result = zwatershed.zwatershed(volume, [self.threshold])[0]
         self.output().imwrite(result)
 
 class ZWatershedTask(ZWatershedTaskMixin,
