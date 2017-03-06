@@ -26,9 +26,11 @@ class FindSynapsesTaskMixin:
     receptor_map_loading_plan = luigi.Parameter(
         default = EMPTY_LOCATION,
         description = "The location of the synapse receptor probability map")
-    neuron_segmentation_loading_plan = luigi.Parameter(
+    neuron_segmentation_loading_plan_path = luigi.Parameter(
         default=EMPTY_LOCATION,
         description="The location of the segmented neurons.")
+    erode_with_neurons = luigi.BoolParameter(
+        description="Exclude areas within neurons")
     
     def input(self):
         if self.wants_dual_probability_maps:
@@ -36,8 +38,8 @@ class FindSynapsesTaskMixin:
                              self.receptor_map_loading_plan]
         else:
             loading_plans = [self.synapse_map_loading_plan_path]
-        if not is_empty_dataset_location(self.neuron_segmentation_loading_plan):
-            loading_plans.append(self.neuron_segmentation_loading_plan)
+        if not self.erode_with_neurons:
+            loading_plans.append(self.neuron_segmentation_loading_plan_path)
         for loading_plan in loading_plans:
             for tgt in DestVolumeReader(loading_plan).get_source_targets():
                 yield tgt
@@ -93,8 +95,6 @@ class FindSynapsesRunMixin:
     min_slice = luigi.IntParameter(
         default=3,
         description="Minimum acceptable size of a synapse in the Z direction")
-    erode_with_neurons = luigi.BoolParameter(
-        description="Exclude areas within neurons")
     
     def ariadne_run(self):
         if self.wants_dual_probability_maps:

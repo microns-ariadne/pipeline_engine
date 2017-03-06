@@ -170,6 +170,109 @@ void get_dir_files(
 }
 
 /*
+ * read_loading_plan - read a volume using a load plan
+ *
+ * path - path to the load plan file
+ * volumedata - read the volume data in here
+ *
+ * See the README.md file for the format of this file.
+ */
+template <typename T> void read_loading_plan(
+    std::string path,
+    VolumeData<T> &volumedata)
+{
+    Json::Reader reader;
+    Json::Value d;
+    
+    std::cout << "Reading load plan, " << path << std::endl;
+    ifstream fin(path);
+    if (! fin) {
+	throw ErrMsg("Error: input file, \"" + path + "\" cannot be opened.");
+    }
+    if (! reader.parse(fin, d)) {
+	throw ErrMsg("Cannot parse \"" + path + "\" as json.");
+    }
+    fin.close();
+    Json::Value dimensions = d["dimensions"];
+    Json::Uint depth = dimensions[0].asUInt();
+    Json::Uint height = dimensions[1].asUInt();
+    Json::Uint width = dimensions[2].asUInt();
+    Json::Uint x0 = d["x"].asUInt();
+    Json::Uint y0 = d["y"].asUInt();
+    Json::Uint z0 = d["z"].asUInt();
+    volumedata.reshape(vigra::MultiArrayShape<3>::type(
+        width, height, depth));
+    
+    Json::Value blocks = d["blocks"]
+    for (int i=0; i < blocks.size(); i++) {
+	Json::Value subvolume = blocks[i][0];
+	Json::Uint svx0 = subvolume["x"].asUInt();
+	Json::Uint svy0 = subvolume["y"].asUInt();
+	Json::Uint svz0 = subvolume["z"].asUInt();
+	Json::Uint svx1 = svx0 + subvolume["width"].asUInt();
+	Json::Uint svy1 = svy0 + subvolume["height"].asUInt();
+	Json::Uint svz1 = svz0 + subvolume["depth"].asUInt();
+	Json::Value location = blocks[i][1];
+	VolumeData<T> subvolumedata;
+	vigra::importVolume(subvolumedata, location.asString())
+	for (int z=svz0; z<svz1; ++z) {
+	    for (int y=svy0; y < svy1; ++y) {
+		for (int x=svx0; x < svx1; ++x) {
+		    volumedata(x-x0, y-y0, z-z0) = 
+		        subvolumedata(x-svx0, y-svy0, z-svz0);
+    }
+    std::cout << "Finished reading volume." << std::endl;
+}
+
+/*
+ * write_storage_plan - write a volume based on a storage plan
+ *
+ * path - path to the storage plan .json file
+ * volumedata - write the data from this volume
+ *
+ */
+template <typename T> void write_storage_plan(
+    std::string path,
+    VolumeData<T> &volumedata)
+{
+    std::cout << "Reading storage plan, " << path << std::endl;
+    ifstream fin(path);
+    if (! fin) {
+	throw ErrMsg("Error: input file, \"" + path + "\" cannot be opened.");
+    }
+    if (! reader.parse(fin, d)) {
+	throw ErrMsg("Cannot parse \"" + path + "\" as json.");
+    }
+    fin.close();
+    Json::Value dimensions = d["dimensions"];
+    Json::Uint depth = dimensions[0].asUInt();
+    Json::Uint height = dimensions[1].asUInt();
+    Json::Uint width = dimensions[2].asUInt();
+    Json::Uint x0 = d["x"].asUInt();
+    Json::Uint y0 = d["y"].asUInt();
+    Json::Uint z0 = d["z"].asUInt();
+    volumedata.reshape(vigra::MultiArrayShape<3>::type(
+        width, height, depth));
+    
+    Json::Value blocks = d["blocks"]
+    for (int i=0; i < blocks.size(); i++) {
+	Json::Value subvolume = blocks[i][0];
+	Json::Uint svx0 = subvolume["x"].asUInt();
+	Json::Uint svy0 = subvolume["y"].asUInt();
+	Json::Uint svz0 = subvolume["z"].asUInt();
+	Json::Uint svx1 = svx0 + subvolume["width"].asUInt();
+	Json::Uint svy1 = svy0 + subvolume["height"].asUInt();
+	Json::Uint svz1 = svz0 + subvolume["depth"].asUInt();
+	Json::Value location = blocks[i][1];
+	vigra::MultiArrayView<3, T> subvolume = volumedata.subarray(
+	    vigra::Shape(svx0 - x0, svy0 - y0, svz0 - z0),
+	    vigra::Shape(svx1 - x0, svy1 - y0, svz1 - z0));
+	vigra::exportVolume(subvolume, location.asString());
+    }
+    std::cout << "Finished writing volume" << std::endl;
+}
+
+/*
  * get_json_files - read in the probability volumes and watershed input files
  *                  from a JSON document
  *
@@ -213,19 +316,25 @@ void get_json_files(std::string path,
     Json::Value config = d["config"];
     for (int i=0; i < probabilities.size(); i++) {
 	Json::Value probability = probabilities[i];
-	std::vector<std::string> file_names;
-	for (int j=0; j < probability.size(); j++) {
-	    file_names.push_back(probability[j].asString());
-	}
-	std::vector<VolumeProbPtr> tmp = VolumeProb::create_volume_from_images(
-	    file_names);
-	prob_list.push_back(tmp[0]);
-	/*
-	 * The membrane probabilities appear as the first and second on the
-	 * list, hence the duplication of element 0 below.
-	 */
-	if (i == 0) {
+	std::vector<VolumeProbPtr> tmp;
+	if (config.isObject() && (! config["use-loading-plans"].empty())) {
+	    tmp = new VolumeProb;
+	    read_loading_plan(probability.asString(), tmp);
+	} else {
+	    std::vector<std::string> file_names;
+	    for (int j=0; j < probability.size(); j++) {
+		file_names.push_back(probability[j].asString());
+	    }
+	    tmp = VolumeProb::create_volume_from_images(
+		file_names);
 	    prob_list.push_back(tmp[0]);
+	    /*
+	     * The membrane probabilities appear as the first and second on the
+	     * list, hence the duplication of element 0 below.
+	     */
+	    if (i == 0) {
+		prob_list.push_back(tmp[0]);
+	    }
 	}
     }
     /*

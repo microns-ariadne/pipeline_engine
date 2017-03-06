@@ -1,5 +1,6 @@
 '''The task factory creates tasks for particular pipeline steps.'''
 
+import contextlib
 import json
 import luigi
 import os
@@ -33,6 +34,7 @@ from .skeletonize import SkeletonizeTask
 from .stitch_segmentation import StitchSegmentationTask, Compression
 from .synapse_statistics import SynapseStatisticsTask
 from .utilities import to_hashable
+from ..parameters import EMPTY_LOCATION
 from ..volumedb import VolumeDB, get_storage_plan_path, get_loading_plan_path
 
 class AMTaskFactory(object):
@@ -56,7 +58,111 @@ class AMTaskFactory(object):
         self.volume_db_url = volume_db_url
         assert isinstance(volume_db, VolumeDB)
         self.volume_db = volume_db
-   
+    
+    class __LP(object):
+        '''Class to handle context for creating a loading plan.
+        
+        See loading_plan() for documentation.
+        '''
+        def __init__(self, volume_db, volume, loading_plan_id, dataset_name,
+                     src_task):
+            assert isinstance(volume_db, VolumeDB)
+            self.volume_db = volume_db
+            self.volume = volume
+            self.loading_plan_id = loading_plan_id
+            self.dataset_name = dataset_name
+            self.src_task = src_task
+        def __or__(self, task):
+            self.volume_db.register_dataset_dependent(
+                self.loading_plan_id, task, self.dataset_name, self.volume,
+                src_task=self.src_task)
+            return task
+    
+    def loading_plan(self, volume, dataset_name, src_task=None):
+        '''Register a loading plan for a given volume
+        
+        There are several steps to regisetering a loading plan - getting
+        the loading_plan_id, figuring out where to store the loading plan file
+        and then actually registering the loading plan. This method is
+        designed to be used in the following way:
+        
+        loading_plan_path, lp = self.loading_plan(volume, dataset_name)
+        
+        task = lp | MyTask(loading_plan_path=loading_plan_path)
+        
+        :param volume: the volume to be loaded
+        :param dataset_name: the name of the dataset being requested
+        :param src_task: the task that produced the dataset. Default is accept
+        data from any task
+        :returns: a two-tuple of the path to the loading plan and a class
+        instance which will register the loading plan when the task is
+        piped into it.
+        '''
+        loading_plan_id = self.volume_db.get_loading_plan_id()
+        root = self.volume_db.get_datatype_root(dataset_name)
+        loading_plan_path = get_loading_plan_path(
+            root, loading_plan_id, img_volume, 
+            dataset_name)
+        return loading_plan_path, self.__LP(
+            self.volume_db, volume, loading_plan_id,  dataset_name, src_task)
+        
+    class __SP(object):
+        '''Class to handle context for creating a storage plan.
+        
+        See storage_plan() for documentation.
+        '''
+        def __init__(self, volume_db, volume, dataset_id, dataset_name):
+            assert isinstance(volume_db, VolumeDB)
+            self.volume_db = volume_db
+            self.volume = volume
+            self.dataset_id = dataset_id
+            self.dataset_name = dataset_name
+        def __or__(self, task):
+            self.volume_db.register_dataset(
+                self.dataset_id, task, self.dataset_name, self.volume)
+            return task
+    
+    def storage_plan(self, volume, dataset_name):
+        '''Register a storage plan for a given volume
+        
+        There are several steps to regisetering a storage plan - getting
+        the dataset_id, figuring out where to store the storage plan file
+        and then actually registering the storage plan. This method is
+        designed to be used in the following way:
+        
+        storage_plan_path, sp = self.storage_plan(volume, dataset_name)
+        
+        task = sp | MyTask(storage_plan=storage_plan_path)
+        
+        :param volume: the volume to be written
+        :param dataset_name: the name of the dataset being written
+        :returns: a two-tuple of the path to the storage plan and a class
+        instance which will register the storage plan when the task is
+        piped into it.
+        '''
+        dataset_id = self.volume_db.get_dataset_id()
+        root = self.volume_db.get_datatype_root(dataset_name)
+        storatge_plan_path = get_storage_plan_path(
+            root, dataset_id, img_volume, 
+            dataset_name)
+        return storage_plan_path, self.__SP(
+            self.volume_db, volume, loading_plan_id,  dataset_name)
+    
+    class __Null(object):
+        '''This class can be used in place of __LP or __SP to do nothing
+        
+        Usage:
+        
+        null = self.__Null()
+        
+        foo = null | bar
+        
+        assert foo == bar
+        '''
+        def __or__(self, other):
+            return other
+
+        
     def gen_get_volume_task(self,
                             experiment,
                             sample,
@@ -79,19 +185,16 @@ class AMTaskFactory(object):
         :param resolution: the MIPMAP resolution of the volume
         :returns: A task that outputs a volume target.
         '''
-        dataset_id = self.volume_db.get_dataset_id()
-        root = self.volume_db.get_datatype_root(dataset_name)
-        storage_plan = get_storage_plan_path(root, dataset_id, volume, 
-                                            dataset_name)
-        task = DownloadFromButterflyTask(experiment=experiment,
-                                         sample=sample,
-                                         dataset=dataset,
-                                         channel=channel,
-                                         url=url,
-                                         volume=volume,
-                                         resolution=resolution,
-                                         storage_plan=storage_plan)
-        self.volume_db.register_dataset(dataset_id, task, dataset_name, volume)
+        storage_plan, sp = self.storage_plan(volume, dataset_name)
+        task = sp | DownloadFromButterflyTask(
+            experiment=experiment,
+            sample=sample,
+            dataset=dataset,
+            channel=channel,
+            url=url,
+            volume=volume,
+            resolution=resolution,
+            storage_plan=storage_plan)
         return task
 
     def gen_classify_task(
@@ -114,11 +217,7 @@ class AMTaskFactory(object):
         #
         # Make the loading plan
         #
-        loading_plan_id = self.volume_db.get_loading_plan_id()
-        root = self.volume_db.get_datatype_root(dataset_name)
-        loading_plan = get_loading_plan_path(
-            root, loading_plan_id, img_volume, 
-            dataset_name)
+        loading_plan, lp = self.loading_plan(img_volume, dataset_name)
         #
         # Make a storage plan for each output channel
         #
@@ -145,16 +244,11 @@ class AMTaskFactory(object):
         #
         # Create the task
         #
-        task = ClassifyTask(classifier_path=classifier_path,
-                            image_loading_plan=loading_plan,
-                            prob_plans=prob_plans,
-                            class_names=datasets,
-                            done_file=done_file_location)
-        #
-        # Register the loading plan
-        #
-        self.volume_db.register_dataset_dependent(
-            loading_plan_id, task, dataset_name, img_volume)
+        task = lp | ClassifyTask(classifier_path=classifier_path,
+                                 image_loading_plan=loading_plan,
+                                 prob_plans=prob_plans,
+                                 class_names=datasets,
+                                 done_file=done_file_location)
         #
         # Register the datasets
         #
@@ -192,46 +286,32 @@ class AMTaskFactory(object):
         #
         # Get the loading plan for the probability map
         #
-        loading_plan_id = self.volume_db.get_loading_plan_id()
-        root = self.volume_db.get_datatype_root(prob_dataset_name)
-        loading_plan_path = get_loading_plan_path(
-            root, loading_plan_id, volume, prob_dataset_name)
+        loading_plan_path, lp = self.loading_plan(volume, prob_dataset_name)
         #
         # Get the storage plan for the seeds
         #
-        dataset_id = self.volume_db.get_dataset_id()
-        root = self.volume_db.get_datatype_root(seeds_dataset_name)
-        storage_plan = get_storage_plan_path(
-            root, dataset_id, volume, seeds_dataset_name)
+        storage_plan, sp = self.storage_plan(volume, seeds_dataset_name)
         #
         # Create the task
         #
-        task = FindSeedsTask(prob_loading_plan_path=loading_plan_path,
-                             storage_plan=storage_plan,
-                             dimensionality=dimensionality,
-                             method=method,
-                             sigma_xy=sigma_xy,
-                             sigma_z=sigma_z,
-                             threshold=threshold,
-                             minimum_distance_xy=minimum_distance_xy,
-                             minimum_distance_z=minimum_distance_z,
-                             distance_threshold=distance_threshold)
-        #
-        # Register the loading plan
-        #
-        self.volume_db.register_dataset_dependent(
-            loading_plan_id, task, prob_dataset_name, volume)
-        #
-        # Register the storage plan
-        #
-        self.volume_db.register_dataset(
-            dataset_id, task, seeds_dataset_name, volume)
+        task = lp | sp | FindSeedsTask(
+            prob_loading_plan_path=loading_plan_path,
+            storage_plan=storage_plan,
+            dimensionality=dimensionality,
+            method=method,
+            sigma_xy=sigma_xy,
+            sigma_z=sigma_z,
+            threshold=threshold,
+            minimum_distance_xy=minimum_distance_xy,
+            minimum_distance_z=minimum_distance_z,
+            distance_threshold=distance_threshold)
         return task
     
     def gen_segmentation_task(
         self, volume, prob_dataset_name, seeds_dataset_name, 
         mask_dataset_name, seg_dataset_name,
-        sigma_xy, sigma_z, dimensionality):
+        sigma_xy, sigma_z, dimensionality,
+        seeds_src_task=None, mask_src_task=None):
         '''Generate a segmentation task
 
         Generate a segmentation task.  The task takes a probability map of
@@ -250,58 +330,40 @@ class AMTaskFactory(object):
         directions
         :param sigma_z: the sigma of the smoothing gaussian in the Z direction
         :param dimensionality: Whether to do 2D or 3D segmentation
+        :param seeds_src_task: the task that produced the seeds. Default is
+        get seeds from whatever volume overlapped this one.
+        :param mask_src_task: the task that produced the mask. Default is get
+        mask from any mask that overlaps.
         '''
         #
         # Get the load plans for the inputs
         #
-        prob_load_plan_id, mask_load_plan_id, seeds_load_plan_id = [
-            self.volume_db.get_loading_plan_id() for _ in range(3)]
-        prob_root, mask_root, seeds_root = [
-            self.volume_db.get_datatype_root(dataset_name)
-            for dataset_name in prob_dataset_name, mask_dataset_name,
-            seeds_dataset_name]
-        prob_load_plan_path, mask_load_plan_path, seeds_load_plan_path = [
-            get_loading_plan_path(root, loading_plan_id, volume, dataset_name)
-            for root, loading_plan_id, dataset_name in (
-                (prob_root, prob_loading_plan_id, prob_dataset_name),
-                (mask_root, mask_loading_plan_id, mask_dataset_name),
-                (seeds_root, seeds_load_plan_id, seeds_dataset_name))]
+        prob_load_plan_path, plp = self.loading_plan(volume, prob_dataset_name)
+        mask_load_plan_path, mlp = self.loading_plan(
+            volume, mask_dataset_name, mask_src_task)
+        seeds_load_plan_path, slp = self.loading_plan(
+            volume, seeds_dataset_name, seeds_src_task)
         #
         # Get the storage plan for the segmentation
         #
-        root = self.volume_db.get_datatype_root(seg_dataset_name)
-        dataset_id = self.volume_db.get_dataset_id()
-        storage_plan = get_storage_plan_path(root, dataset_id, volume, 
-                                             seg_dataset_name)
+        storage_plan, sp = self.storage_plan(volume, seg_dataset_name)
         #
         # Create the task
         #
-        task = SegmentTask(volume=volume, 
-                           prob_loading_plan_path=prob_load_plan_path,
-                           mask_loading_plan_path=mask_load_plan_path,
-                           seed_loading_plan_path=seeds_load_plan_path,
-                           storage_plan=storage_plan,
-                           sigma_xy=sigma_xy,
-                           sigma_z=sigma_z,
-                           dimensionality=dimensionality)
-        #
-        # Register the load plans
-        #
-        self.volume_db.register_dataset_dependent(
-             prob_load_plan_id, task, prob_dataset_name, volume)
-        self.volume_db.register_dataset_dependent(
-                mask_load_plan_id, task, mask_dataset_name, volume)
-        self.volume_db.register_dataset_dependent(
-                seeds_load_plan_id, task, seeds_dataset_name, volume)        
-        #
-        # Register the storage plan
-        #
-        self.volume_db.register_dataset(
-            dataset_id, task, seg_dataset_name, volume)
+        task = sp | plp | mlp | slp | SegmentTask(
+            volume=volume, 
+            prob_loading_plan_path=prob_load_plan_path,
+            mask_loading_plan_path=mask_load_plan_path,
+            seed_loading_plan_path=seeds_load_plan_path,
+            storage_plan=storage_plan,
+            sigma_xy=sigma_xy,
+            sigma_z=sigma_z,
+            dimensionality=dimensionality)
         return task
     
     def gen_cc_segmentation_task(
-        self, volume, prob_location, mask_location, seg_location, threshold,
+        self, volume, prob_dataset_name, mask_dataset_name, seg_dataset_name,
+        threshold,
         dimensionality=Dimensionality.D2,
         fg_is_higher=False):
         '''Generate a 2d segmentation task
@@ -310,9 +372,10 @@ class AMTaskFactory(object):
         on the individual planes.
         
         :param volume: the volume to be segmented, in global coordinates
-        :param prob_location: where to find the membrane probability volume
-        :param mask_location: where to find the mask location
-        :param seg_location: where to put the segmentation
+        :param prob_dataset_name: Name of the membrane probability dataset,
+        e.g. "membrane"
+        :param mask_dataset_name: Name of the mask dataset, e.g. "mask"
+        :param seg_dataset_name: Name for the segmentation dataset
         :param threshold: the cutoff in the membrane probabilities between
         membrane and not-membrane, scaled from 0 to 255.
         :param dimensionality: whether to do 2D or 3D connected components
@@ -320,24 +383,35 @@ class AMTaskFactory(object):
         :param fg_is_higher: True if foreground is above threshold, False if
                              below
         '''
+        #
+        # Get the load plans for the inputs
+        #
+        prob_load_plan_path, plp = self.loading_plan(volume, prob_dataset_name)
+        mask_load_plan_path, mlp = self.loading_plan(volume, mask_dataset_name)
+        seeds_load_plan_path, slp = self.loading_plan(
+            volume, seeds_dataset_name)
+        #
+        # Get the storage plan for the segmentation
+        #
+        storage_plan, sp = self.storage_plan(volume, seg_dataset_name)
+        
         if dimensionality == Dimensionality.D2:
-            return SegmentCC2DTask(volume=volume,
-                                 prob_location=prob_location,
-                                 mask_location=mask_location,
-                                 output_location=seg_location,
-                                 threshold=threshold,
-                                 fg_is_higher=fg_is_higher)
+            task_class = SegmentCC2DTask
         else:
-            return SegmentCC3DTask(volume=volume,
-                                 prob_location=prob_location,
-                                 mask_location=mask_location,
-                                 output_location=seg_location,
-                                 threshold=threshold,
-                                 fg_is_higher=fg_is_higher)
+            task_class = SegmentCC3DTask
+        task = sp | plp | mlp | slp | task_class(
+            prob_loading_plan_path=prob_loading_plan_path,
+            mask_loading_plan_path=mask_load_plan_path,
+            storage_plan=storage_plan,
+            threshold=threshold,
+            fg_is_higher=fg_is_higher)
+        return task
 
     
-    def gen_unsegmentation_task(self, volume, input_location, output_location,
-                                use_min_contact, contact_threshold):
+    def gen_unsegmentation_task(self, volume, 
+                                input_dataset_name, output_dataset_name,
+                                use_min_contact, contact_threshold,
+                                src_task=None):
         '''Generate a 3d to 2d unsegmentation task
         
         Convert a 3d segmentation into a stack of 2d segmentations. Connected
@@ -345,67 +419,96 @@ class AMTaskFactory(object):
         pixels in the 2d planes with the same label.
         
         :param volume:  the volume to be segmented
-        :param input_location: the location of the input segmentation
-        :param output_location: the location for the output segmentation
+        :param input_dataset_name: the dataset name of the input segmentation,
+        e.g. "segmentation"
+        :param output_dataset_name: dataset name of the output segmentation,
+        e.g. "resegmentation"
         :param use_min_contact: only break objects if they have less than
         a certain amount of contact area between planes
         :param contact_threshold: minimum area to keep an object together
+        :param src_task: the task that produced the input segmentation. Default
+        is to take segmentation from whatever overlaps
         '''
-        return UnsegmentTask(volume=volume, 
-                             input_location=input_location,
-                             output_location=output_location,
-                             use_min_contact=use_min_contact,
-                             contact_threshold=contact_threshold)
+        #
+        # Get the loading plan for the input segmentation
+        #
+        loading_plan_path, lp = self.loading_plan(
+            volume, input_dataset_name, src_task)
+        #
+        # Get the storage plan for the output segmentation
+        #
+        storage_plan = self.storage_plan(volume, output_dataset_name)
+        
+        return sp | lp | UnsegmentTask(
+            volume=volume, 
+            input_loading_plan_path=loading_plan_path,
+            storage_plan=storage_plan,
+            use_min_contact=use_min_contact,
+            contact_threshold=contact_threshold)
     
-    def gen_filter_task(self, volume, input_location, output_location,
-                        min_area):
+    def gen_filter_task(self, volume, input_dataset_name, output_dataset_name,
+                        min_area, src_task=None):
         '''Generate a task that filters small objects
         
         :param volume: the volume of the segmentation
-        :param input_location: the location of the input segmentation
-        :param output_location: the location for the output segmentation
+        :param input_dataset_name: the dataset name of the input segmentation
+        :param output_dataset_name: the dataset name of the output segmentation
         :param min_area: the minimum allowable area for a segment
+        :param src_task: the task supplying the input segmentation
         '''
-        return FilterSegmentationTask(
+        loading_plan_path, lp = self.loading_plan(
+            volume, input_dataset_name, src_task)
+        storage_plan, sp = self.storage_plan(volume, output_dataset_name)
+        return sp | lp | FilterSegmentationTask(
             volume=volume,
-            input_location=input_location,
-            output_location=output_location,
+            input_loading_plan_path=loading_plan_path,
+            storage_plan=storage_plan,
             min_area=min_area)
     
     def gen_skeletonize_task(
-        self, volume, segmentation_location, skeleton_location,
-        xy_nm, z_nm, decimation_factor=0):
+        self, volume, segmentation_dataset_name, skeleton_location,
+        xy_nm, z_nm, decimation_factor=0, src_task=None):
         '''Generate a skeletonize task
         
         The skeletonize task takes a segmentation and produces .swc files
         (see http://research.mssm.edu/cnic/swc.html).
         
         :param volume: the volume in global coordinates of the segmentation
-        :param segmentation_location: the location of the segmentation volume
+        :param segmentation_dataset_name: the dataset name of the segmentation
+        to skeletonize
         :param skeleton_location: the name of the directory that will hold
             the .swc files.
         :param xy_nm: the size of a voxel in the x and y directions
         :param z_nm: the size of a voxel in the z direction
         :param decimation_factor: remove a skeleton leaf if it is less than
             this factor of its parent's volume.
+        :param src_task: the task that produced the segmentation. Default
+        is don't care
         '''
-        return SkeletonizeTask(
+        segmentation_loading_plan_path, lp = self.loading_plan(
+            volume, segmentation_dataset_name, src_task)
+        return lp | SkeletonizeTask(
             volume=volume,
-            segmentation_location=segmentation_location,
+            segmentation_loading_plan_path=segmentation_loading_plan_path,
             skeleton_location=skeleton_location,
             xy_nm=xy_nm, z_nm=z_nm, 
             decimation_factor=decimation_factor)
     
     def gen_find_synapses_task(
-        self, volume, syn_location, neuron_segmentation, output_location,
+        self, volume, synapse_prob_dataset_name, output_dataset_name,
         erosion_xy, erosion_z, sigma_xy, sigma_z, threshold,
-        min_size_2d, max_size_2d, min_size_3d, min_slice):
+        min_size_2d, max_size_2d, min_size_3d, min_slice,
+        neuron_segmentation_dataset_name=None):
         '''Generate a task to segment synapses
         
         :param volume: the volume to segment
-        :param syn_location: the location of the synapse prob map
-        :param neuron_location: the location of the neuron prob map
-        :param output_location: the location for the output segmentation
+        :param synapse_prob_dataset: the dataset name of the synapse
+        probabilities, e.g. "synapse"
+        :param neuron_segmentation_dataset: the dataset name of the
+        segmentation of the neurons. By default, do not use the neuron
+        dataset.
+        :param output_dataset_name: the dataset name for the synapse
+        segmentation, e.g. "synapse-segmentation"
         :param erosion_xy: how much to erode neurons in the x/y direction
         :param erosion_z: how much to erode neurons in the z direction
         :param sigma_xy: The sigma for the smoothing gaussian in the x and y
@@ -418,33 +521,53 @@ class AMTaskFactory(object):
         :param min_size_3d: discard any 3d segments with area less than this.
         :param min_slice: discard any 3d segments whose z-extent is lt this.
         '''
-        return FindSynapsesTask(volume=volume,
-                                synapse_map_location=syn_location,
-                                neuron_segmentation=neuron_segmentation,
-                                output_location=output_location,
-                                erosion_xy=erosion_xy,
-                                erosion_z= erosion_z,
-                                sigma_xy=sigma_xy,
-                                sigma_z=sigma_z,
-                                threshold=threshold,
-                                min_size_2d=min_size_2d,
-                                max_size_2d=max_size_2d,
-                                min_size_3d=min_size_3d,
-                                min_slice=min_slice)
+        #
+        # Get the loading plans
+        #
+        synprob_loading_plan_path, slp = self.loading_plan(
+            volume, synapse_prob_dataset_name)
+        if neuron_segmentation_dataset_name is None:
+            neuron_loading_plan_path = EMPTY_LOCATION
+            nlp = self.__Null()
+            erode_with_neurons=False
+        else:
+            neuron_loading_plan_path, nlp = self.loading_plan(
+                volume, neuron_segmentation_dataset_name)
+            erode_with_neurons = True
+        #
+        # Get the storage plan
+        #
+        storage_plan, sp = self.storage_plan(volume, output_dataset_name)
+        return slp | nlp | sp | FindSynapsesTask(
+            volume=volume,
+            synapse_map_loading_plan_path=synprob_loading_plan_path,
+            neuron_segmentation_loading_plan_path=neuron_loading_plan_path,
+            storage_plan = storage_plan,
+            erosion_xy=erosion_xy,
+            erosion_z= erosion_z,
+            sigma_xy=sigma_xy,
+            sigma_z=sigma_z,
+            threshold=threshold,
+            min_size_2d=min_size_2d,
+            max_size_2d=max_size_2d,
+            min_size_3d=min_size_3d,
+            min_slice=min_slice,
+            erode_with_neurons=erode_with_neurons)
     
     def gen_find_synapses_tr_task(
-        self, volume, transmitter_location, receptor_location,
-        neuron_segmentation, output_location,
+        self, volume, transmitter_dataset_name, receptor_dataset_name,
+        output_dataset_name,
         erosion_xy, erosion_z, sigma_xy, sigma_z, threshold,
-        min_size_2d, max_size_2d, min_size_3d, min_slice):
+        min_size_2d, max_size_2d, min_size_3d, min_slice,
+        neuron_dataset_name = None):
         '''Generate a task to segment synapses w/a transmitter and receptor map
         
         :param volume: the volume to segment
-        :param transmitter_location: the location of the transmitter
-                                     probability map
-        :param receptor_location: the location of the receptor probability map
-        :param neuron_location: the location of the neuron prob map
-        :param output_location: the location for the output segmentation
+        :param transmitter_dataset_name: the name of the transmitter
+        probability map dataset
+        :param receptor_location: the receptor probability map dataset name
+        :param neuron_dataset_name: the name of the neuron segmentation dataset
+        :param output_dataset_name: the name of the synapse segmentation dataset
         :param erosion_xy: how much to erode neurons in the x/y direction
         :param erosion_z: how much to erode neurons in the z direction
         :param sigma_xy: The sigma for the smoothing gaussian in the x and y
@@ -457,31 +580,54 @@ class AMTaskFactory(object):
         :param min_size_3d: discard any 3d segments with area less than this.
         :param min_slice: discard any 3d segments whose z-extent is lt this.
         '''
-        return FindSynapsesTask(volume=volume,
-                                transmitter_map_location=transmitter_location,
-                                receptor_map_location=receptor_location,
-                                neuron_segmentation=neuron_segmentation,
-                                output_location=output_location,
-                                wants_dual_probability_maps=True,
-                                erosion_xy=erosion_xy,
-                                erosion_z= erosion_z,
-                                sigma_xy=sigma_xy,
-                                sigma_z=sigma_z,
-                                threshold=threshold,
-                                min_size_2d=min_size_2d,
-                                max_size_2d=max_size_2d,
-                                min_size_3d=min_size_3d,
-                                min_slice=min_slice)
+        #
+        # Get the loading plans
+        #
+        transmitter_loading_plan_path, tlp = self.loading_plan(
+            volume, transmitter_dataset_name)
+        receptor_loading_plan_path, rlp = self.loading_plan(
+            volume, receptor_dataset_name)
+        if neuron_dataset_name is None:
+            neuron_loading_plan_path = EMPTY_LOCATION
+            nlp = self.__Null()
+            erode_with_neurons=False
+        else:
+            neuron_loading_plan_path, nlp = self.loading_plan(
+                volume, neuron_dataset_name)
+            erode_with_neurons = True
+        #
+        # Get the storage plan
+        #
+        storage_plan, sp = self.storage_plan(volume, output_dataset_name)
+        return tlp | rlp | nlp | sp | FindSynapsesTask(
+            volume=volume,
+            transmitter_map_loading_plan_path=transmitter_loading_plan_path,
+            receptor_map_loading_plan_path=receptor_loading_plan_path,
+            neuron_segmentation_loading_plan_path=neuron_loading_plan_path,
+            storage_plan = storage_plan,
+            erosion_xy=erosion_xy,
+            erosion_z= erosion_z,
+            sigma_xy=sigma_xy,
+            sigma_z=sigma_z,
+            threshold=threshold,
+            min_size_2d=min_size_2d,
+            max_size_2d=max_size_2d,
+            min_size_3d=min_size_3d,
+            min_slice=min_slice,
+            wants_dual_probability_maps=True,
+            erode_with_neurons=erode_with_neurons)
     
     def gen_connect_synapses_task(
-        self, volume, synapse_location, neuron_location, output_location,
-        xy_dilation, z_dilation, min_contact):
+        self, volume, synapse_dataset_name, neuron_dataset_name, 
+        output_location,
+        xy_dilation, z_dilation, min_contact, 
+        synapse_src_task=None, neuron_src_task=None):
         '''Generate a task to connect synapses to neurons
         
         :param volume: the volume containing the synapses and neurons
-        :param synapse_location: the location of the synapse segmentation
+        :param synapse_dataset_name: the name of the synapse segmentation
                                  dataset
-        :param neuron_location: the location of the neuron segmentation dataset
+        :param neuron_dataset_name: the name of the neuron segmentation dataset
         :param output_location: the location for the json file containing
                                 the connections
         :param xy_dilation: how much to dilate the synapses in the X and Y
@@ -489,17 +635,23 @@ class AMTaskFactory(object):
         :param z_dilation: how much to dilate in the Z direction
         :param min_contact: do not connect if fewer than this many overlapping
                             voxels
-        
+        :param synapse_src_task: the task providing the synapse segmentation
+        Default is take segmentation from any task.
+        :param neuron_src_task: the task providing the neuron segmentation
         The structure of the output is a dictionary of lists. The lists
         are columns of labels and the rows are two neuron labels that
         match one segment label.
         
         The dictionary keys are "neuron_1", "neuron_2", "synapse"
         '''
-        return ConnectSynapsesTask(
+        synapse_load_plan, slp = self.loading_plan(
+            volume, synapse_dataset_name, synapse_src_task)
+        neuron_load_plan, nlp = self.loading_plan(
+            volume, neuron_dataset_name, neuron_src_task)
+        return slp | nlp | ConnectSynapsesTask(
             volume=volume,
-            synapse_seg_location=synapse_location,
-            neuron_seg_location=neuron_location,
+            synapse_seg_load_plan_path=synapse_load_plan,
+            neuron_seg_load_plan_path=neuron_load_plan,
             output_location=output_location,
             xy_dilation=xy_dilation,
             z_dilation=z_dilation,
@@ -522,44 +674,53 @@ class AMTaskFactory(object):
             output_location=output_location)
     
     def gen_match_neurons_task(
-        self, volume, gt_location, detected_location, output_location):
+        self, volume, gt_dataset_name, detected_dataset_name, 
+        output_location, detected_src_task=None):
         '''Match detected neurons to ground truth based on maximum overlap
 
         :param volume: the volume being analyzed
-        :param gt_location: the location on disk of the ground truth neuron
-                            segmentation
-        :param detected_location: the location on disk of the automated
-                                  neuron segmentation
+        :param gt_dataset_name: the name of the dataset providing ground-truth
+        segmentation of neurons
+        :param detected_dataset_name: the name of the dataset providing
+        the pipeline's segmentation
         :param output_location: the location on disk for the .json file
                                 that gives the gt neuron that matches
                                 the detected
+        :param detected_src_task: the task that produced the segmentation.
+        Default is take data from whatever overlaps
         '''
-        return MatchNeuronsTask(
+        gt_loading_plan, glp = self.loading_plan(volume, gt_dataset_name)
+        detected_loading_plan, dlp = self.loading_plan(
+            volume, detected_dataset_name, detected_src_task)
+        return glp | dlp | MatchNeuronsTask(
             volume=volume,
-            gt_location=gt_location,
-            detected_location=detected_location,
+            gt_load_plan_path=gt_loading_plan,
+            detected_load_plan_path=detected_loading_plan,
             output_location=output_location)
     
     def gen_match_synapses_task(
-        self, volume, gt_location, detected_location, output_location,
-        method):
+        self, volume, gt_dataset_name, detected_dataset_name, output_location,
+        method, detected_src_task=None):
         '''Generate a task to match ground truth synapses to detected
         
         :param volume: The volume to analyze
-        :param gt_location: The location of the ground-truth neurons on disk
-        :param detected_location: The location of the detected neurons
-            on disk
+        :param gt_dataset_name: The name of the ground-truth neurons dataset
+        :param detected_dataset_name: The name of the detected neuron dataset
         :param output_location: where to store the .json file with the
             synapse-synapse correlates
         :param method: one of the MatchMethod enums - either "overlap" to
         match detected and gt synapses by maximum overlap or "distance"
         to match them by closest distance.
         '''
-        return MatchSynapsesTask(volume=volume,
-                                 gt_location=gt_location,
-                                 detected_location=detected_location,
-                                 output_location=output_location,
-                                 match_method=method)
+        gt_loading_plan, glp = self.loading_plan(volume, gt_dataset_name)
+        detected_loading_plan, dlp = self.loading_plan(
+            volume, detected_dataset_name, detected_src_task)
+        return glp | dlp | MatchSynapsesTask(
+            volume=volume,
+            gt_loading_plan_path=gt_loading_plan,
+            detected_loading_plan_path=detected_loading_plan,
+            output_location=output_location,
+            match_method=method)
     
     def gen_synapse_statistics_task(
         self, synapse_matches, detected_synapse_connections, neuron_map,
@@ -614,6 +775,7 @@ class AMTaskFactory(object):
         :param classifier_filename: the classifier trained to assess merge/no
         merge decisions.
         '''
+        assert False, "TODO: implement NeuroproofTask with plans"
         neuroproof, ld_library_path = \
             self.__get_neuroproof_config("neuroproof_graph_predict")
         return NeuroproofTask(volume=volume,
@@ -626,9 +788,9 @@ class AMTaskFactory(object):
 
     def gen_neuroproof_learn_task(self,
                                   volume,
-                                  prob_location,
-                                  seg_location,
-                                  gt_location,
+                                  prob_dataset_name,
+                                  seg_dataset_name,
+                                  gt_dataset_name,
                                   output_location,
                                   strategy=StrategyEnum.all,
                                   num_iterations=1,
@@ -638,10 +800,11 @@ class AMTaskFactory(object):
         
         :param volume: the volume for the probability, segmentation and
                        ground-truth data.
-        :param prob_location: the location of the probability volume
-        :param seg_location: the location of the segmentation volume
+        :param prob_dataset_name: the name of the probability dataset, e.g.
+        "membrane"
+        :param seg_dataset_name: the name of the segmentation dataset
                        produced by the pipeline
-        :param gt_location: the location of the ground truth segmentation
+        :param gt_dataset_name: the name of the ground truth segmentation
         :param output_location: the location for the classifier file.
         :param strategy: the strategy to use for classification.
         :param num_iterations: the number of times to refine the classifier
@@ -651,11 +814,15 @@ class AMTaskFactory(object):
         '''
         neuroproof, ld_library_path = self.__get_neuroproof_config(
             "neuroproof_graph_learn")
-        return NeuroproofLearnTask(
+        prob_loading_plan, plp = self.loading_plan(volume, prob_dataset_name)
+        seg_loading_plan, slp = self.loading_plan(volume, seg_dataset_name)
+        gt_loading_plan, glp = self.loading_plan(volume, gt_dataset_name)
+        
+        return plp | slp | glp | NeuroproofLearnTask(
             volume=volume,
-            prob_location=prob_location,
-            seg_location=seg_location,
-            gt_location=gt_location,
+            prob_loading_plan_path=prob_loading_plan,
+            seg_loading_plan_path=seg_loading_plan,
+            gt_loading_plan_path=gt_loading_plan,
             output_location=output_location,
             neuroproof=neuroproof,
             neuroproof_ld_library_path=ld_library_path,
@@ -665,38 +832,58 @@ class AMTaskFactory(object):
             use_mito=use_mito)
     
     def gen_mask_border_task(
-        self, volume, prob_location, mask_location, threshold=250):
+        self, volume, prob_dataset_name, mask_dataset_name, threshold=250):
         '''Generate the outer and border masks for a volume
         
         :param volume: the volume being masked
-        :param prob_location: the location of the membrane probabilities
-        :param mask_location: where to write the masks
+        :param prob_dataset_name: the name of the membrane probability dataset,
+        e.g. "membrane"
+        :param mask_dataset_name: the name for the mask dataset, e.g. "mask"
         :param threshold: Mask out voxels with membrane probabilities at this
         threshold or higher.
         '''
-        return MaskBorderTask(volume=volume,
-                              prob_location=prob_location,
-                              mask_location=mask_location,
-                              threshold=threshold)
+        prob_loading_plan_path, lp = self.loading_plan(
+            volume, prob_dataset_name)
+        storage_plan, sp = self.storage_plan(volume, mask_dataset_name)
+        return lp | sp | MaskBorderTask(
+            volume=volume,
+            prob_loading_plan_path=prob_loading_plan_path,
+            storage_plan=storage_plan,
+            threshold=threshold)
     
     def gen_connected_components_task(
-        self, volume1, location1, volume2, location2, overlap_volume,
-        output_location):
+        self, dataset_name, volume1, src_task1, volume2, src_task2, 
+        overlap_volume, output_location):
         '''Find the connected components between two segmentation volumes
         
+        :param dataset_name: the name of the segmentation dataset, 
+        e.g. "neuroproof"
         :param volume1: the volume of the first segmentation
-        :param location1: the location of the first segmentation's dataset
+        :param src_task1: the task that produced the first volume
         :param volume2: the volume of the second segmentation
-        :param location2: the location of the second segmentation's dataset
+        :param src_task2: the task that produced the second volume
         :param overlap_volume: the volume to be scanned for connected components
         :param output_location: where to write the data file
         '''
-        return ConnectedComponentsTask(volume1=volume1,
-                                       location1=location1,
-                                       volume2=volume2,
-                                       location2=location2,
-                                       overlap_volume=overlap_volume,
-                                       output_location=output_location)
+        #
+        # Lots of loading plans here: a cutout and complete one for each
+        # segmentation.
+        #
+        cutout1, c1lp = self.loading_plan(
+            overlap_volume, dataset_name, src_task1)
+        full1, f1lp = self.loading_plan(volume1, dataset_name, src_task1)
+        cutout2, c2lp = self.loading_plan(
+            overlap_volume, dataset_name, src_task2)
+        full2, f2lp = self.loading_plan(volume2, dataset_name, src_task2)
+        
+        return c1lp | f1lp | c2lp | f2lp | ConnectedComponentsTask(
+            volume1=volume1,
+            cutout_loading_plan1_path=cutout1,
+            segmentation_loading_plan1_path=full1,
+            volume2=volume2,
+            cutout_loading_plan2_path=cutout2,
+            segmentation_loading_plan2_path=full2,
+            output_location=output_location)
     
     def gen_all_connected_components_task(
         self, input_locations, output_location):
@@ -715,29 +902,42 @@ class AMTaskFactory(object):
                                           output_location=output_location)
     
     def gen_volume_relabeling_task(
-        self, input_volumes, relabeling_location, 
-        output_volume, output_location):
+        self, dataset_name, input_volumes, relabeling_location, 
+        output_volume, output_dataset_name):
         '''Relabel a segmentation using global labels
         
         Use the output of the AllConnectedComponents task to map
         input segmentations to a single output segmentation using
         globally-valid labels.
         
+        :param dataset_name: the name of the segmentation dataset
         :param input_volumes: a sequence of dictionaries having keys of
-        "volume" and "location". Each "volume" is a
+        "volume" and "task". Each "volume" is a
         :py:class:`ariadne_microns_pipeline.parameters.Volume` describing
-        the volume of the input dataset. Each "location" is a
-        :py:class:`ariadne_microns_pipeline.parameters.DatasetLocation`
-        describing the location of the dataset on disk.
+        the volume of the input dataset. Each "task" is the
+        :py:class:`luigi.Task` that produced the volume.
         :param relabeling_location: the location of the file produced
         by the AllConnectedComponentsTask
         :param output_volume: the volume to write
-        :param output_location: the location for the output volume dataset
+        :param output_dataset_name: the name of the output volume dataset
         '''
-        return VolumeRelabelingTask(input_volumes=input_volumes,
-                                    relabeling_location=relabeling_location,
-                                    output_volume=output_volume,
-                                    output_location=output_location)
+        loading_plans = []
+        lp_objects = []
+        for d in input_volumes:
+            volume = d["volume"]
+            task = d["task"]
+            loading_plan, lp = self.loading_plan(volume, dataset_name, task)
+            loading_plans.append(loading_plan)
+            lp_objects.append(lp)
+        storage_plan, sp = self.storage_plan(volume, output_dataset_name)
+        task = sp | VolumeRelabelingTask(
+            input_volumes=loading_plans,
+            relabeling_location=relabeling_location,
+            output_volume=output_volume,
+            storage_plan=storage_plan)
+        for lp in lp_objects:
+            lp | task
+        return task
     
     #########################
     #
@@ -747,50 +947,13 @@ class AMTaskFactory(object):
     #
     #########################
 
-    def gen_block_task(
-        self, output_volume, output_location, inputs):
-        '''Create a new volume block from other volumes
-        
-        The input volumes are scanned and their overlaps are written to
-        the output volume. If input volumes overlap and the overlap is in
-        the output volume, the pixel values from the last input volume in
-        the list are written to the output volume.
-
-        :param output_volume: the volume coords of the output dataset
-        :param output_location: where to store the output dataset
-        :param inputs: a sequence of dictionaries having keys of
-        "volume" and "location". Each "volume" is a
-        :py:class:`ariadne_microns_pipeline.parameters.Volume` describing
-        the volume of the input dataset. Each "location" is a
-        :py:class:`ariadne_microns_pipeline.parameters.DatasetLocation`
-        describing the location of the dataset on disk.
-        '''
-        #
-        # Make the "inputs" variable hashable
-        #
-        inputs = to_hashable(inputs)
-        return BlockTask(
-            output_location=output_location,
-            output_volume=output_volume,
-            input_volumes=inputs)
-    
-    def gen_extract_dataset_task(self, in_hdf5_file, dataset_name):
-        '''Extract an HDF5VolumeTarget or other dataset from an HDF5 file
-        
-        Given an HDF5FileTarget, extract one of its datasets.
-        :param in_hdf5_file: the HDF5 file containing the dataset
-        :param dataset_name: the name of the dataset within the HDF5 file
-        '''
-        return ExtractDatasetTask(in_hdf5_file.path, dataset_name)
-    
     def gen_segmentation_statistics_task(self,
                                          volume,
-                                         gt_seg_location,
-                                         gt_seg_volume,
-                                         pred_seg_location,
-                                         pred_seg_volume,
+                                         gt_seg_dataset_name,
+                                         pred_seg_dataset_name,
                                          connectivity,
-                                         output_location):
+                                         output_location,
+                                         pred_src_task=None):
         '''Collect statistics on the accuracy of a prediction
         
         This task does a statistical analysis of the accuracy of a prediction,
@@ -798,22 +961,23 @@ class AMTaskFactory(object):
         JSON dictionary.
         
         :param volume: The volume that was segmented
-        :param gt_seg_location: the location of the ground truth volume
-        :param gt_seg_volume: the global spatial volume of the gt segmentation
-        :param pred_seg_location: the location of the classifier prediction
-        :param pred_seg_volume: the global spatial volume of the segmentation
+        :param gt_seg_dataset_name: the location of the ground truth volume
+        :param pred_seg_dataset_name: the location of the classifier prediction
         :param connectivity: the location of the connectivity-graph.json file
                              generated by the AllConnectedComponentsTask.
                              "/dev/null" if you don't have one.
         :param output_location: where to put the JSON file that contains the
+        :param pred_src_task: get the prediction data produced by this task.
+        Default is to get it from whatever task.
         statistics.
         '''
-        return SegmentationStatisticsTask(
+        gt_load_plan, glp = self.loading_plan(volume, gt_seg_dataset_name)
+        pred_load_plan, plp = self.loading_plan(
+            volume, pred_seg_dataset_name, pred_src_task)
+        return glp | plp | SegmentationStatisticsTask(
             volume=volume,
-            ground_truth_location = gt_seg_location,
-            ground_truth_volume = gt_seg_volume,
-            test_location=pred_seg_location,
-            test_volume=pred_seg_volume,
+            ground_truth_loading_plan_path=gt_load_plan,
+            test_loading_plan_path=pred_load_plan,
             connectivity=connectivity,
             output_path=output_location)
     
@@ -848,7 +1012,6 @@ class AMTaskFactory(object):
                              excluded_keys=excluded_keys)
     
     def gen_stitch_segmentation_task(self,
-                                     input_volumes,
                                      connected_components_location,
                                      output_volume,
                                      output_location,
@@ -857,8 +1020,6 @@ class AMTaskFactory(object):
                                      compression = Compression.GZIP):
         '''Generate a task to stitch all the segmentations together
         
-        input_volumes: a sequence of dictionaries with keys of "volume" and
-                       "location" which parse as Volumes and DatasetLocations
         connected_components_location: the location of the connected components
                        JSON file that is an output of AllConnectedComponentsTask
         output_volume: the volume coordinates of the output volume
@@ -870,7 +1031,6 @@ class AMTaskFactory(object):
                      stitch_segmentation.Compression
         '''
         return StitchSegmentationTask(
-            input_volumes=input_volumes,
             connected_components_location=connected_components_location,
             output_volume=output_volume,
             output_location=output_location,
@@ -881,20 +1041,22 @@ class AMTaskFactory(object):
     def gen_distance_transform_task(
         self,
         volume,
-        input_location,
+        input_dataset_name,
         input_type,
-        output_location):
+        output_dataset_name):
         '''Generate a task to compute the distance transform on a volume
         
         :param volume: the volume to be analyzed
-        :param input_location: the DatasetLocation of the input volume
+        :param input_dataset_name: the name of the input dataset
         :param input_type: an enum of DistanceTransformInputType.
             BinaryMask for a binary mask, ProbabilityMap to threshold
             a probability map to get background / foreground, Segmentation
             to get the background from the borders between segments.
-        :param output_location: the DatasetLocation of the target output
+        :param output_dataset_name: the name of the output's dataset
         '''
-        return DistanceTransformTask(
+        loading_plan, lp = self.loading_plan(volume, input_dataset_name)
+        storage_plan, sp = self.storage_plan(volume, output_dataset_name)
+        return lp | sp | DistanceTransformTask(
             volume=volume,
             input_location=input_location,
             input_type=input_type,
@@ -903,23 +1065,28 @@ class AMTaskFactory(object):
     def gen_z_watershed_task(
         self,
         volume,
-        x_prob_location,
-        y_prob_location,
-        z_prob_location,
-        output_location):
+        x_prob_dataset_name,
+        y_prob_dataset_name,
+        z_prob_dataset_name,
+        output_dataset_name):
         '''Generate a Z-watershed task to segment a volume using affinities
         
         :param volume: the volume to be segmented
-        :param x_prob_location: the location of the probability map of
+        :param x_prob_dataset_name: the name of the probability map dataset of
         affinities between voxels in the X direction.
-        :param y_prob_location: the location of the probability map of
+        :param y_prob_dataset_name: the name of the probability map dataset of
         affinities between voxels in the Y direction.
-        :param z_prob_location: the location of the probability map of
+        :param z_prob_dataset_name: the name of the probability map dataset of
         affinities between voxels in the Z direction.
-        :param output_location: the DatasetLocation for the output volume.
+        :param output_dataset_name: the name of the output dataset
         '''
-        return ZWatershedTask(volume=volume,
-                              x_prob_location=x_prob_location,
-                              y_prob_location=y_prob_location,
-                              z_prob_location=z_prob_location,
-                              output_location=output_location)
+        xprob_loading_plan, xlp = self.loading_plan(volume, x_prob_dataset_name)
+        yprob_loading_plan, ylp = self.loading_plan(volume, y_prob_dataset_name)
+        zprob_loading_plan, zlp = self.loading_plan(volume, z_prob_dataset_name)
+        storage_plan, sp = self.storage_plan(volume, output_dataset_name)
+        return xlp | ylp | zlp | sp | ZWatershedTask(
+            volume=volume,
+            x_prob_loading_plan_path=x_prob_loading_plan,
+            y_prob_loading_plan_path=y_prob_loading_plan,
+            z_prob_loading_plan_path=z_prob_loading_plan,
+            storage_plan=storage_plan)

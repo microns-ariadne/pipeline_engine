@@ -462,7 +462,7 @@ class KerasClassifier(AbstractPixelClassifier):
                     pred = pred[:, :, :y1b - y0b, :]
                     logger.report_event("Fixing Y padding): " + str(pred.shape))
                 self.out_image[:, z0b:z1b, y0b:y1b, x0b:x1b] = \
-                    (pred * 255).astype(np.uint8)
+                    (np.clip(pred, 0, 1) * 255).astype(np.uint8)
         except:
             self.exception = sys.exc_value
             logger.report_exception()

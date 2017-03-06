@@ -27,7 +27,7 @@ def write_storage_plan(volume_db, dataset_id):
                          volume.width],
              x=volume.x,
              y=volume.y,
-             z=olume.z,
+             z=volume.z,
              blocks=blocks,
              datatype=dtype,
              dataset_name=volume_db.get_dataset_name_by_dataset_id(dataset_id),

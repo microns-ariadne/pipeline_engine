@@ -672,9 +672,7 @@ class PipelineTaskMixin:
                                  [self.z1])).astype(int)
 
     def generate_butterfly_tasks(self):
-        '''Get volumes padded for CNN'''
-        self.butterfly_tasks = \
-            np.zeros((self.ncl_z, self.ncl_y, self.ncl_x), object)
+        '''Get volumes padded for classifier'''
         for zi in range(self.ncl_z):
             z0 = self.cl_zs[zi] - self.nn_z_pad
             z1 = self.cl_ze[zi] + self.nn_z_pad
@@ -685,19 +683,17 @@ class PipelineTaskMixin:
                     x0 = self.cl_xs[xi] - self.nn_x_pad
                     x1 = self.cl_xe[xi] + self.nn_x_pad
                     volume = Volume(x0, y0, z0, x1-x0, y1-y0, z1-z0)
-                    location =self.get_dataset_location(volume, IMG_DATASET)
-                    self.butterfly_tasks[zi, yi, xi] =\
-                        self.factory.gen_get_volume_task(
+                    task = self.factory.gen_get_volume_task(
                             experiment=self.experiment,
                             sample=self.sample,
                             dataset=self.dataset,
                             channel=self.channel,
                             url=self.url,
                             volume=volume,
-                            location=location,
+                            dataset_name=IMG_DATASET,
                             resolution=self.resolution)
-                    self.register_dataset(
-                        self.butterfly_tasks[zi, yi, xi].output())
+                    self.datasets[task.output().path] = task
+                    self.tasks.append(task)
 
     def generate_classifier_tasks(self):
         '''Get the pixel classifier tasks
@@ -712,213 +708,91 @@ class PipelineTaskMixin:
         # stores the shim task associated with that generic name.
         #
         if self.wants_affinity_segmentation:
-            self.classifier_tasks = \
-                np.zeros((3, self.ncl_z, self.ncl_y, self.ncl_x), object)
             datasets = {
                 self.x_affinity_class_name:X_AFFINITY_DATASET,
                 self.y_affinity_class_name:Y_AFFINITY_DATASET,
                 self.z_affinity_class_name:Z_AFFINITY_DATASET
                 }
-            taskmaps = {
-                Z_AFFINITY_DATASET: self.classifier_tasks[0],
-                Y_AFFINITY_DATASET: self.classifier_tasks[1],
-                X_AFFINITY_DATASET: self.classifier_tasks[2]
-            }
         else:
-            self.classifier_tasks = \
-                np.zeros((self.ncl_z, self.ncl_y, self.ncl_x), object)
             datasets = {
                 self.membrane_class_name: MEMBRANE_DATASET
-            }
-            taskmaps = {
-                MEMBRANE_DATASET: self.classifier_tasks
             }
             
         if not self.wants_neuroproof_learn:
             if self.wants_transmitter_receptor_synapse_maps:
-                self.transmitter_classifier_tasks = \
-                    np.zeros((self.ncl_z, self.ncl_y, self.ncl_x), object)
-                self.receptor_classifier_tasks = \
-                    np.zeros((self.ncl_z, self.ncl_y, self.ncl_x), object)
                 datasets.update({
                     self.transmitter_class_name: SYNAPSE_TRANSMITTER_DATASET, 
                     self.receptor_class_name: SYNAPSE_RECEPTOR_DATASET
                 })
-                taskmaps.update({
-                    SYNAPSE_TRANSMITTER_DATASET: self.transmitter_classifier_tasks,
-                    SYNAPSE_RECEPTOR_DATASET: self.receptor_classifier_tasks
-                })
             else:
-                self.synapse_classifier_tasks = np.zeros(
-                    (self.ncl_z, self.ncl_y, self.ncl_x), object)
                 datasets.update({
                     self.synapse_class_name: SYNAPSE_DATASET})
-                taskmaps.update({
-                    SYNAPSE_DATASET: self.synapse_classifier_tasks
-                })
-        self.additional_classifier_tasks = dict(
-            [(k, np.zeros((self.ncl_z, self.ncl_y, self.ncl_x), object))
-             for k in self.additional_neuroproof_channels])
         for channel in self.additional_neuroproof_channels:
             if channel not in (SYNAPSE_DATASET, SYNAPSE_TRANSMITTER_DATASET,
                                SYNAPSE_RECEPTOR_DATASET) \
                and not self.wants_neuroproof_learn:
-                datasets[channel] = self.additional_classifier_tasks[channel]
+                datasets[channel] = channel
         for zi in range(self.ncl_z):
             for yi in range(self.ncl_y):
                 for xi in range(self.ncl_x):
-                    btask = self.butterfly_tasks[zi, yi, xi]
-                    input_target = btask.output()
-                    img_location = DatasetLocation(
-                        input_target.paths,
-                        input_target.dataset_path,
-                        input_target.pattern)
-                    paths = self.get_dirs(
-                        self.cl_xs[xi], self.cl_ys[yi], self.cl_zs[zi])
+                    x0 = self.cl_xs[xi]
+                    x1 = self.cl_xe[xi]
+                    y0 = self.cl_ys[yi]
+                    y1 = self.cl_ye[yi]
+                    z0 = self.cl_zs[zi]
+                    z1 = self.cl_ze[zi]
+                    output_volume = Volume(x0, y0, z0, 
+                                           x1-x0, y1-y0, z1-z0)
+                    x0p = x0 - self.nn_x_pad
+                    x1p = x1 + self.nn_x_pad
+                    y0p = y0 - self.nn_y_pad
+                    y1p = y1 + self.nn_y_pad
+                    z0p = z0 - self.nn_z_pad
+                    z1p = z1 + self.nn_z_pad
+                    input_volume = Volume(x0p, y0p, z0p,
+                                          x1p - x0p, y1p - y0p, z1p - z0p)
                     ctask = self.factory.gen_classify_task(
-                        paths=paths,
                         datasets=datasets,
-                        pattern=self.get_pattern(MEMBRANE_DATASET),
-                        img_volume=btask.volume,
-                        img_location=img_location,
+                        img_volume=input_volume,
+                        output_volume=output_volume,
+                        dataset_name=IMG_DATASET,
                         classifier_path=self.pixel_classifier_path)
-                    ctask.set_requirement(btask)
+                    self.tasks.append(ctask)
                     #
                     # Create shims for all channels
                     #
-                    for channel, tasks in taskmaps.items():
+                    for channel in datasets.values():
                         shim_task = ClassifyShimTask.make_shim(
                             classify_task=ctask,
                             dataset_name=channel)
-                        self.register_dataset(shim_task.output())
-                        tasks[zi, yi, xi] = shim_task
-     
-    def generate_block_tasks(self):
-        '''Generate tasks that reblock classifications for segmentation'''
-        if self.wants_affinity_segmentation:
-            old = list(self.classifier_tasks)
-            self.classifier_tasks = np.zeros(
-                (3, self.n_z, self.n_y, self.n_x), object)
-            new = list(self.classifier_tasks)
-        else:
-            old = [self.classifier_tasks]
-            self.classifier_tasks = np.zeros(
-                (self.n_z, self.n_y, self.n_x), object)
-            new = [self.classifier_tasks]
-        if not self.wants_neuroproof_learn:
-            if self.wants_transmitter_receptor_synapse_maps:
-                old.append(self.transmitter_classifier_tasks)
-                self.transmitter_classifier_tasks = \
-                    np.zeros((self.n_z, self.n_y, self.n_x), object)
-                new.append(self.transmitter_classifier_tasks)
-                old.append(self.receptor_classifier_tasks)
-                self.receptor_classifier_tasks = \
-                    np.zeros((self.n_z, self.n_y, self.n_x), object)
-                new.append(self.receptor_classifier_tasks)
-            else:
-                old.append(self.synapse_classifier_tasks)
-                self.synapse_classifier_tasks = \
-                    np.zeros((self.n_z, self.n_y, self.n_x), object)
-                new.append(self.synapse_classifier_tasks)
-            
-        old_additional_classifier_tasks = self.additional_classifier_tasks
-        self.additional_classifier_tasks = {}
-        for name in self.additional_neuroproof_channels:
-            if name == SYNAPSE_DATASET and not self.wants_neuroproof_learn:
-                self.additional_classifier_tasks[name] =\
-                    self.synapse_classifier_tasks
-            elif name == SYNAPSE_TRANSMITTER_DATASET \
-                 and not self.wants_neuroproof_learn:
-                self.additional_classifier_tasks[name] = \
-                    self.transmitter_classifier_tasks
-            elif name == SYNAPSE_RECEPTOR_DATASET \
-                 and not self.wants_neuroproof_learn:
-                self.additional_classifier_tasks[name] = \
-                    self.receptor_classifier_tasks
-            else:
-                old.append(old_additional_classifier_tasks)
-                self.additional_classifier_tasks[name] = \
-                    np.zeros((self.n_z, self.n_y, self.n_x), object)
-                new.append(self.additional_classifier_tasks[name])
-        for zi in range(self.n_z):
-            zs = self.zs[zi]
-            ze = self.ze[zi]
-            cl_zidx = [idx for idx in range(self.ncl_z)
-                       if self.cl_zs[idx] < ze and self.cl_ze[idx] > zs]
-            for yi in range(self.n_y):
-                ys = self.ys[yi]
-                ye = self.ye[yi]
-                cl_yidx = [idx for idx in range(self.ncl_y)
-                           if self.cl_ys[idx] < ye and self.cl_ye[idx] > ys]
-                for xi in range(self.n_x):
-                    xs = self.xs[xi]
-                    xe = self.xe[xi]
-                    cl_xidx = [idx for idx in range(self.ncl_x)
-                               if self.cl_xs[idx] < xe and self.cl_xe[idx] > xs]
-                    self.generate_block_task(
-                        xi, yi, zi, xs, xe, ys, ye, zs, ze, 
-                        cl_xidx, cl_yidx, cl_zidx, old, new)
+                        self.datasets[shim_task.output().path] = shim_task
+                        self.tasks.append(shim_task)
     
-    def generate_block_task(self, xi, yi, zi, xs, xe, ys, ye, zs, ze, 
-                            cl_xidx, cl_yidx, cl_zidx, old_list, new_list):
-        '''Generate the tasks for one x/y/z
+    def get_block_volume(self, xi, yi, zi):
+        '''Get the volume for a segmentation block
         
-        xi, yi, zi: indices of the block
-        xs, xe, ys, ye, zs, ze: starts and ends of the block
-        cl_xidx, cl_yidx, cl_zidx: indices of the overlapping input blocks
-        old_list: the old task arrays
-        new_list: the new task arrays
+        :param xi: the X index of the block
+        :param yi: the Y index of the block
+        :param zi: the Z index of the block
         '''
-        volume = Volume(xs, ys, zs, xe-xs, ye-ys, ze-zs)
-        for old, new in zip(old_list, new_list):
-            if old.size == 0:
-                continue
-            name = old[0, 0, 0].output().dataset_location.dataset_name
-            location = self.get_dataset_location(volume, name)
-            inputs = []
-            tasks = []
-            for zz in cl_zidx:
-                for yy in cl_yidx:
-                    for xx in cl_xidx:
-                        task = old[zz, yy, xx]
-                        tasks.append(task)
-                        tgt = task.output()
-                        inputs.append(dict(volume=tgt.volume,
-                                           location=tgt.dataset_location))
-            if len(inputs) == 1 and volume == inputs[0]["volume"]:
-                # A direct block copy - this generally happens on
-                # xi = yi = zi = 0.
-                # Just carry the old task forward.
-                #
-                task = old[cl_zidx[0], cl_yidx[0], cl_xidx[0]]
-            else:
-                task = self.factory.gen_block_task(volume, location, inputs)
-                for itask in tasks:
-                    task.set_requirement(itask)
-            new[zi, yi, xi] = task
-
+        return Volume(self.xs[xi], self.ys[yi], self.zs[zi],
+                      self.xe[xi] - self.xs[xi],
+                      self.ye[yi] - self.ys[yi],
+                      self.ze[zi] - self.zs[zi])
+    
     def generate_border_mask_tasks(self):
         '''Create a border mask for each block'''
-        self.border_mask_tasks = \
-            np.zeros((self.n_z, self.n_y, self.n_x), object)
         for zi in range(self.n_z):
             for yi in range(self.n_y):
                 for xi in range(self.n_x):
-                    ctask = self.classifier_tasks[zi, yi, xi]
-                    input_target = ctask.output()
-                    input_location = DatasetLocation(
-                        input_target.paths,
-                        input_target.dataset_path,
-                        input_target.pattern)
-                    volume = ctask.output_volume
-                    location = self.get_dataset_location(volume, MASK_DATASET)
+                    volume = self.get_block_volume(xi, yi, zi)
                     btask = self.factory.gen_mask_border_task(
                         volume,
-                        input_location,
-                        location)
-                    self.border_mask_tasks[zi, yi, xi] = btask
-                    btask.set_requirement(ctask)
-
+                        MEMBRANE_DATASET,
+                        MASK_DATASET)
+                    self.datasets[btask.output().path] = btask
+                    self.tasks.append(btask)
+                    
     def generate_seed_tasks(self):
         '''Find seeds for the watersheds'''
         self.seed_tasks = \
@@ -926,19 +800,11 @@ class PipelineTaskMixin:
         for zi in range(self.n_z):
             for yi in range(self.n_y):
                 for xi in range(self.n_x):
-                    ctask = self.classifier_tasks[zi, yi, xi]
-                    prob_target = ctask.output()
-                    volume = prob_target.volume
-                    prob_location = DatasetLocation(
-                        prob_target.paths,
-                        prob_target.dataset_path,
-                        prob_target.pattern)
-                    seeds_location = \
-                        self.get_dataset_location(volume, SEEDS_DATASET)
+                    volume = self.get_block_volume(xi, yi, zi)
                     stask = self.factory.gen_find_seeds_task(
                         volume=volume,
-                        prob_location=prob_location, 
-                        seeds_location=seeds_location, 
+                        prob_dataset_name=MEMBRANE_DATASET,
+                        seeds_dataset_name=SEEDS_DATASET,
                         sigma_xy=self.sigma_xy, 
                         sigma_z=self.sigma_z, 
                         threshold=self.threshold,
@@ -946,10 +812,9 @@ class PipelineTaskMixin:
                         dimensionality=self.dimensionality,
                         minimum_distance_xy=self.minimum_distance_xy,
                         minimum_distance_z=self.minimum_distance_z)
-                    self.seed_tasks[zi, yi, xi] = stask
-                    self.register_dataset(stask.output())
-                    stask.set_requirement(ctask)
-
+                    self.datasets[stask.output().path] = stask
+                    self.tasks.append(stask)
+                    
     def generate_watershed_tasks(self):
         '''Run watershed on each pixel '''
         self.watershed_tasks = \
@@ -958,44 +823,24 @@ class PipelineTaskMixin:
         for zi in range(self.n_z):
             for yi in range(self.n_y):
                 for xi in range(self.n_x):
-                    ctask = self.classifier_tasks[zi, yi, xi]
-                    btask = self.border_mask_tasks[zi, yi, xi]
-                    volume = btask.volume
-                    prob_target = ctask.output()
-                    prob_location = DatasetLocation(
-                        prob_target.paths,
-                        prob_target.dataset_path,
-                        prob_target.pattern)
-                    seg_location = \
-                        self.get_dataset_location(volume, SEG_DATASET)
-                    if self.method != SeedsMethodEnum.ConnectedComponents:
-                        seeds_task = self.seed_tasks[zi, yi, xi]
-                        seeds_target = seeds_task.output()
-                        seeds_location = seeds_target.dataset_location
-                        stask = self.factory.gen_segmentation_task(
-                            volume=btask.volume,
-                            prob_location=prob_location,
-                            mask_location=btask.mask_location,
-                            seeds_location=seeds_location,
-                            seg_location=seg_location,
-                            sigma_xy=self.sigma_xy,
-                            sigma_z=self.sigma_z,
-                            dimensionality=self.dimensionality)
-                        if self.use_distance_watershed:
-                            stask.use_distance = True
-                            stask.threshold = self.watershed_threshold
-                        stask.set_requirement(seeds_task)
-                    else:
-                        stask = self.factory.gen_2D_segmentation_task(
-                            volume=btask.volume,
-                            prob_location=prob_location,
-                            mask_location=btask.mask_location,
-                            seg_location=seg_location,
-                            threshold=self.threshold)
-                    self.register_dataset(stask.output())
+                    volume = self.get_block_volume(xi, yi, zi)
+                    seeds_task = self.seed_tasks[zi, yi, xi]
+                    stask = self.factory.gen_segmentation_task(
+                        volume=volume,
+                        prob_dataset=MEMBRANE_DATASET,
+                        mask_dataset=MASK_DATASET,
+                        seeds_dataset_name=SEEDS_DATASET,
+                        seeds_src_task=seeds_task,
+                        seg_dataset_name=SEG_DATASET,
+                        sigma_xy=self.sigma_xy,
+                        sigma_z=self.sigma_z,
+                        dimensionality=self.dimensionality)
+                    if self.use_distance_watershed:
+                        stask.use_distance = True
+                        stask.threshold = self.watershed_threshold
                     self.watershed_tasks[zi, yi, xi] = stask
-                    stask.set_requirement(ctask)
-                    stask.set_requirement(btask)
+                    self.datasets[stask.output().path] = stask
+                    self.tasks.append(stask)
     
     def generate_resegmentation_tasks(self):
         self.resegmentation_tasks = \
@@ -1004,20 +849,17 @@ class PipelineTaskMixin:
         for zi in range(self.n_z):
             for yi in range(self.n_y):
                 for xi in range(self.n_x):
+                    volume = self.get_block_volume(xi, yi, zi)
                     wtask = self.watershed_tasks[zi, yi, xi]
-                    input_location = wtask.output().dataset_location
-                    volume = wtask.output().volume
-                    output_location = self.get_dataset_location(
-                        volume, RESEG_DATASET)
                     rtask = self.factory.gen_unsegmentation_task(
                         volume = volume,
-                        input_location = input_location,
-                        output_location = output_location,
+                        input_dataset_name=SEG_DATASET,
+                        output_dataset_name=RESEG_DATASET,
                         use_min_contact = self.use_min_contact,
                         contact_threshold = self.contact_threshold)
-                    rtask.set_requirement(wtask)
-                    self.register_dataset(rtask.output())
                     self.resegmentation_tasks[zi, yi, xi] = rtask
+                    self.datasets[rtask.output().plan] = rtask
+                    self.tasks.append(rtask)
     
     def generate_z_watershed_tasks(self):
         '''Generate tasks to go from affinity maps to oversegmentations'''
@@ -1027,24 +869,17 @@ class PipelineTaskMixin:
         for zi in range(self.n_z):
             for yi in range(self.n_y):
                 for xi in range(self.n_x):
-                    ztask = self.classifier_tasks[0, zi, yi, xi]
-                    ytask = self.classifier_tasks[1, zi, yi, xi]
-                    xtask = self.classifier_tasks[2, zi, yi, xi]
-                    volume = ztask.output().volume
-                    output_location = self.get_dataset_location(
-                        volume, SEG_DATASET)
+                    volume = self.get_block_volume(xi, yi, zi)
                     zwtask = self.factory.gen_z_watershed_task(
                          volume=volume,
-                         x_prob_location=xtask.output().dataset_location,
-                         y_prob_location=ytask.output().dataset_location,
-                         z_prob_location=ztask.output().dataset_location,
-                         output_location=output_location)
-                    zwtask.set_requirement(xtask)
-                    zwtask.set_requirement(ytask)
-                    zwtask.set_requirement(ztask)
+                         x_prob_dataset_name=X_AFFINITY_DATASET,
+                         y_prob_dataset_name=Y_AFFINITY_DATASET,
+                         z_prob_dataset_name=Z_AFFINITY_DATASET,
+                         output_dataset_name=SEG_DATASET)
                     zwtask.threshold = self.z_watershed_threshold
-                    self.register_dataset(zwtask.output())
                     self.watershed_tasks[zi, yi, xi] = zwtask
+                    self.datasets[zwtask.output().path] = zwtask
+                    self.tasks.append(zwtask)
     
     def generate_neuroproof_tasks(self):
         '''Generate all tasks involved in Neuroproofing a segmentation
@@ -1147,8 +982,6 @@ class PipelineTaskMixin:
 
     def generate_gt_cutout(self, volume, yi, xi, zi):
         '''Generate gt cutouts for a given volume'''
-        dataset_location = self.get_dataset_location(
-            volume, GT_DATASET)
         if self.wants_neuron_statistics or self.wants_synapse_statistics:
             btask = self.factory.gen_get_volume_task(
                 self.experiment,
@@ -1157,14 +990,11 @@ class PipelineTaskMixin:
                 self.gt_channel,
                 self.url,
                 volume,
-                dataset_location,
+                GT_DATASET,
                 resolution=self.resolution)
-            self.register_dataset(btask.output())
-            self.gt_tasks[zi, yi, xi] = btask
+            self.datasets[btask.output().path] = btask
         if self.wants_synapse_statistics:
-            synapse_gt_location = self.get_dataset_location(
-                volume, SYN_GT_DATASET)
-            self.gt_synapse_tasks[zi, yi, xi] =\
+            stask =\
                 self.factory.gen_get_volume_task(
                     experiment=self.experiment,
                     sample=self.sample,
@@ -1172,65 +1002,21 @@ class PipelineTaskMixin:
                     channel=self.synapse_channel,
                     url=self.url,
                     volume=volume,
-                    location=synapse_gt_location,
+                    dataset_name=SYN_GT_DATASET,
                     resolution=self.resolution)
-            self.register_dataset(self.gt_synapse_tasks[zi, yi, xi].output())
+            self.datasets[stask.output().path] = stask
         if self.has_annotation_mask:
-            gt_mask_location = self.get_dataset_location(
-                volume, GT_MASK_DATASET)
-            self.gt_mask_tasks[zi, yi, xi] = \
-                self.factory.gen_get_volume_task(
+            mtask = self.factory.gen_get_volume_task(
                     experiment=self.experiment,
                     sample=self.sample,
                     dataset=self.dataset,
                     channel=self.gt_mask_channel,
                     url=self.url,
                     volume=volume,
-                    location=gt_mask_location,
+                    dataset_name=GT_MASK_DATASET,
                     resolution=self.resolution)
-            self.register_dataset(self.gt_mask_tasks[zi, yi, xi].output())
+            self.datasets[mtask.output().path] = mtask
             
-    def generate_pred_cutouts(self):
-        '''Generate volumes matching the ground truth segmentations'''
-        self.pred_block_tasks = np.zeros((self.n_z, self.n_y, self.n_x),
-                                         object)
-        self.gt_block_tasks = np.zeros((self.n_z, self.n_y, self.n_x),
-                                       object)
-        for zi in range(self.n_z):
-            z0 = self.zs[zi] + self.np_z_pad
-            z1 = self.ze[zi] - self.np_z_pad
-            for yi in range(self.n_y):
-                y0 = self.ys[yi] + self.np_y_pad
-                y1 = self.ye[yi] - self.np_y_pad
-                for xi in range(self.n_x):
-                    x0 = self.xs[xi] + self.np_x_pad
-                    x1 = self.xe[xi] - self.np_x_pad
-                    volume=Volume(x0, y0, z0, x1-x0, y1-y0, z1-z0)
-                    #
-                    # Reblock the segmentation prediction
-                    #
-                    dataset_location = self.get_dataset_location(
-                        volume, PRED_DATASET)
-                    nptask = self.np_tasks[zi, yi, xi]
-                    btask = self.factory.gen_block_task(
-                        volume, dataset_location,
-                        [dict(volume=nptask.volume,
-                              location=nptask.output_seg_location)])
-                    btask.set_requirement(nptask)
-                    self.pred_block_tasks[zi, yi, xi] = btask
-                    #
-                    # Reblock the ground-truth
-                    #
-                    dataset_location = self.get_dataset_location(
-                        volume, GT_BLOCK_DATASET)
-                    gt_task = self.gt_tasks[zi, yi, xi]
-                    btask = self.factory.gen_block_task(
-                        volume, dataset_location,
-                        [dict(volume=gt_task.volume,
-                              location=gt_task.output().dataset_location)])
-                    btask.set_requirement(gt_task)
-                    self.gt_block_tasks[zi, yi, xi] = btask
-                    
     def generate_statistics_tasks(self):
         if self.wants_neuron_statistics:
             self.statistics_tasks = np.zeros((self.n_z, self.n_y, self.n_x),
@@ -1248,23 +1034,21 @@ class PipelineTaskMixin:
                         x1 = self.x_grid[xi+1]
                         volume = Volume(x0, y0, z0, x1-x0, y1-y0, z1-z0)
                         ptask = self.np_tasks[zi, yi, xi]
-                        gttask = self.gt_tasks[zi, yi, xi]
                         output_location = os.path.join(
                             self.get_dirs(
                                 self.xs[xi], self.ys[yi], self.zs[zi])[0],
                             "segmentation_statistics.json")
                         stask = self.factory.gen_segmentation_statistics_task(
                             volume=volume, 
-                            gt_seg_location=gttask.output().dataset_location,
-                            gt_seg_volume=gttask.output().volume,
-                            pred_seg_location=ptask.output().dataset_location,
-                            pred_seg_volume=ptask.output().volume,
+                            gt_seg_dataset_name=GT_DATASET,
+                            pred_seg_dataset_name=NP_DATASET,
                             connectivity=acc_file,
-                            output_location=output_location)
-                        stask.set_requirement(ptask)
-                        stask.set_requirement(gttask)
+                            output_location=output_location,
+                            pred_src_task=ptask)
+                        self.tasks.append(stask)
                         stask.set_requirement(
                             self.all_connected_components_task)
+                        self.datasets[stask.output().path] = stask
                         self.statistics_tasks[zi, yi, xi] = stask
                         json_paths.append(stask.output().path)
             self.statistics_csv_task = self.factory.gen_json_to_csv_task(
@@ -1899,21 +1683,6 @@ class PipelineTaskMixin:
         self.neuroproof_learn_task.set_requirement(self.volume_relabeling_task)
         self.neuroproof_learn_task.set_requirement(self.ground_truth_task)
     
-    def register_dataset(self, target):
-        '''Register the location of a dataset
-        
-        :param target: a VolumeTarget having a volume and a dataset_location
-        
-        Store the location of a target produced by the pipeline in the
-        datasets dictionary for inclusion in the index file.
-        '''
-        dataset_name = target.dataset_location.dataset_name
-        if dataset_name not in self.datasets:
-            self.datasets[dataset_name] = {}
-        volume = to_hashable(target.volume.to_dictionary())
-        self.datasets[dataset_name][volume] = \
-            target.dataset_location.to_dictionary()
-        
     def compute_requirements(self):
         '''Compute the requirements for this task'''
         if not hasattr(self, "requirements"):
@@ -1929,6 +1698,7 @@ class PipelineTaskMixin:
             logging.getLogger("luigi-interface").disabled = False
             self.requirements = []
             self.datasets = {}
+            self.tasks = []
             try:
                 self.init_db()
                 self.factory = AMTaskFactory(self.volume_db_url, 

@@ -398,3 +398,28 @@ lists of two-tuples of volume (see [Volume object](#volume-object)) and dataset 
 The microns-volume script [ariadne_microns_pipeline/scripts/microns_volume.py]
 has an example of how to use the index.json file to read an arbitrary
 subvolume of an arbitrary channel.
+
+### loading plan / storage plan (*.plan) files
+
+These are plans for how to load or store .tif stacks to make a volume. The
+file is a .json file with the following structure:
+
+* **dimensions** (list of 3 values) - the depth, height and width of the volume
+* **x** (integer) - the x-offset of the volume
+* **y** (integer) - the y-offset of the volume
+* **z** (integer) - the z-offset of the volume
+* **datatype** (string) - the Numpy dtype of the data, typically "uint8",
+                          "uint16", or "uint32"
+* **dataset_name** (string) - the name of the dataset's type, e.g. "image" or
+                              "neuroproof"
+* **dataset_id** (integer) - the database ID of the storage plan (only if
+                             storage plan)
+* **loading_plan_id** (integer) - the database ID of the loading plan (only if
+                                loading plan)
+* **blocks** (list) - a list of two-tuples. The first element of the two-tuple
+                      is a volume (see Volume object above for format). The
+                      second is the pathname of a .tif stack that holds the
+                      block's data.
+
+To load a volume, create an array of the given dimensions, then iterate over
+the blocks, reading and placing them.

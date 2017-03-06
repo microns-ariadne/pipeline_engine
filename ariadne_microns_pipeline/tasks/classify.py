@@ -206,8 +206,7 @@ class ClassifyShimTask(RequiresMixin, luigi.Task):
     
     @staticmethod
     def make_shim(classify_task, dataset_name):
-        shim = ClassifyShimTask(dataset_name=dataset_name,
-                                classify_task.output().path)
+        shim = ClassifyShimTask(dataset_name=dataset_name)
         shim.set_requirement(classify_task)
         return shim
     
