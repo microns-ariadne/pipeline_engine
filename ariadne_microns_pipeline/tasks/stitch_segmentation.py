@@ -12,6 +12,7 @@ import multiprocessing
 import time
 
 from .utilities import RunMixin, RequiresMixin, SingleThreadedMixin, to_hashable
+from ..parameters import VolumeParameter
 from ..targets import DestVolumeReader
 
 class Compression(enum.Enum):

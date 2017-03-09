@@ -6,7 +6,7 @@ import rh_logger
 from scipy.ndimage import grey_erosion, grey_dilation
 import sys
 
-from ..parameters import VolumeParameter, DatasetLocationParameter
+from ..parameters import VolumeParameter
 from ..parameters import Volume, DatasetLocation
 from .utilities import RequiresMixin, RunMixin
 from ..targets.factory import TargetFactory

@@ -7,7 +7,7 @@ from scipy.sparse import coo_matrix
 from .find_seeds import Dimensionality
 from ..algorithms import watershed
 from ..algorithms.morphology import parallel_distance_transform
-from ..parameters import EMPTY_LOCATION
+from ..parameters import EMPTY_LOCATION, VolumeParameter
 from ..targets import DestVolumeReader
 from .utilities import RequiresMixin, RunMixin, SingleThreadedMixin, \
      DatasetMixin
@@ -252,7 +252,7 @@ class SegmentCC3DTask(SegmentCCTaskMixin,
     '''
 
 class UnsegmentTaskMixin(DatasetMixin):
-    input_loading_plan_path = DatasetLocationParameter(
+    input_loading_plan_path = luigi.Parameter(
         description="The location for the input segmentation")
     
     def input(self):

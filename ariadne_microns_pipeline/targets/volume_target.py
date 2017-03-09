@@ -74,7 +74,7 @@ class SrcVolumeTarget(luigi.LocalTarget):
         self.storage_plan_path = storage_plan_path
         done_file = os.path.splitext(storage_plan_path)[0] + ".done"
         self.__volume = None
-        super(VolumeTarget, self).__init__(done_file)
+        super(SrcVolumeTarget, self).__init__(done_file)
 
     def __getstate__(self):
         return self.storage_plan_path
@@ -94,6 +94,15 @@ class SrcVolumeTarget(luigi.LocalTarget):
                 self.__volume = Volume(d["x"], d["y"], d["z"],
                                        width, height, depth)
         return self.__volume
+    
+    def create_directories(self):
+        '''Create the subdirectories to host the .tif files'''
+        with open(self.storage_plan_path, "r") as fd:
+            d = json.load(fd)
+        for subvolume, tif_path in d["blocks"]:
+            tif_dir = os.path.dirname(tif_path)
+            if not os.path.isdir(tif_dir):
+                os.makedirs(tif_dir)
     
     def imwrite(self, data):
         '''Write the data blocks to disk + the done file

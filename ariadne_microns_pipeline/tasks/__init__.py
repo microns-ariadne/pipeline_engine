@@ -10,7 +10,6 @@ mapper/factory that lets you select the task class for a given task and
 execution mechanism.
 '''
 
-from .block import BlockTask
 from .classify import ClassifyTask
 from .connected_components import \
      AllConnectedComponentsTask, ConnectedComponentsTask, VolumeRelabelingTask
@@ -28,9 +27,8 @@ from .segment import SegmentTask, SegmentCC2DTask, UnsegmentTask
 from .skeletonize import SkeletonizeTask
 from .stitch_segmentation import StitchSegmentationTask
 from .synapse_statistics import SynapseStatisticsTask
-from .visualize import VisualizeTask, PipelineVisualizeTask
 
-all = [AllConnectedComponentsTask, BlockTask, ClassifyTask, 
+all = [AllConnectedComponentsTask, ClassifyTask, 
        ConnectedComponentsTask, ConnectSynapsesTask,
        DistanceTransformTask,
        DownloadFromButterflyTask, AMTaskFactory,
@@ -38,5 +36,5 @@ all = [AllConnectedComponentsTask, BlockTask, ClassifyTask,
        MaskBorderTask, MatchNeuronsTask, MatchSynapsesTask,
        NeuroproofTask, NeuroproofLearnTask, 
        SegmentTask, SegmentCC2DTask, UnsegmentTask,
-       VisualizeTask, VolumeRelabelingTask, PipelineVisualizeTask, 
+       VolumeRelabelingTask, 
        SkeletonizeTask, StitchSegmentationTask, SynapseStatisticsTask]

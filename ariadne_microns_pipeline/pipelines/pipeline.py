@@ -9,13 +9,12 @@ from ..tasks.find_seeds import SeedsMethodEnum, Dimensionality
 from ..tasks.match_synapses import MatchMethod
 from ..tasks.nplearn import StrategyEnum
 from ..targets.classifier_target import PixelClassifierTarget
-from ..targets.hdf5_target import HDF5FileTarget
+from ..targets.volume_target import write_loading_plan, write_storage_plan
 from ..targets.butterfly_target import ButterflyChannelTarget
 from ..parameters import Volume, VolumeParameter
 from ..parameters import EMPTY_LOCATION, EMPTY_DATASET_ID, is_empty_dataset_id
 from ..parameters import DEFAULT_LOCATION
 from ..tasks.utilities import to_hashable
-from ..pipelines.synapse_gt_pipeline import SynapseGtTask
 from ..volumedb import VolumeDB, Persistence, UINT8, UINT16, UINT32
 import json
 import numpy as np
@@ -512,6 +511,11 @@ class PipelineTaskMixin:
                                       self.volume_db_url)
         self.volume_db = VolumeDB(self.volume_db_url, "w")
         #
+        # Register the temp and root directories
+        #
+        self.volume_db.set_target_dir(self.root_dir)
+        self.volume_db.set_temp_dir(self.temp_dir)
+        #
         # Define the datatypes
         #
         rh_logger.logger.report_event("Creating data types in the volume DB")
@@ -524,7 +528,7 @@ class PipelineTaskMixin:
             FILTERED_SYN_SEG_DATASET, UINT16,
             "The segmentation of synapses after running a filtering algorithm "
             "to remove false positives")
-        self.register_dataset(SEEDS_DATASET, UINT32,
+        self.register_datatype(SEEDS_DATASET, UINT32,
                               "The seeds for a watershed segmentation")
         self.register_datatype(MASK_DATASET, UINT8,
                               "The mask of the extra-cellular space")
@@ -882,7 +886,7 @@ class PipelineTaskMixin:
                     self.tasks.append(zwtask)
     
     def generate_neuroproof_tasks(self):
-        '''Generate all tasks involved in Neuroproofing a segmentation
+        '''Generate neuroproof tasks for all blocks
         
         We Neuroproof the blocks and the x, y and z borders between blocks
         '''
@@ -896,62 +900,30 @@ class PipelineTaskMixin:
         # output dataset name
         #
         if not self.wants_affinity_segmentation:
-            task_sets = (
-                (self.classifier_tasks,
-                 self.additional_classifier_tasks,
-                 self.segmentation_tasks,
-                 self.np_tasks,
-                 NP_DATASET),
-            )
+            prob_dataset_name = MEMBRANE_DATASET
+            additional_dataset_names = []
         else:
-            #
-            # Use the x affinity, inverted, as the "membrane"
-            # Add the y and z affinities into Neuroproof.
-            #
-            additional_classifier_tasks = {
-                Y_AFFINITY_DATASET:self.classifier_tasks[1],
-                Z_AFFINITY_DATASET:self.classifier_tasks[0]
-            }
-            additional_classifier_tasks.update(self.additional_classifier_tasks)
-            task_sets = (
-                (self.classifier_tasks[2],
-                 additional_classifier_tasks,
-                 self.segmentation_tasks,
-                 self.np_tasks,
-                 NP_DATASET),
-            )
-            
-        for classifier_tasks, additional_classifier_tasks, seg_tasks, np_tasks, \
-            dataset_name in task_sets:
-
-            for zi in range(classifier_tasks.shape[0]):
-                for yi in range(classifier_tasks.shape[1]):
-                    for xi in range(classifier_tasks.shape[2]):
-                        classifier_task = classifier_tasks[zi, yi, xi]
-                        seg_task = seg_tasks[zi, yi, xi]
-                        volume = classifier_task.output_volume
-                        output_seg_location = self.get_dataset_location(
-                            volume, dataset_name)
-                        np_task = self.factory.gen_neuroproof_task(
-                            volume=volume,
-                            prob_location=classifier_task.output_location,
-                            input_seg_location=seg_task.output_location,
-                            output_seg_location=output_seg_location,
-                            classifier_filename=self.neuroproof_classifier_path)
-                        np_task.threshold=self.np_threshold
-                        additional_tasks = [ 
-                            additional_classifier_tasks[k][zi, yi, xi]
-                            for k in self.additional_neuroproof_channels]
-                        additional_locations = [
-                            task.output().dataset_location for task in
-                            additional_tasks]
-                        np_task.additional_locations = additional_locations
-                        np_task.cpu_count = self.np_cores
-                        np_task.set_requirement(classifier_task)
-                        np_task.set_requirement(seg_task)
-                        map(np_task.set_requirement, additional_tasks)
-                        np_tasks[zi, yi, xi] = np_task
-                        self.register_dataset(np_task.output())
+            prob_dataset_name = X_AFFINITY_DATASET
+            additional_dataset_names = [
+                Y_AFFINITY_DATASET, Z_AFFINITY_DATASET]
+        additional_dataset_names += self.additional_neuroproof_channels
+        for zi in range(classifier_tasks.shape[0]):
+            for yi in range(classifier_tasks.shape[1]):
+                for xi in range(classifier_tasks.shape[2]):
+                    volume = self.get_block_volume(xi, yi, zi)
+                    src_task = self.segmentation_tasks[zi, yi, xi]
+                    np_task = self.factory.gen_neuroproof_task(
+                        volume=volume,
+                        prob_dataset_name=prob_dataset_name,
+                        additional_dataset_names=additional_dataset_names,
+                        input_seg_dataset_name=SEG_DATASET,
+                        output_seg_dataset_name=NP_DATASET,
+                        classifier_filename=self.neuroproof_classifier_path,
+                        input_seg_src_task=src_task)
+                    np_task.threshold=self.np_threshold
+                    np_tasks[zi, yi, xi] = np_task
+                    self.datasets[np_task.output().path] = np_task
+                    self.tasks.append(np_task)
     
     def generate_gt_cutouts(self):
         '''Generate volumes of ground truth segmentation
@@ -959,7 +931,8 @@ class PipelineTaskMixin:
         Get the ground-truth neuron data, the synapse data if needed and
         the mask of the annotated area, if present
         '''
-        if self.wants_neuron_statistics or self.wants_synapse_statistics:
+        if self.wants_neuron_statistics or self.wants_synapse_statistics or \
+           self.wants_neuroproof_learn:
             self.gt_tasks = \
                 np.zeros((self.n_z, self.n_y, self.n_x), object)
         if self.wants_synapse_statistics:
@@ -982,7 +955,8 @@ class PipelineTaskMixin:
 
     def generate_gt_cutout(self, volume, yi, xi, zi):
         '''Generate gt cutouts for a given volume'''
-        if self.wants_neuron_statistics or self.wants_synapse_statistics:
+        if self.wants_neuron_statistics or self.wants_synapse_statistics or \
+           self.wants_neuroproof_learn:
             btask = self.factory.gen_get_volume_task(
                 self.experiment,
                 self.sample,
@@ -1016,6 +990,7 @@ class PipelineTaskMixin:
                     dataset_name=GT_MASK_DATASET,
                     resolution=self.resolution)
             self.datasets[mtask.output().path] = mtask
+            self.tasks.append(mtask)
             
     def generate_statistics_tasks(self):
         if self.wants_neuron_statistics:
@@ -1174,16 +1149,16 @@ class PipelineTaskMixin:
                     filename = CONNECTED_COMPONENTS_PATTERN.format(
                         direction="x")
                     output_location = os.path.join(
-                            left_tgt.dataset_location.roots[0], filename)
+                            os.dirname(left_tgt.output().path), filename)
                     task = self.factory.gen_connected_components_task(
+                        dataset_name=NP_DATASET,
                         volume1=left_tgt.volume,
-                        location1=left_tgt.dataset_location,
+                        src_task1=left_task,
                         volume2=right_tgt.volume,
-                        location2=right_tgt.dataset_location,
+                        src_task_2=right_task,
                         overlap_volume=overlap_volume,
                         output_location=output_location)
-                    task.set_requirement(left_task)
-                    task.set_requirement(right_task)
+                    self.tasks.append(task)
                     self.x_connectivity_graph_tasks[zi, yi, xi] = task
                                         
     def generate_y_connectivity_graph_tasks(self):
@@ -1210,16 +1185,16 @@ class PipelineTaskMixin:
                     filename = CONNECTED_COMPONENTS_PATTERN.format(
                             direction="y")
                     output_location = os.path.join(
-                        left_tgt.dataset_location.roots[0], filename)
+                        os.path.dirname(left_tgt.output().path), filename)
                     task = self.factory.gen_connected_components_task(
+                        dataset_name=NP_DATASET,
                         volume1=left_tgt.volume,
-                        location1=left_tgt.dataset_location,
+                        src_task1=left_task,
                         volume2=right_tgt.volume,
-                        location2=right_tgt.dataset_location,
+                        src_task_2=right_task,
                         overlap_volume=overlap_volume,
                         output_location=output_location)
-                    task.set_requirement(left_task)
-                    task.set_requirement(right_task)
+                    self.tasks.append(task)
                     self.y_connectivity_graph_tasks[zi, yi, xi] = task
                                         
     def generate_z_connectivity_graph_tasks(self):
@@ -1246,17 +1221,16 @@ class PipelineTaskMixin:
                     filename = CONNECTED_COMPONENTS_PATTERN.format(
                             direction="z")
                     output_location = os.path.join(
-                        left_tgt.dataset_location.roots[0], filename)
+                        os.path.dirname(left_tgt.output().path), filename)
                     task = self.factory.gen_connected_components_task(
                         volume1=left_tgt.volume,
-                        location1=left_tgt.dataset_location,
+                        src_task1=left_task,
                         volume2=right_tgt.volume,
-                        location2=right_tgt.dataset_location,
+                        src_task2=right_task,
                         overlap_volume=overlap_volume,
                         output_location=output_location)
-                    task.set_requirement(left_task)
-                    task.set_requirement(right_task)
-                    self.z_connectivity_graph_tasks[zi, yi, xi] = task    
+                    self.z_connectivity_graph_tasks[zi, yi, xi] = task
+                    self.tasks.append(task)
                     
     def generate_synapse_segmentation_tasks(self):
         '''Generate connected-components and filter tasks for synapses
@@ -1271,13 +1245,7 @@ class PipelineTaskMixin:
         for zi in range(self.n_z):
             for yi in range(self.n_y):
                 for xi in range(self.n_x):
-                    ctask = self.synapse_classifier_tasks[zi, yi, xi]
-                    nptask = self.np_tasks[zi, yi, xi]
-                    volume = ctask.output().volume
-                    ctask_loc = ctask.output().dataset_location
-                    np_loc = nptask.output().dataset_location
-                    stask_loc = self.get_dataset_location(
-                        volume, SYN_SEG_DATASET)
+                    volume = self.get_block_volume(xi, yi, zi)
                     stask = self.factory.gen_find_synapses_task(
                         volume=volume,
                         syn_location=ctask_loc,
@@ -1339,16 +1307,22 @@ class PipelineTaskMixin:
     
     def generate_synapse_connectivity_tasks(self):
         '''Make tasks that connect neurons to synapses'''
+        #
+        # TODO: use the global segmentation
+        #
         self.synapse_connectivity_tasks = np.zeros(
             (self.n_z, self.n_y, self.n_x), object)
+        if self.wants_transmitter_receptor_synapse_maps:
+            transmitter_dataset_name = SYNAPSE_TRANSMITTER_DATASET
+            receptor_dataset_name = SYNAPSE_RECEPTOR_DATASET
+        else:
+            transmitter_dataset_name = receptor_dataset_name = None
         for zi in range(self.n_z):
             for yi in range(self.n_y):
                 for xi in range(self.n_x):
+                    volume = self.get_block_volume(xi, yi, zi)
                     segtask = self.synapse_segmentation_tasks[zi, yi, xi]
-                    volume = segtask.output().volume
-                    syn_location = segtask.output().dataset_location
                     ntask = self.np_tasks[zi, yi, xi]
-                    neuron_location = ntask.output().dataset_location
                     output_location = os.path.join(
                         self.get_dirs(
                             self.xs[xi], self.ys[yi], self.zs[zi])[0],
@@ -1356,27 +1330,17 @@ class PipelineTaskMixin:
                     
                     sctask = self.factory.gen_connect_synapses_task(
                         volume=volume,
-                        synapse_location=syn_location,
-                        neuron_location=neuron_location,
+                        synapse_dataset_name=SYN_SEG_DATASET,
+                        neuron_dataset_name=NP_DATASET,
+                        transmitter_dataset_name=transmitter_dataset_name,
+                        receptor_dataset_name=receptor_dataset_name,
                         output_location=output_location,
                         xy_dilation=self.synapse_xy_dilation,
                         z_dilation=self.synapse_z_dilation,
-                        min_contact=self.min_synapse_neuron_contact)
-                    sctask.set_requirement(segtask)
-                    sctask.set_requirement(ntask)
-                    if self.wants_transmitter_receptor_synapse_maps:
-                        #
-                        # If we have synapse polarity, hook the polarity
-                        # probability maps into the ConnectSynapsesTask
-                        #
-                        task = self.transmitter_classifier_tasks[zi, yi, xi]
-                        sctask.transmitter_probability_map_location = \
-                            task.output().dataset_location
-                        task = self.receptor_classifier_tasks[zi, yi, xi]
-                        sctask.set_requirement(task)
-                        sctask.receptor_probability_map_location = \
-                            task.output().dataset_location
-                        sctask.set_requirement(task)
+                        min_contact=self.min_synapse_neuron_contact,
+                        synapse_src_task=segtask,
+                        neuron_src_task=ntask)
+                    self.tasks.append(sctask)
                     self.synapse_connectivity_tasks[zi, yi, xi] = sctask
         if self.synapse_connection_location != EMPTY_LOCATION:
             #
@@ -1418,49 +1382,41 @@ class PipelineTaskMixin:
             (self.n_z, self.n_y, self.n_x), object)
         gt_neuron_synapse_tasks = np.zeros(
             (self.n_z, self.n_y, self.n_x), object)
+        if self.has_annotation_mask:
+            mask_dataset_name = GT_MASK_DATASET
+        else:
+            mask_dataset_name = None
         for zi in range(self.n_z):
-            z0 = self.zs[zi]
-            z1 = self.ze[zi]
             for yi in range(self.n_y):
-                y0 = self.ys[yi]
-                y1 = self.ye[yi]
                 for xi in range(self.n_x):
-                    x0 = self.xs[xi]
-                    x1 = self.xe[xi]
-                    volume=Volume(x0, y0, z0, x1-x0, y1-y0, z1-z0)
-                    synapse_gt_task = self.gt_synapse_tasks[zi, yi, xi]
-                    synapse_gt_location = \
-                        synapse_gt_task.output().dataset_location
-                    gt_neuron_task = self.gt_tasks[zi, yi, xi]
+                    volume = self.get_block_volume(xi, yi, zi)
                     #
                     # Segment
                     #
-                    synapse_gt_seg_location = self.get_dataset_location(
-                        volume, SYN_SEG_GT_DATASET)
                     synapse_gt_seg_task = self.factory.gen_cc_segmentation_task(
                         volume=volume,
-                        prob_location=synapse_gt_location,
-                        mask_location=EMPTY_DATASET_LOCATION,
-                        seg_location = synapse_gt_seg_location,
+                        prob_dataset_name=SYN_GT_DATASET,
+                        seg_dataset_name = SYN_SEG_GT_DATASET,
                         threshold=0,
                         dimensionality=Dimensionality.D3,
                         fg_is_higher=True)
                     synapse_gt_seg_task.classes = self.synapse_gt_classes
-                    synapse_gt_seg_task.set_requirement(synapse_gt_task)
-                    self.register_dataset(synapse_gt_seg_task.output())
+                    self.datasets[synapse_gt_seg_task.output().path] = \
+                        synapse_gt_seg_task
+                    self.tasks.append(synapse_gt_seg_task)
                     #
                     # Match GT synapses against detected synapses
                     #
                     synapse_seg_task = \
                         self.synapse_segmentation_tasks[zi, yi, xi]
-                    synapse_seg_location = \
-                        synapse_seg_task.output().dataset_location
                     synapse_match_location = os.path.join(
                         self.get_dirs(x0, y0, z0)[0], "synapse-match.json")
                     synapse_match_task = self.factory.gen_match_synapses_task(
                         volume=volume,
-                        gt_location=synapse_gt_seg_location,
-                        detected_location=synapse_seg_location,
+                        gt_dataset_name=SYN_SEG_GT_DATASET,
+                        detected_dataset_name=SYN_SEG_DATASET,
+                        detected_src_task=synapse_seg_task,
+                        mask_dataset_name=mask_dataset_name,
                         output_location=synapse_match_location,
                         method=self.synapse_match_method)
                     synapse_match_task.min_overlap_pct = \
@@ -1468,29 +1424,22 @@ class PipelineTaskMixin:
                     synapse_match_task.max_distance = self.synapse_max_distance
                     synapse_match_task.set_requirement(synapse_seg_task)
                     synapse_match_task.set_requirement(synapse_gt_seg_task)
-                    if self.has_annotation_mask:
-                        gt_mask_task = self.gt_mask_tasks[zi, yi, xi]
-                        gt_mask_location = \
-                            gt_mask_task.output().dataset_location
-                        synapse_match_task.mask_location = gt_mask_location
-                        synapse_match_task.set_requirement(gt_mask_task)
                     d_gt_synapse_tasks[zi, yi, xi] = synapse_match_task
+                    self.tasks.append(synapse_match_task)
                     #
                     # Match GT neurons against detected neurons
                     #
                     neuron_match_location = os.path.join(
                         self.get_dirs(x0, y0, z0)[0], "neuron-match.json")
                     neuron_seg_task = self.np_tasks[zi, yi, xi]
-                    neuron_seg_location = \
-                        neuron_seg_task.output().dataset_location
                     neuron_match_task=self.factory.gen_match_neurons_task(
                         volume=volume,
-                        gt_location=gt_neuron_task.output().dataset_location,
-                        detected_location=neuron_seg_location,
+                        gt_dataset_name=GT_DATASET,
+                        detected_dataset_name=NP_DATASET,
+                        detected_src_task=neuron_seg_task,
                         output_location=neuron_match_location)
-                    neuron_match_task.set_requirement(neuron_seg_task)
-                    neuron_match_task.set_requirement(gt_neuron_task)
                     d_gt_neuron_tasks[zi, yi, xi] = neuron_match_task
+                    self.tasks.append(neuron_match_task)
                     #
                     # Match GT synapses against GT neurons
                     #
@@ -1589,51 +1538,13 @@ class PipelineTaskMixin:
         #
         for task in self.np_tasks.flatten():
             self.stitched_segmentation_task.set_requirement(task)
-        self.register_dataset(self.stitched_segmentation_task.output())
+        self.tasks.append(self.stitched_segmentation_task)
     
     ########################################################
     #
     # NPLEARN tasks
     #
     ########################################################
-    
-    def generate_nplearn_block_tasks(self):
-        '''Generate tasks to unify probability masks'''
-        if self.wants_affinity_segmentation:
-            probability_map_tasks = reversed(list(self.classifier_tasks))
-        else:
-            probability_map_tasks = [self.classifier_tasks]
-        for key in self.additional_neuroproof_channels:
-            probability_map_tasks.append(self.additional_classifier_tasks[key])
-        self.nplearn_block_tasks = []
-        for tasks in probability_map_tasks:
-            tasks = tasks.flatten()
-            tgt = tasks[0].output()
-            name = NPLEARN_PREFIX + tgt.dataset_location.dataset_name
-            inputs = [dict(volume=_.output().volume,
-                           location=_.output().dataset_location)
-                      for _ in tasks]
-            output_location = self.get_dataset_location(self.volume, name)
-            btask = self.factory.gen_block_task(
-                inputs=inputs,
-                output_volume=self.volume,
-            output_location=output_location)
-            map(btask.set_requirement, tasks)
-            self.nplearn_block_tasks.append(btask)
-
-    def generate_nplearn_ground_truth_task(self):
-        '''Download the ground truth as one big hunk'''
-        dataset_location = self.get_dataset_location(
-            self.volume, GT_DATASET)
-        self.ground_truth_task = self.factory.gen_get_volume_task(
-            experiment=self.experiment,
-            sample=self.sample,
-            dataset=self.dataset,
-            channel=self.gt_channel,
-            url=self.url,
-            volume=self.volume,
-            location = dataset_location,
-            resolution=self.resolution)
     
     def generate_volume_relabeling_task(self):
         '''Make a global segmentation for nplearn'''
@@ -1715,24 +1626,13 @@ class PipelineTaskMixin:
                 #
                 rh_logger.logger.report_event("Making Butterfly download tasks")
                 self.generate_butterfly_tasks()
-                if self.wants_neuroproof_learn:
-                    rh_logger.logger.report_event(
-                        "Making GT Butterfly task for nplearn")
-                    self.generate_nplearn_ground_truth_task()
-                else:
-                    rh_logger.logger.report_event("Making gt cutout tasks")
-                    self.generate_gt_cutouts()
+                rh_logger.logger.report_event("Making gt cutout tasks")
+                self.generate_gt_cutouts()
                 #
                 # Step 2: run the pixel classifier on each
                 #
                 rh_logger.logger.report_event("Making classifier tasks")
                 self.generate_classifier_tasks()
-                #
-                # Step 3: reblock the classification results for overlapped
-                #         segmentation
-                #
-                rh_logger.logger.report_event("Making block tasks")
-                self.generate_block_tasks()
                 if not self.wants_affinity_segmentation:
                     #
                     # Step 4: make the border masks
@@ -1762,60 +1662,88 @@ class PipelineTaskMixin:
                     self.generate_z_watershed_tasks()
                 if self.wants_neuroproof_learn:
                     #
-                    # Neuroproof Learn needs to have everything reblocked
+                    # Neuroproof Learn needs to have the segmentation relabeled
                     #
                     rh_logger.logger.report_event(
                         "Making segmentation relabeling task")
                     self.generate_volume_relabeling_task()
                     rh_logger.logger.report_event(
-                        "Making tasks to reblock probability maps for nplearn")
-                    self.generate_nplearn_block_tasks()
-                    rh_logger.logger.report_event(
                         "Making neuroproof learn task")
                     self.generate_nplearn_task()
                     self.requirements.append(self.neuroproof_learn_task)
-                    return
-                #
-                # Step 7: run Neuroproof on the blocks and border blocks
-                #
-                rh_logger.logger.report_event("Making Neuroproof tasks")
-                self.generate_neuroproof_tasks()
-                #
-                # Step 8: Skeletonize Neuroproof
-                #
-                rh_logger.logger.report_event("Making skeletonize tasks")
-                self.generate_skeletonize_tasks()
-                #
-                # Step 9: Segment the synapses
-                #
-                rh_logger.logger.report_event("Segment synapses")
-                if self.wants_transmitter_receptor_synapse_maps:
-                    self.generate_synapse_tr_segmentation_tasks()
                 else:
-                    self.generate_synapse_segmentation_tasks()
+                    #
+                    # Step 7: run Neuroproof on the blocks and border blocks
+                    #
+                    rh_logger.logger.report_event("Making Neuroproof tasks")
+                    self.generate_neuroproof_tasks()
+                    #
+                    # Step 8: Skeletonize Neuroproof
+                    #
+                    rh_logger.logger.report_event("Making skeletonize tasks")
+                    self.generate_skeletonize_tasks()
+                    #
+                    # Step 9: Segment the synapses
+                    #
+                    rh_logger.logger.report_event("Segment synapses")
+                    if self.wants_transmitter_receptor_synapse_maps:
+                        self.generate_synapse_tr_segmentation_tasks()
+                    else:
+                        self.generate_synapse_segmentation_tasks()
+                    #
+                    # Step 10: The connectivity graph.
+                    #
+                    rh_logger.logger.report_event("Making connectivity graph")
+                    self.generate_connectivity_graph_tasks()
+                    #
+                    # Step 11: Connect synapses to neurites
+                    #
+                    rh_logger.logger.report_event("Connecting synapses and neurons")
+                    requirements = self.generate_synapse_connectivity_tasks()
+                    self.requirements += list(requirements)
+                    #
+                    # Step 12: find ground-truth synapses and compute statistics
+                    #
+                    rh_logger.logger.report_event("Comparing synapses to gt")
+                    self.generate_synapse_statistics_tasks()
+                    #
+                    # Step 13: write out the stitched segmentation
+                    #
+                    if self.stitched_segmentation_location != EMPTY_LOCATION:
+                        rh_logger.logger.report_event("Stitching segments")
+                        self.generate_stitched_segmentation_task()
+                        self.requirements.append(self.stitched_segmentation_task)
                 #
-                # Step 10: The connectivity graph.
+                # Do the VolumeDB computation
                 #
-                rh_logger.logger.report_event("Making connectivity graph")
-                self.generate_connectivity_graph_tasks()
+                rh_logger.logger.report_event("Computing load/store plans")
+                self.volume_db.compute_subvolumes()
                 #
-                # Step 11: Connect synapses to neurites
+                # Write the loading plans
                 #
-                rh_logger.logger.report_event("Connecting synapses and neurons")
-                requirements = self.generate_synapse_connectivity_tasks()
-                self.requirements += list(requirements)
+                rh_logger.logger.report_event("Writing loading plans")
+                for loading_plan_id in self.volume_db.get_loading_plan_ids():
+                    loading_plan_path = volume_db.get_loading_plan_path(
+                        loading_plan_id)
+                    directory = os.path.dirname(loading_plan_path)
+                    if not os.path.exists(directory):
+                        os.makedirs(directory)
+                    write_loading_plan(loading_plan_path, volume_db, 
+                                      loading_plan_id)
                 #
-                # Step 12: find ground-truth synapses and compute statistics
+                # Write the storage plans
                 #
-                rh_logger.logger.report_event("Comparing synapses to gt")
-                self.generate_synapse_statistics_tasks()
+                rh_logger.logger.report_event("Writing storage plans")
+                for dataset_id in self.volume_db.get_dataset_ids():
+                    write_storage_plan(volume_db, dataset_id)
                 #
-                # Step 13: write out the stitched segmentation
+                # Hook up dependencies.
                 #
-                if self.stitched_segmentation_location != EMPTY_LOCATION:
-                    rh_logger.logger.report_event("Stitching segments")
-                    self.generate_stitched_segmentation_task()
-                    self.requirements.append(self.stitched_segmentation_task)
+                for task in self.tasks:
+                    for tgt in task.input():
+                        path = tgt.path
+                        if path in self.datasets:
+                            task.set_requirement(self.datasets[path])
                 #
                 # The requirements:
                 #

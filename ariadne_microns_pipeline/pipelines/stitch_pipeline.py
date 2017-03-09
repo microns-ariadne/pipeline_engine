@@ -3,7 +3,6 @@ import luigi
 import os
 
 from ..parameters import Volume
-from ..parameters import DatasetLocation
 from ..targets.factory import TargetFactory
 from ..tasks.factory import AMTaskFactory
 from ..tasks.connected_components import \

@@ -58,7 +58,7 @@ def get_loading_plan_path(root, loading_plan_id, volume, dataset_name):
         dataset_name, volume.x, volume.x1,
         volume.y, volume.y1,
         volume.z, volume.z1,
-        dataset_id)
+        loading_plan_id)
     location = os.path.join(
         root, str(volume.x), str(volume.y),
         str(volume.z), leaf_dir)
@@ -96,6 +96,10 @@ class VolumeObj(Base):
                          "x0", "y0", "z0", "x1", "y1", "z1",
                          unique=True),
         )
+    def volume(self):
+        '''Return the parameters.Volume style volume for this obj'''
+        return Volume(self.x0, self.y0, self.z0,
+                      self.x1 - self.x0, self.y1 -self.y0, self.z1-self.z0)
 
 class TaskObj(Base):
     '''A Luigi task'''
@@ -298,7 +302,8 @@ class LoadingPlanObj(Base):
         TaskObj, primaryjoin=task_id == TaskObj.task_id)
     src_task = relationship(
         TaskObj, primaryjoin=src_task_id == TaskObj.task_id)
-    
+
+
 class SubvolumeLinkObj(Base):
     '''find all the subvolumes needed by a LoadingPlan
     
@@ -524,7 +529,7 @@ class VolumeDB(object):
         for name, value in task.get_params():
             value = getattr(task, name)
             param = TaskParameterObj(name=name,
-                                     value=value,
+                                     value=repr(value),
                                      task=task_obj)
             self.session.add(param)
         if commit:
@@ -776,6 +781,36 @@ class VolumeDB(object):
                 persistence=persistence))
         self.session.commit()
     
+    def get_loading_plan_path(self, loading_plan_id):
+        '''Get the canonical loading plan path from the loading plan ID
+        
+        :param loading_plan_id: the loading plan ID of the loading plan
+        whose path we want.
+        '''
+        loading_plan = self.session.query(LoadingPlanObj).filter(
+            LoadingPlanObj.loading_plan_id == loading_plan_id).first()
+        assert isinstance(loading_plan, LoadingPlanObj)
+        loading_plan_path = get_loading_plan_path(
+            self.get_datatype_root(loading_plan.dataset_type.name),
+            loading_plan_id, loading_plan.volume.volume,
+            loading_plan.dataset_type.name)
+        return loading_plan_path
+    
+    def get_storage_plan_path(self, dataset_id):
+        '''Get the canonical storage plan path from the dataset id
+        
+        :param dataset_id: the dataset ID for the dataset whose storage plan
+        we are referencing.
+        '''
+        dataset = self.session.query(DatasetObj).filter(
+            DatasetObj.dataset_id == dataset_id).first()
+        assert isinstance(dataset, DatasetObj)
+        return get_storage_plan_path(
+            self.get_datatype_root(dataset.dataset_type.name),
+            dataset_id,
+            dataset.volume.volume,
+            dataset.dataset_type.name)
+    
     def get_dependencies(self, task):
         '''Get a list of the tasks this task depends on
         
@@ -895,6 +930,19 @@ class VolumeDB(object):
             DatasetSubvolumeObj.subvolume_id
         ]
         return self._make_location_volume_result(clauses)
+    
+    def get_loading_plan_ids(self):
+        '''Return a sequence of all of the loading plan IDs
+        
+        '''
+        return map(lambda _:_[0],
+                   self.session.query(LoadingPlanObj.loading_plan_id))
+    
+    def get_dataset_ids(self):
+        '''Return a sequence of all of the dataset IDs'''
+        
+        return map(lambda _:_[0],
+                   self.session.query(DatasetObj.dataset_id))
     
     def imread(self, loading_plan_id):
         '''Read a volume, using a loading plan

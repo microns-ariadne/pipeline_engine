@@ -3,10 +3,10 @@
 import luigi
 import numpy as np
 from .utilities import RunMixin, DatasetMixin
+from ..parameters import VolumeParameter
 from ..targets.butterfly_target \
      import ButterflyChannelTarget, get_butterfly_plane_from_channel
 from ..targets.factory import TargetFactory
-from ..parameters import VolumeParameter, DatasetLocationParameter
 
 class DownloadFromButterflyTaskMixin:
     '''Download a volume from Butterfly'''
@@ -25,6 +25,7 @@ class DownloadFromButterflyTaskMixin:
     resolution = luigi.IntParameter(
         default=0,
         description="The MIPMAP resolution of the image to be retrieved.")
+    volume = VolumeParameter(description="The voxel location to download")
     
     def estimate_memory_usage(self):
         '''Return an estimate of bytes of memory required by this task'''

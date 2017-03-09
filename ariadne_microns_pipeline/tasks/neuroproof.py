@@ -21,7 +21,7 @@ class NeuroproofTaskMixin(DatasetMixin):
     prob_loading_plan_path = luigi.Parameter(
         description="Location of the membrane probability dataset. "
         "Note: the probabilities can't be sharded.")
-    additional_locations = luigi.Parameter(
+    additional_loading_plan_paths = luigi.Parameter(
         default=[],
         description="Locations of additional probability maps "
         "to aid Neuroproof")
@@ -81,60 +81,42 @@ class NeuroproofRunMixin:
     def ariadne_run(self):
         '''Run the neuroproof subprocess'''
         #
-        # TODO: hack Neuroproof to read .tif stacks
-        #
-        assert False
-        #
         # The arguments for neuroproof_graph_predict:
         #
-        # watershed-file: directory containing the segmentation .png files
-        # prediction-file: directory containing the probability .png files
-        # classifier-file: path to either the .xml or .h5 agglomeration
-        #                  classifier
-        #
-        inputs = self.input()
-        prob_volume = inputs.next()
-        seg_volume = inputs.next()
-        additional_maps = list(inputs)
-        #
-        # Get the anticipated filenames and make sure the directories
-        # for them have been created.
-        #
         output_target = self.output()
-        output = output_target.anticipate_filenames()
-        outdirs = set()
-        for filename in output:
-            outdirs.add(os.path.dirname(filename))
-        for directoryname in outdirs:
-            if not os.path.isdir(directoryname):
-                os.makedirs(directoryname)
+        output_target.create_directories()
+        output = self.storage_plan
         #
         # neuroproof_graph_predict will take a .json file in place of a
         # prediction file. It has the following format:
         #
         # { "probabilities": [
-        #      [ filenames of channel 0],
-        #      [ filenames of channel 1],
-        #      ...
-        #      [ filenames of channel N]]
+        #       "<probability-loading-plan-1>",
+        #       ...
+        #       "<probability-loading-plan-N"
+        #   ]
         #   "config": {
-        #        "invert": [ True or False per probability ]
+        #        "invert": [ True or False per probability ],
+        #        "use-loading-plan": True,
+        #        "use-storage-plan": True
         #   }
-        #   "watershed": [ filenames of watershed ],
-        #   "output": [ filenames to write on output] }
+        #   "watershed": "watershed-loading-plan",
+        #   "output": "output-storage-plan" }
         #
         # config is optional as are its key/value pairs. Predictably,
         # "invert" is False by default.
         #
-        probabilities = [tgt.get_filenames() for tgt in
-                         [prob_volume] + additional_maps]
-        watershed = seg_volume.get_filenames()
+        probabilities = \
+            [self.prob_loading_plan_path] + self.additional_loading_plan_paths
+        watershed = self.input_seg_loading_plan_path
         config_path = \
             os.path.splitext(self.classifier_filename)[0] + "_config.json"
         if os.path.isfile(config_path):
             config = json.load(open(config_path, "r"))
         else:
             config = {}
+        config["use-loading-plan"] = True
+        config["use-storage-plan"] = True
         d = dict(config=config,
                  probabilities=probabilities,
                  watershed=watershed,

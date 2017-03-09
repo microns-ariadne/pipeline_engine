@@ -203,10 +203,14 @@ class ClassifyShimTask(RequiresMixin, luigi.Task):
     
     dataset_name = luigi.Parameter(
          description="The name of the desired dataset")
+    storage_plan_path = luigi.Parameter(
+         description="Location of the storage plan for the dataset")
     
     @staticmethod
     def make_shim(classify_task, dataset_name):
-        shim = ClassifyShimTask(dataset_name=dataset_name)
+        shim = ClassifyShimTask(
+            dataset_name=dataset_name,
+            storage_plan_path = classify_task.prob_plans[dataset_name])
         shim.set_requirement(classify_task)
         return shim
     
@@ -214,10 +218,7 @@ class ClassifyShimTask(RequiresMixin, luigi.Task):
         yield self.requirements[0].output()
     
     def output(self):
-        with self.input().next().open("r") as fd:
-            d = json.load(fd)
-        storage_plan_path = d[self.dataset_name]
-        return SrcVolumeTarget(storage_plan_path)
+        return SrcVolumeTarget(self.storage_plan_path)
     
     @property
     def output_volume(self):

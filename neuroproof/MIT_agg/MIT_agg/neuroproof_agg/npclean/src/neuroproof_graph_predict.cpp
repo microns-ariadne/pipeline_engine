@@ -194,32 +194,35 @@ template <typename T> void read_loading_plan(
     }
     fin.close();
     Json::Value dimensions = d["dimensions"];
-    Json::Uint depth = dimensions[0].asUInt();
-    Json::Uint height = dimensions[1].asUInt();
-    Json::Uint width = dimensions[2].asUInt();
-    Json::Uint x0 = d["x"].asUInt();
-    Json::Uint y0 = d["y"].asUInt();
-    Json::Uint z0 = d["z"].asUInt();
+    Json::UInt depth = dimensions[0].asUInt();
+    Json::UInt height = dimensions[1].asUInt();
+    Json::UInt width = dimensions[2].asUInt();
+    Json::UInt x0 = d["x"].asUInt();
+    Json::UInt y0 = d["y"].asUInt();
+    Json::UInt z0 = d["z"].asUInt();
     volumedata.reshape(vigra::MultiArrayShape<3>::type(
         width, height, depth));
     
-    Json::Value blocks = d["blocks"]
-    for (int i=0; i < blocks.size(); i++) {
+    Json::Value blocks = d["blocks"];
+    cilk_for (int i=0; i < blocks.size(); i++) {
 	Json::Value subvolume = blocks[i][0];
-	Json::Uint svx0 = subvolume["x"].asUInt();
-	Json::Uint svy0 = subvolume["y"].asUInt();
-	Json::Uint svz0 = subvolume["z"].asUInt();
-	Json::Uint svx1 = svx0 + subvolume["width"].asUInt();
-	Json::Uint svy1 = svy0 + subvolume["height"].asUInt();
-	Json::Uint svz1 = svz0 + subvolume["depth"].asUInt();
+	Json::UInt svx0 = subvolume["x"].asUInt();
+	Json::UInt svy0 = subvolume["y"].asUInt();
+	Json::UInt svz0 = subvolume["z"].asUInt();
+	Json::UInt svx1 = svx0 + subvolume["width"].asUInt();
+	Json::UInt svy1 = svy0 + subvolume["height"].asUInt();
+	Json::UInt svz1 = svz0 + subvolume["depth"].asUInt();
 	Json::Value location = blocks[i][1];
-	VolumeData<T> subvolumedata;
-	vigra::importVolume(subvolumedata, location.asString())
+	vigra::MultiArray<3, T> subvolumedata;
+	vigra::importVolume(subvolumedata, location.asString());
 	for (int z=svz0; z<svz1; ++z) {
 	    for (int y=svy0; y < svy1; ++y) {
 		for (int x=svx0; x < svx1; ++x) {
 		    volumedata(x-x0, y-y0, z-z0) = 
 		        subvolumedata(x-svx0, y-svy0, z-svz0);
+		}
+	    }
+	}
     }
     std::cout << "Finished reading volume." << std::endl;
 }
@@ -229,12 +232,17 @@ template <typename T> void read_loading_plan(
  *
  * path - path to the storage plan .json file
  * volumedata - write the data from this volume
- *
+ * mapping - the mapping from the segment numbers in volumedata to those
+ *           in the output segmentation.
  */
 template <typename T> void write_storage_plan(
     std::string path,
-    VolumeData<T> &volumedata)
+    VolumeData<T> &volumedata,
+    std::vector<T> &mapping)
 {
+    Json::Reader reader;
+    Json::Value d;
+
     std::cout << "Reading storage plan, " << path << std::endl;
     ifstream fin(path);
     if (! fin) {
@@ -245,29 +253,41 @@ template <typename T> void write_storage_plan(
     }
     fin.close();
     Json::Value dimensions = d["dimensions"];
-    Json::Uint depth = dimensions[0].asUInt();
-    Json::Uint height = dimensions[1].asUInt();
-    Json::Uint width = dimensions[2].asUInt();
-    Json::Uint x0 = d["x"].asUInt();
-    Json::Uint y0 = d["y"].asUInt();
-    Json::Uint z0 = d["z"].asUInt();
+    Json::UInt depth = dimensions[0].asUInt();
+    Json::UInt height = dimensions[1].asUInt();
+    Json::UInt width = dimensions[2].asUInt();
+    Json::UInt x0 = d["x"].asUInt();
+    Json::UInt y0 = d["y"].asUInt();
+    Json::UInt z0 = d["z"].asUInt();
     volumedata.reshape(vigra::MultiArrayShape<3>::type(
         width, height, depth));
     
-    Json::Value blocks = d["blocks"]
-    for (int i=0; i < blocks.size(); i++) {
+    Json::Value blocks = d["blocks"];
+    cilk_for (int i=0; i < blocks.size(); i++) {
 	Json::Value subvolume = blocks[i][0];
-	Json::Uint svx0 = subvolume["x"].asUInt();
-	Json::Uint svy0 = subvolume["y"].asUInt();
-	Json::Uint svz0 = subvolume["z"].asUInt();
-	Json::Uint svx1 = svx0 + subvolume["width"].asUInt();
-	Json::Uint svy1 = svy0 + subvolume["height"].asUInt();
-	Json::Uint svz1 = svz0 + subvolume["depth"].asUInt();
+	Json::UInt width = subvolume["width"].asUInt();
+	Json::UInt height = subvolume["height"].asUInt();
+	Json::UInt depth = subvolume["depth"].asUInt();
+	Json::UInt svx0 = subvolume["x"].asUInt();
+	Json::UInt svy0 = subvolume["y"].asUInt();
+	Json::UInt svz0 = subvolume["z"].asUInt();
+	Json::UInt svx1 = svx0 + width;
+	Json::UInt svy1 = svy0 + height;
+	Json::UInt svz1 = svz0 + depth;
 	Json::Value location = blocks[i][1];
-	vigra::MultiArrayView<3, T> subvolume = volumedata.subarray(
-	    vigra::Shape(svx0 - x0, svy0 - y0, svz0 - z0),
-	    vigra::Shape(svx1 - x0, svy1 - y0, svz1 - z0));
-	vigra::exportVolume(subvolume, location.asString());
+	vigra::MultiArrayView<3, T> subarray = volumedata.subarray(
+	    vigra::Shape3(svx0 - x0, svy0 - y0, svz0 - z0),
+	    vigra::Shape3(svx1 - x0, svy1 - y0, svz1 - z0));
+	vigra::MultiArray<3, T> output_volume;
+	output_volume.reshape(vigra::Shape3(width, height, depth));
+	for (int x=0; x < width; ++x) {
+	    for (int y=0; y < height; ++y) {
+		for (int z=0; z < depth; ++z) {
+		    output_volume(x, y, z) = mapping[subarray(x, y, z)];
+		}
+	    }
+	}
+	vigra::exportVolume(output_volume, location.asString());
     }
     std::cout << "Finished writing volume" << std::endl;
 }
@@ -279,8 +299,7 @@ template <typename T> void write_storage_plan(
  * path - path to the JSON document
  * prob_list - a vector of probability volumes in the order expected by the
  *             classifier.
- * ws_input_files - the .PNG files containing the planes of labels for the
- *                  watershed.
+ * pLabels - load the initial segmentation into here.
  *
  * The format of the JSON file:
  * { "probabilities": 
@@ -294,8 +313,7 @@ template <typename T> void write_storage_plan(
  */
 void get_json_files(std::string path, 
                     std::vector<VolumeProbPtr> &prob_list,
-                    std::vector<std::string> &ws_input_files,
-		    std::vector<std::string> &output_files)
+                    VolumeLabelPtr &pLabels)
 {
     Json::Reader reader;
     Json::Value d;
@@ -311,15 +329,20 @@ void get_json_files(std::string path,
     fin.close();
     /*
      * Read the probabilities: a list of lists of file names
+     *
+     * Or it's a loading plan
      */
     Json::Value probabilities = d["probabilities"];
     Json::Value config = d["config"];
+    bool use_loading_plans = 
+	(config.isObject() && (! config["use-loading-plans"].empty()));
     for (int i=0; i < probabilities.size(); i++) {
 	Json::Value probability = probabilities[i];
 	std::vector<VolumeProbPtr> tmp;
-	if (config.isObject() && (! config["use-loading-plans"].empty())) {
-	    tmp = new VolumeProb;
-	    read_loading_plan(probability.asString(), tmp);
+	if (use_loading_plans) {
+	    VolumeProbPtr pvp = VolumeProb::create_volume();
+	    tmp.push_back(pvp);
+	    read_loading_plan(probability.asString(), *tmp[0]);
 	} else {
 	    std::vector<std::string> file_names;
 	    for (int j=0; j < probability.size(); j++) {
@@ -371,16 +394,67 @@ void get_json_files(std::string path,
      * Capture the filenames for the watershed stack.
      */
     Json::Value watershed = d["watershed"];
-    for (int i=0; i < watershed.size(); i++) {
-	ws_input_files.push_back(watershed[i].asString());
+    if (use_loading_plans) {
+	pLabels = VolumeLabelData::create_volume();
+	read_loading_plan(watershed.asString(), *pLabels);
+    } else {
+	std::vector<std::string> ws_input_files;
+	for (int i=0; i < watershed.size(); i++) {
+	    ws_input_files.push_back(watershed[i].asString());
+	}
+	pLabels = VolumeLabelData::create_volume_from_images_seg(ws_input_files);
     }
+}
+
+/*
+ * store_segmentation - write the segmentation to disk
+ *
+ * path - the .json configuration file giving the details of how to
+ *            write the output.
+ * segmentation - the initial segmentation
+ * mapping - the mapping of input segment number to output segment number
+ */
+void store_segmentation(std::string path, 
+                        VolumeLabelData &segmentation,
+			std::vector<Label_t> mapping)
+{
+    Json::Reader reader;
+    Json::Value d;
+    
+    std::cout << "Using configuration, " << path << std::endl;
+    ifstream fin(path);
+    if (! fin) {
+	throw ErrMsg("Error: input file, \"" + path + "\" cannot be opened.");
+    }
+    if (! reader.parse(fin, d)) {
+	throw ErrMsg("Cannot parse \"" + path + "\" as json.");
+    }
+    fin.close();
+    Json::Value config = d["config"];
+    bool use_storage_plans = 
+	(config.isObject() && (! config["use-storage-plans"].empty()));
     /*
      * Capture the output files
      */
-     Json::Value output = d["output"];
-     for (int i=0; i< output.size(); i++) {
-	 output_files.push_back(output[i].asString());
+    Json::Value output = d["output"];
+    if (use_storage_plans) { 
+	write_storage_plan(output.asString(), segmentation, mapping);
+    } else {
+        cilk_for (int i=0; i< output.size(); i++) {
+	    cv::Mat plane(segmentation.shape(1), segmentation.shape(0), CV_8UC3);
+	    for (int x = 0; x < segmentation.shape(0); x++) {
+		for (int y=0; y < segmentation.shape(1); y++) {
+		    Label_t val = mapping[segmentation(x, y, i)];
+		    cv::Vec3b &rgb = plane.at<Vec3b>(y, x);
+		    rgb[0] = (vigra::UInt8)val;
+		    rgb[1] = val >> 8;
+		    rgb[2] = val >> 16;
+		}
+	    }
+    	    cv::imwrite(output.asString().c_str(), plane);
+	}
     }
+
 }
 
 /*
@@ -410,64 +484,18 @@ void compress_labels(VolumeLabelPtr labelvol,
     std::cout << "Found " << dest << " labels" << std::endl;
 }
 
-/*
- * write_labels - write a label volume to a series of .png files
- */
-void write_labels(VolumeLabelPtr labelvol, 
-                  std::vector<std::string> filenames,
-		  std::vector<Label_t> mapping)
-{
-    cilk_for (int i=0; i < labelvol->shape(2); i++) {
-        cv::Mat plane(labelvol->shape(1), labelvol->shape(0), CV_8UC3);
-	for (int x = 0; x < labelvol->shape(0); x++) {
-	    for (int y=0; y < labelvol->shape(1); y++) {
-		Label_t val = mapping[(*labelvol)(x, y, i)];
-		cv::Vec3b &rgb = plane.at<Vec3b>(y, x);
-		rgb[0] = (vigra::UInt8)val;
-		rgb[1] = val >> 8;
-		rgb[2] = val >> 16;
-	    }
-	}
-	cv::imwrite(filenames[i].c_str(), plane);
-    }
-}
-
 void run_prediction(PredictOptions& options)
 {
     boost::posix_time::ptime start = boost::posix_time::microsec_clock::local_time();
     boost::posix_time::ptime start_all = boost::posix_time::microsec_clock::local_time();
 
-    std::vector<std::string> prob_input_files;
-    std::vector<std::string> ws_input_files;
-    std::vector<std::string> output_files;
-    
     printf("-- Read dirs\n");
     
-    size_t ext_pos = options.prediction_filename.find_last_of('.');
-    bool is_hdf5 = false;
-    bool is_json = false;
-    if (ext_pos != string::npos) {
-	std:string ext = options.prediction_filename.substr(ext_pos);
-	is_hdf5 = ((ext == ".hdf5") || (ext == ".h5"));
-	is_json = (ext == ".json");
-    }
     vector<VolumeProbPtr> prob_list;
-    if (is_json) {
-	get_json_files(options.prediction_filename,
-		       prob_list,
-		       ws_input_files,
-		       output_files);
-    } else if (is_hdf5) {
-	prob_list = VolumeProb::create_volume_array(
-	    options.prediction_filename.c_str(), PRED_DATASET_NAME);
-        get_dir_files(options.watershed_filename, ws_input_files);
-    } else {
-	get_dir_files(options.prediction_filename, prob_input_files);
-        get_dir_files(options.watershed_filename, ws_input_files);
-	prob_list = VolumeProb::create_volume_from_images(prob_input_files);
-    }    
-    VolumeLabelPtr initial_labels = cilk_spawn VolumeLabelData::create_volume_from_images_seg(ws_input_files);
-    
+    VolumeLabelPtr initial_labels;
+    get_json_files(options.prediction_filename,
+	           prob_list,
+		   initial_labels);
     
     // create watershed volume from the oversegmentation file.
     EdgeClassifier* eclfr;
@@ -477,17 +505,10 @@ void run_prediction(PredictOptions& options)
         eclfr = new OpencvRFclassifier(options.classifier_filename.c_str());
     }
     EdgeClassifier* back_up = eclfr->clone();
-/*VolumeLabelData::create_volume(
-            options.watershed_filename.c_str(), SEG_DATASET_NAME);*/
-    cilk_sync;
 
     boost::posix_time::ptime now;
     now = boost::posix_time::microsec_clock::local_time();
     VolumeProbPtr boundary_channel = prob_list[0];
-    printf("-- Read probs H5 file - finish\n"); 	
-    cout << "Read prediction array" << endl;
-
-    cout << "Read watershed" << endl;
 
     now = boost::posix_time::microsec_clock::local_time();
     cout << endl << "------------------------ TIME TO LOAD DATA: " << (now - start).total_milliseconds() << " ms\n";
@@ -638,16 +659,12 @@ void run_prediction(PredictOptions& options)
     }
         
     start = boost::posix_time::microsec_clock::local_time();
-    if (is_json) {
-	VolumeLabelPtr pLabels = stack.get_labelvol();
-	pLabels->rebase_labels();
-	std::vector<Label_t> mapping;
-	compress_labels(pLabels, mapping);
-	write_labels(pLabels, output_files, mapping);
-    } else {
-	stack.serialize_stack(options.output_filename.c_str(),
-	            options.graph_filename.c_str(), options.location_prob);
-    }
+    VolumeLabelPtr pLabels = stack.get_labelvol();
+    pLabels->rebase_labels();
+    std::vector<Label_t> mapping;
+    compress_labels(pLabels, mapping);
+    store_segmentation(options.prediction_filename, *pLabels, mapping);
+
     now = boost::posix_time::microsec_clock::local_time();
     cout << endl << "---------------------- TIME TO SERIALIZE: " << (now - start).total_milliseconds() << " ms\n";
 
