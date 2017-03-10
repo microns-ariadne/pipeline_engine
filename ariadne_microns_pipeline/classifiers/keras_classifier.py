@@ -231,6 +231,8 @@ class KerasClassifier(AbstractPixelClassifier):
             self.stretch_output = False
         if "invert" in state:
             self.invert = state["invert"]
+        else:
+            self.invert = False
     
     def get_class_names(self):
         return self.classes
