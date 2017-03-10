@@ -35,7 +35,9 @@ class KerasClassifier(AbstractPixelClassifier):
                  xy_trim_size=0,
                  z_trim_size=0,
                  classes = ["membrane"],
-                 mirrored=False):
+                 mirrored=False,
+                 stretch_output=False,
+                 invert=False):
         '''Initialize from a model and weights
         
         :param model_path: path to JSON model file suitable for 
@@ -57,6 +59,9 @@ class KerasClassifier(AbstractPixelClassifier):
         :param classes: an array of class names to be output
         :param mirrored: If True, there is no external padding and the padded
         regions of the input are filled with a mirroring of the input
+        :param stretch_output: if True, stretch the output intensity range
+        to between 0 and 255.
+        :param invert: If True, invert the probability map outputs
         '''
         self.xypad_size = xypad_size
         self.zpad_size = zpad_size
@@ -70,6 +75,8 @@ class KerasClassifier(AbstractPixelClassifier):
         self.z_trim_size = z_trim_size
         self.classes = classes
         self.mirrored = mirrored
+        self.stretch_output=stretch_output
+        self.invert = invert
 
     @staticmethod
     def __keras_backend():
@@ -182,7 +189,9 @@ class KerasClassifier(AbstractPixelClassifier):
                     xy_trim_size=self.xy_trim_size,
                     z_trim_size=self.z_trim_size,
                     classes=self.classes,
-                    mirrored=self.mirrored)
+                    mirrored=self.mirrored,
+                    stretch_output=self.stretch_output,
+                    invert=self.invert)
     
     def __setstate__(self, state):
         '''Restore the state from the pickle'''
@@ -216,6 +225,12 @@ class KerasClassifier(AbstractPixelClassifier):
             self.mirrored = state["mirrored"]
         else:
             self.mirrored = False
+        if "stretch_output" in state:
+            self.stretch_output = state["stretch_output"]
+        else:
+            self.stretch_output = False
+        if "invert" in state:
+            self.invert = state["invert"]
     
     def get_class_names(self):
         return self.classes
@@ -527,8 +542,17 @@ class KerasClassifier(AbstractPixelClassifier):
                     y1b = self.out_image.shape[2]
                     pred = pred[:, :, :y1b - y0b, :]
                     logger.report_event("Fixing Y padding): " + str(pred.shape))
+                if self.stretch_output:
+                    pred_min = pred.min()
+                    pred_max = pred.max()
+                    pred = (pred - pred_min) / \
+                        (pred_max - pred_min + np.finfo(pred.dtype).eps)
+                else:
+                    pred = np.clip(pred, 0, 1)
+                if self.invert:
+                    pred = 1 - pred
                 self.out_image[:, z0b:z1b, y0b:y1b, x0b:x1b] = \
-                    (np.clip(pred, 0, 1) * 255).astype(np.uint8)
+                    (pred * 255).astype(np.uint8)
         except:
             self.exception = sys.exc_value
             logger.report_exception()
