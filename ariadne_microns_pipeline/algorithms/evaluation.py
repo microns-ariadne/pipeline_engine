@@ -2,6 +2,7 @@ import enum
 import hungarian
 import numpy as np
 from scipy.ndimage.filters import maximum_filter
+from scipy.ndimage import distance_transform_edt
 from scipy.sparse import coo_matrix
 import fast64counter
 import mahotas
@@ -24,13 +25,13 @@ def thin_boundaries(im, mask):
         im[:] = 1.0
         im[0,:] = 2.0
 
-    # repeatedly expand regions by one pixel until the background is gone
-    while (im[mask] == 0).sum() > 0:
-        zeros = (im == 0)
-        im[zeros] = maximum_filter(im, 3)[zeros]
-
+    # Fill in zeros with closest foreground value
+    fg = distance_transform_edt(im == 0, 
+                                return_distances=False,
+                                return_indices=True)
+    im = im[fg[0], fg[1], fg[2]]
     # make sure image is not constant to avoid zero division
-    if len(np.unique(im))==1:
+    if np.all(im == im[0, 0, 0]):
         im[0,:] = 5
     return im
 
