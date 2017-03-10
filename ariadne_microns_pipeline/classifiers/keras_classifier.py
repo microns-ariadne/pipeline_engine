@@ -315,19 +315,26 @@ class KerasClassifier(AbstractPixelClassifier):
         if self.downsample_factor == 1 and \
            image.shape[1] >= self.block_size[1] and \
            image.shape[2] >= self.block_size[2]:
-            return image
-        image_out = []
-        for plane in image:
-            plane = zoom(plane, 1.0 / self.downsample_factor)
-            if plane.shape[0] < self.block_size[1] or \
-               plane.shape[1] < self.block_size[2]:
-                xs = max(plane.shape[1], self.block_size[2])
-                ys = max(plane.shape[0], self.block_size[1])
-                tmp = np.zeros((ys, xs), plane.dtype)
-                tmp[:plane.shape[0], :plane.shape[1]] = plane
-                plane = tmp
-            image_out.append(plane)
-        return np.array(image_out)
+            image_out = image
+        else:
+            image_out = []
+            for plane in image:
+                plane = zoom(plane, 1.0 / self.downsample_factor)
+                if plane.shape[0] < self.block_size[1] or \
+                   plane.shape[1] < self.block_size[2]:
+                    xs = max(plane.shape[1], self.block_size[2])
+                    ys = max(plane.shape[0], self.block_size[1])
+                    tmp = np.zeros((ys, xs), plane.dtype)
+                    tmp[:plane.shape[0], :plane.shape[1]] = plane
+                    plane = tmp
+                image_out.append(plane)
+            image_out = np.array(image_out)
+        if self.mirrored:
+            #
+            # Pad and mirror
+            #
+            image_out = self.mirror_block(image_out)
+        return image_out
     
     def preprocessor(self, image):
         '''The preprocessor thread: run normalization and make blocks'''
@@ -337,6 +344,9 @@ class KerasClassifier(AbstractPixelClassifier):
         # the downsampled size.
         #
         image = self.downsample_and_pad_image(image)
+        logger.report_event(
+            "Image after downsampling and padding: %d, %d, %d" % 
+            (image.shape[0], image.shape[1], image.shape[2]))
         #
         # Coordinates:
         #
@@ -353,21 +363,12 @@ class KerasClassifier(AbstractPixelClassifier):
             np.array([self.zpad_size*2, 
                       self.get_y_pad_ds()*2, 
                       self.get_x_pad_ds()*2])
-        xpad_ds = 0 if self.mirrored else self.get_x_pad_ds()
-        ypad_ds = 0 if self.mirrored else self.get_y_pad_ds()
-        if self.mirrored:
-            input_block_size = output_block_size.copy()
-            #
-            # May need to add extra lines if input_block_size[0] has fewer
-            # lines than needed for mirroring.
-            #
-            if input_block_size[0] <= self.zpad_size:
-                input_block_size[0] = self.zpad_size + 1
-        else:
-            input_block_size = self.block_size
+        xpad_ds = self.get_x_pad_ds()
+        ypad_ds = self.get_y_pad_ds()
+        input_block_size = self.block_size
         
         z0 = self.get_z_pad()
-        z1 = image.shape[0] - self.get_z_pad()
+        z1 = image.shape[0] - self.zpad_size
         n_z = 1 + int((z1-z0 - 1) / output_block_size[0])
         zs = np.linspace(z0, z1, n_z+1).astype(int)
         y0 = ypad_ds
@@ -417,8 +418,6 @@ class KerasClassifier(AbstractPixelClassifier):
                     x1b = x1a - xpad_ds * 2
                     block = np.array([norm_img[z][y0a:y1a, x0a:x1a]
                                       for z in range(z0a, z1a)])
-                    if self.mirrored:
-                        block = self.mirror_block(block)
                     if block.shape[0] == 1:
                         if KerasClassifier.__keras_backend() == 'theano':
                             block.shape = \
@@ -456,7 +455,11 @@ class KerasClassifier(AbstractPixelClassifier):
     
     def mirror_block(self, block):
         '''Mirror the padding regions of a block'''
-        bigblock = np.zeros(self.block_size, block.dtype)
+        bigblock = np.zeros((block.shape[0] + self.zpad_size * 2,
+                             block.shape[1] + self.xypad_size * 2,
+                             block.shape[2] + self.xypad_size * 2),
+                            block.dtype)
+
         for z in range(self.zpad_size, self.zpad_size+block.shape[0]):
             bigblock[z] = self.mirror_image_layer(block[z-self.zpad_size])
         for z in range(self.zpad_size):
