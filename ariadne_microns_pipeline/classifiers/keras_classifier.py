@@ -545,13 +545,15 @@ class KerasClassifier(AbstractPixelClassifier):
                     pred = pred[:, :, :y1b - y0b, :]
                     logger.report_event("Fixing Y padding): " + str(pred.shape))
                 if self.stretch_output:
-                    pred_min = pred.min()
-                    pred_max = pred.max()
-                    pred = (pred - pred_min) / \
-                        (pred_max - pred_min + np.finfo(pred.dtype).eps)
+                    for z in range(pred.shape[0]):
+                        pred_min = pred[z].min()
+                        pred_max = pred[z].max()
+                        pred[z] = (pred[z] - pred_min) / \
+                            (pred_max - pred_min + np.finfo(pred.dtype).eps)
                 else:
                     pred = np.clip(pred, 0, 1)
                 if self.invert:
+                    logger.report_event("Inverting output")
                     pred = 1 - pred
                 self.out_image[:, z0b:z1b, y0b:y1b, x0b:x1b] = \
                     (pred * 255).astype(np.uint8)

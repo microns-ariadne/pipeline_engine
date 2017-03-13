@@ -9,7 +9,8 @@ import matplotlib
 from matplotlib.backends.backend_pdf import FigureCanvasPdf
 import numpy as np
 from scipy.sparse import coo_matrix
-from scipy.ndimage import grey_erosion, grey_dilation
+from scipy.ndimage import grey_erosion, grey_dilation, generate_binary_structure
+from scipy.ndimage import binary_dilation
 
 from ..algorithms.evaluation import segmentation_metrics, Rand, f_info
 from ..algorithms.vi import split_vi, bits_to_nats
@@ -71,12 +72,13 @@ class SegmentationStatisticsRunMixin:
         '''
         if self.xy_erosion == 0 and self.z_erosion == 0:
             return
-        strel = np.ones((self.z_erosion*2 + 1, 
-                         self.xy_erosion*2 + 1,
-                         self.xy_erosion*2 + 1), bool)
-        mask = grey_erosion(seg, footprint=strel) == \
+        strel = generate_binary_structure(3, 1)
+        mask = grey_erosion(seg, footprint=strel) != \
                grey_dilation(seg, footprint=strel)
-        seg[~ mask] = 0
+        strel[0, 1, 1] = False
+        strel[2, 1, 1] = False
+        mask = binary_dilation(mask, strel)
+        seg[mask] = 0
 
     def cutout(self, segmentation, volume):
         '''Limit the segmentation to the task's volume
