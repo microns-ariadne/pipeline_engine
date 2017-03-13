@@ -271,7 +271,7 @@ class SegmentationReportTask(RequiresMixin, RunMixin, luigi.Task):
             matplotlib.pyplot.setp(ann, fontsize=6)
         vi_ax = figure.add_axes((0.65, 0.1, 0.30, 0.70))
         vi_ax.boxplot([_[~np.isnan(_)] for _ in vi_data, vim_data, vis_data],
-                      labels=['VI\n(nats)', 'Merge', 'Split'])
+                      labels=['VI\n(bits)', 'Merge', 'Split'])
         for i, data in enumerate([vi_data, vim_data, vis_data]):
             ann = vi_ax.annotate(
                 "%.2f" % data.mean(),
