@@ -139,7 +139,7 @@ class NeuroproofRunMixin:
                     "-prediction", h5file, "probabilities",
                     "-output", outfile, "segmentation",
                     "-classifier", self.classifier_filename]
-            rh_logger_logger.report_event(" ".join(args)
+            rh_logger_logger.report_event(" ".join(args))
             
             #
             # Inject the custom LD_LIBRARY_PATH into the subprocess environment
