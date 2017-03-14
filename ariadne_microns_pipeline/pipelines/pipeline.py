@@ -234,6 +234,8 @@ class PipelineTaskMixin:
         default=[],
         description="The names of additional classifier classes "
                     "that are fed into Neuroproof as channels")
+    wants_standard_neuroproof=luigi.BoolParameter(
+        description="Use the standard Neuroproof build and interface")
     nplearn_strategy = luigi.EnumParameter(
         enum=StrategyEnum,
         default=StrategyEnum.all,
@@ -1049,6 +1051,8 @@ class PipelineTaskMixin:
                         np_task.cpu_count = self.np_cores
                         np_task.set_requirement(classifier_task)
                         np_task.set_requirement(seg_task)
+                        np_task.wants_standard_neuroproof =\
+                            self.wants_standard_neuroproof
                         map(np_task.set_requirement, additional_tasks)
                         np_tasks[zi, yi, xi] = np_task
                         self.register_dataset(np_task.output())

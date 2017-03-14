@@ -105,7 +105,7 @@ class NeuroproofLearnRunMixin:
             gt_path = os.path.join(tempdir, "gt.h5")
             
             prob_volume = prob_target.imread().astype(np.float32) / 255.
-            prob_volume = [prob_volume, prob_volume]
+            prob_volume = [prob_volume, 1-prob_volume]
             for tgt in additional_map_targets:
                 prob_volume.append(tgt.imread().astype(np.float32) / 255.)
             prob_volume = np.array(prob_volume)

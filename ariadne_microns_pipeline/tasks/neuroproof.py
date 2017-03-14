@@ -12,6 +12,7 @@ import numpy as np
 import os
 import subprocess
 import tempfile
+import rh_logger
 
 from ..parameters import VolumeParameter, DatasetLocationParameter
 from ..parameters import MultiDatasetLocationParameter
@@ -89,9 +90,92 @@ class NeuroproofRunMixin:
         default=0,
         description="Threshold used for removing small bodies as a "
                     "post-processing step")
+    wants_standard_neuroproof = luigi.BoolParameter(
+        description = "Use the standard interface to Neuroproof")
     
     def ariadne_run(self):
         '''Run the neuroproof subprocess'''
+        if self.wants_standard_neuroproof:
+            self.run_standard()
+        else:
+            self.run_optimized()
+
+    def run_standard(self):
+        '''Run the out-of-the-box neuroproof'''
+        #
+        # Write the segmentation and membrane probabilities to one
+        # big temporary hdf5 file
+        #
+        inputs = self.input()
+        prob_volume = inputs.next()
+        seg_volume = inputs.next()
+        additional_maps = list(inputs)
+        fd, h5file = tempfile.mkstemp(".h5")
+        rh_logger.logger.report_event("Neuroproof input: %s" % h5file)
+        with h5py.File(h5file, "w") as h:
+            h.create_dataset("segmentation", data=seg_volume.imread())
+            n_channels = len(additional_maps) + 2
+            probs = h.create_dataset(
+                "probabilities",
+                shape=(prob_volume.depth, prob_volume.height, 
+                       prob_volume.width, n_channels),
+                dtype=np.float32)
+            membrane = prob_volume.imread().astype(np.float32) / 255
+            probs[:, :, :, 0] = membrane
+            probs[:, :, :, 1] = 1 - membrane
+            for idx, tgt in enumerate(additional_maps):
+                probs[:, :, :, idx+2] = tgt.imread().astype(np.float32) / 255
+        os.close(fd)
+        outfile = tempfile.mktemp(".h5")
+        rh_logger.logger.report_event("Neuroproof output: %s" % outfile)
+        
+        try:
+            args = [self.neuroproof,
+                    "-threshold", str(self.threshold),
+                    "-algorithm", "1",
+                    "-nomito",
+                    "-min_region_sz", "0",
+                    "-watershed", h5file, "segmentation",
+                    "-prediction", h5file, "probabilities",
+                    "-output", outfile, "segmentation",
+                    "-classifier", self.classifier_filename]
+            rh_logger_logger.report_event(" ".join(args)
+            
+            #
+            # Inject the custom LD_LIBRARY_PATH into the subprocess environment
+            #
+            env = os.environ.copy()
+            if "LD_LIBRARY_PATH" in env:
+                ld_library_path = self.neuroproof_ld_library_path + os.pathsep +\
+                    env["LD_LIBRARY_PATH"]
+            else:
+                ld_library_path = self.neuroproof_ld_library_path
+            env["LD_LIBRARY_PATH"] = ld_library_path
+            self.configure_env(env)
+            #
+            # Do the dirty deed...
+            #
+            subprocess.check_call(args, env=env, close_fds=True)
+            #
+            # There's an apparent bug in Neuroproof where it writes
+            # the output to "fo.h5" for example, when you've asked it
+            # to send the output to "foo.h5"
+            #
+            alt_outfile = os.path.splitext(outfile)[0][:-1] + ".h5"
+            if (not os.path.exists(outfile)) and os.path.exists(alt_outfile):
+                outfile=alt_outfile
+            #
+            # Finish the output volume
+            #
+            with h5py.File(outfile, "r") as fd:
+                self.output().imwrite(
+                    fd["segmentation"][:].astype(np.uint32))
+        finally:
+            os.remove(h5file)
+            os.remove(outfile)
+        
+    def run_optimized(self):
+        '''Run the MIT neuroproof'''
         #
         # The arguments for neuroproof_graph_predict:
         #
