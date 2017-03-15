@@ -174,6 +174,7 @@ class NeuroproofLearnRunMixin:
             # up with the formula below.
             #
             args = args[0] + ' "' + '" "'.join(args[1:]) + '"'
+            rh_logger.logger.report_event(" ".join(args))
             subprocess.check_call(args, env=env, shell=True)
 
         finally:
