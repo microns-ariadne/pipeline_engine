@@ -221,11 +221,17 @@ void get_json_files(std::string path,
 	    file_names);
 	prob_list.push_back(tmp[0]);
 	/*
-	 * The membrane probabilities appear as the first and second on the
-	 * list, hence the duplication of element 0 below.
+	 * The membrane probabilities appear as the first and their inverse
+         * appears as the second element.
 	 */
 	if (i == 0) {
-	    prob_list.push_back(tmp[0]);
+	    VolumeProbPtr vInv = VolumeProb::create_volume();
+	    vInv->reshape(tmp[0]->shape());
+	    for (auto it=vInv->begin(); it != vInv->end(); ++it) {
+	      *it = 1;
+	    }
+	    *vInv -= *tmp[0];
+	    prob_list.push_back(vInv);
 	}
     }
     /*
