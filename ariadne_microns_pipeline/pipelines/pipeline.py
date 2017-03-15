@@ -250,10 +250,10 @@ class PipelineTaskMixin:
     nplearn_cpu_count = luigi.IntParameter(
         default=4,
         description="# of CPUS to use in the NeuroproofLearnTask")
-    close_width = luigi.IntParameter(
-        description="The width of the structuring element used for closing "
-        "when computing the border masks.",
-        default=5)
+    mask_threshold = luigi.IntParameter(
+        default=250,
+        description="All membrane probabilities above this are masked to be "
+        "extra-cellular space")
     sigma_xy = luigi.FloatParameter(
         description="The sigma in the X and Y direction of the Gaussian "
         "used for smoothing the probability map",
@@ -852,7 +852,8 @@ class PipelineTaskMixin:
                     btask = self.factory.gen_mask_border_task(
                         volume,
                         input_location,
-                        location)
+                        location,
+                        threshold=self.mask_threshold)
                     self.border_mask_tasks[zi, yi, xi] = btask
                     btask.set_requirement(ctask)
 
@@ -1831,7 +1832,8 @@ class PipelineTaskMixin:
                 strategy=self.nplearn_strategy,
                 num_iterations=self.nplearn_num_iterations,
                 prune_feature=self.prune_feature,
-                use_mito=self.use_mito) 
+                use_mito=self.use_mito,
+                wants_standard_neuroproof=self.wants_standard_neuroproof) 
         self.neuroproof_learn_task.cpu_count = self.nplearn_cpu_count
         map(self.neuroproof_learn_task.set_requirement,
             self.nplearn_block_tasks)

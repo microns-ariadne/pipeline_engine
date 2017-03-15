@@ -501,7 +501,8 @@ class AMTaskFactory(object):
                                   strategy=StrategyEnum.all,
                                   num_iterations=1,
                                   prune_feature=True,
-                                  use_mito=False):
+                                  use_mito=False,
+                                  wants_standard_neuroproof=False):
         '''Generate a task to learn a Neuroproof classifier
         
         :param volume: the volume for the probability, segmentation and
@@ -516,6 +517,9 @@ class AMTaskFactory(object):
         :param prune_feature: True to prune features with low predictive
                values
         :param use_mito: True to use a mitochondrial channel.
+        :param wants_standard_neuroproof: use neuroproof_mininmal's build
+        of Neuroproof_stack_learn instead of this repo's build of
+        neuroproof_graph_learn
         '''
         neuroproof, ld_library_path = self.__get_neuroproof_config(
             "neuroproof_graph_learn")
@@ -530,7 +534,8 @@ class AMTaskFactory(object):
             strategy=strategy,
             num_iterations=num_iterations,
             prune_feature=prune_feature,
-            use_mito=use_mito)
+            use_mito=use_mito,
+            wants_standard_neuroproof=wants_standard_neuroproof)
     
     def gen_mask_border_task(
         self, volume, prob_location, mask_location, threshold=250):

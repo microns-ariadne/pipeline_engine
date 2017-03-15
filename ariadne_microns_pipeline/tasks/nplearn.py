@@ -77,6 +77,8 @@ class NeuroproofLearnRunMixin:
         description="Automatically prune useless features")
     use_mito = luigi.BoolParameter(
         description="Set delayed mito agglomeration")
+    wants_standard_neuroproof = luigi.BoolParameter(
+        description="Use the run convention for Neuroproof_stack_learn")
     
     def ariadne_run(self):
         '''Run neuroproof_graph_learn in a subprocess'''
@@ -122,22 +124,39 @@ class NeuroproofLearnRunMixin:
             with h5py.File(gt_path, "w") as fd:
                 fd.create_dataset("stack", data=gt_volume)
             del gt_volume
-            #
-            # Run the neuroproof_graph_learn task
-            #
-            # See neuroproof_graph_learn.cpp for parameters
-            #
-            args = [
-                self.neuroproof,
-                '--classifier-name', self.output_location,
-                '--strategy-type', str(self.strategy.value),
-                '--num-iterations', str(self.num_iterations),
-                '--prune_feature', ("1" if self.prune_feature else "0"),
-                '--use_mito', ("1" if self.use_mito else "0"),
-                '--watershed-file', watershed_path,
-                '--prediction-file', pred_path,
-                '--groundtruth-file', gt_path
-                ]
+            if self.wants_standard_neuroproof:
+                #
+                # Run the Neuroproof_stack_learn application
+                #
+                args = [
+                    self.neuroproof,
+                    "-watershed", watershed_path, "stack",
+                    "-prediction", pred_path, "volume/predictions",
+                    "-groundtruth", gt_path, "stack",
+                    "-iteration", str(self.num_iterations),
+                    "-strategy", str(self.strategy.value),
+                    "-classifier", self.output_location]
+                if not self.use_mito:
+                    args.append("-nomito")
+                if self.prune_feature:
+                    args.append("-prune_feature")
+            else:
+                #
+                # Run the neuroproof_graph_learn task
+                #
+                # See neuroproof_graph_learn.cpp for parameters
+                #
+                args = [
+                    self.neuroproof,
+                    '--classifier-name', self.output_location,
+                    '--strategy-type', str(self.strategy.value),
+                    '--num-iterations', str(self.num_iterations),
+                    '--prune_feature', ("1" if self.prune_feature else "0"),
+                    '--use_mito', ("1" if self.use_mito else "0"),
+                    '--watershed-file', watershed_path,
+                    '--prediction-file', pred_path,
+                    '--groundtruth-file', gt_path
+                    ]
             #
             # Inject the custom LD_LIBRARY_PATH into the subprocess environment
             #
