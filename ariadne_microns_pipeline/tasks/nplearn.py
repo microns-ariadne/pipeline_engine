@@ -120,17 +120,22 @@ class NeuroproofLearnRunMixin:
             # should close the handles before Neuroproof starts.
             #
             pool = multiprocessing.Pool(3)
+            dataset_name = "stack"
             pred_process = pool.apply_async(
                 write_prob_volume, 
-                args=[prob_target, additional_map_targets, pred_path])
+                args=[prob_target, additional_map_targets, pred_path, 
+                      dataset_name])
             seg_process = pool.apply_async(
                 write_seg_volume, 
-                args=(watershed_path, seg_target))
+                args=(watershed_path, seg_target, dataset_name))
             gt_process = pool.apply_async(
-                write_gt_volume,
-                args=(gt_target, gt_path))
+                write_seg_volume,
+                args=(gt_path, gt_target, dataset_name))
             pool.close()
             pool.join()
+            pred_process.get()
+            seg_process.get()
+            gt_process.get()
             
             if self.wants_standard_neuroproof:
                 #
@@ -138,9 +143,9 @@ class NeuroproofLearnRunMixin:
                 #
                 args = [
                     self.neuroproof,
-                    "-watershed", watershed_path, "stack",
-                    "-prediction", pred_path, "volume/predictions",
-                    "-groundtruth", gt_path, "stack",
+                    "-watershed", watershed_path, dataset_name,
+                    "-prediction", pred_path, dataset_name,
+                    "-groundtruth", gt_path, dataset_name,
                     "-iteration", str(self.num_iterations),
                     "-strategy", str(self.strategy.value),
                     "-classifier", self.output_location]
@@ -190,33 +195,26 @@ class NeuroproofLearnRunMixin:
                 #
                 rh_logger.logger.report_exception()
 
-def write_gt_volume(gt_target, gt_path):
-    '''Write the ground truth volume out to an HDF5 file
-    
-    :param gt_target: the ground-truth volume
-    :param gt_path: the name of the HDF5 file to write.
-    '''
-    gt_volume = gt_target.imread().astype(np.int32)
-    with h5py.File(gt_path, "w") as fd:
-        fd.create_dataset("stack", data=gt_volume)
-
-def write_seg_volume(watershed_path, seg_target):
+def write_seg_volume(watershed_path, seg_target, dataset_name):
     '''Write the watershed out to an hdf5 file for Neuroproof
     
     :param watershed_path: the path to the HDF5 file to write
     :param seg_target: the volume to write
+    :param dataset_name: the HDF5 dataset's key name
     '''
     with h5py.File(watershed_path, "w") as fd:
         seg_volume = seg_target.imread().astype(np.int32)
-        fd.create_dataset("stack", data=seg_volume)
+        fd.create_dataset(dataset_name, data=seg_volume)
 
-def write_prob_volume(prob_target, additional_map_targets, pred_path):
+def write_prob_volume(prob_target, additional_map_targets, pred_path, 
+                      dataset_name):
     '''Write Neuroproof's probabilities hdf file
     
     :param prob_target: the membrane probabilities volume
     :param additional_map_targets: a list of additional volumes to write
     out to the probabilities file.
     :param pred_path: the name of the HDF5 file to write
+    :param dataset_name: the HDF5 dataset's key name
     '''
     prob_volume = prob_target.imread().astype(np.float32) / 255.
     prob_volume = [prob_volume, 1-prob_volume]
@@ -225,7 +223,7 @@ def write_prob_volume(prob_target, additional_map_targets, pred_path):
     prob_volume = np.array(prob_volume)
     prob_volume = prob_volume.transpose(3, 2, 1, 0)
     with h5py.File(pred_path, "w") as fd:
-        fd.create_dataset("volume/predictions", data=prob_volume)
+        fd.create_dataset(dataset_name, data=prob_volume)
 
 
 class NeuroproofLearnTask(

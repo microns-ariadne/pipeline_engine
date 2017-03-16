@@ -8,6 +8,7 @@ from cv2 import imread, imwrite
 import h5py
 import json
 import luigi
+import multiprocessing
 import numpy as np
 import os
 import subprocess
@@ -17,6 +18,7 @@ import rh_logger
 from ..parameters import VolumeParameter, DatasetLocationParameter
 from ..parameters import MultiDatasetLocationParameter
 from ..targets.factory import TargetFactory
+from .nplearn import write_seg_volume, write_prob_volume
 from utilities import RequiresMixin, RunMixin, CILKCPUMixin
 
 class NeuroproofTaskMixin:
@@ -110,22 +112,19 @@ class NeuroproofRunMixin:
         prob_volume = inputs.next()
         seg_volume = inputs.next()
         additional_maps = list(inputs)
-        fd, h5file = tempfile.mkstemp(".h5")
-        rh_logger.logger.report_event("Neuroproof input: %s" % h5file)
-        with h5py.File(h5file, "w") as h:
-            h.create_dataset("segmentation", data=seg_volume.imread())
-            n_channels = len(additional_maps) + 2
-            probs = h.create_dataset(
-                "probabilities",
-                shape=(prob_volume.depth, prob_volume.height, 
-                       prob_volume.width, n_channels),
-                dtype=np.float32)
-            membrane = prob_volume.imread().astype(np.float32) / 255
-            probs[:, :, :, 0] = membrane
-            probs[:, :, :, 1] = 1 - membrane
-            for idx, tgt in enumerate(additional_maps):
-                probs[:, :, :, idx+2] = tgt.imread().astype(np.float32) / 255
-        os.close(fd)
+        h5file = tempfile.mktemp(".h5")
+        probfile = tempfile.mktemp(".h5")
+        rh_logger.logger.report_event("Neuroproof watershed: %s" % h5file)
+        rh_logger.logger.report_event("Neuroproof probabilities: %s" % probfile)
+        pool = multiprocessing.Pool(2)
+        pool.apply_async(
+            write_seg_volume,
+            args=(h5file, seg_volume, "segmentation"))
+        pool.apply_async(
+            write_prob_volume,
+            args=(prob_volume, additional_maps, probfile, "probabilities"))
+        pool.close()
+        pool.join()
         outfile = tempfile.mktemp(".h5")
         rh_logger.logger.report_event("Neuroproof output: %s" % outfile)
         
@@ -136,10 +135,10 @@ class NeuroproofRunMixin:
                     "-nomito",
                     "-min_region_sz", "0",
                     "-watershed", h5file, "segmentation",
-                    "-prediction", h5file, "probabilities",
+                    "-prediction", probfile, "probabilities",
                     "-output", outfile, "segmentation",
                     "-classifier", self.classifier_filename]
-            rh_logger_logger.report_event(" ".join(args))
+            rh_logger.logger.report_event(" ".join(args))
             
             #
             # Inject the custom LD_LIBRARY_PATH into the subprocess environment
@@ -172,7 +171,9 @@ class NeuroproofRunMixin:
                     fd["segmentation"][:].astype(np.uint32))
         finally:
             os.remove(h5file)
-            os.remove(outfile)
+            os.remove(probfile)
+            if os.path.exists(outfile):
+                os.remove(outfile)
         
     def run_optimized(self):
         '''Run the MIT neuroproof'''
