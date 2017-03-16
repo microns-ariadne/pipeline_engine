@@ -69,7 +69,8 @@ class VolumeTarget(luigi.LocalTarget):
         self.width = state["width"]
         self.height = state["height"]
         self.depth = state["depth"]
-        super(VolumeTarget, self).__init__(self.__get_touchfile_name())
+        self.__touchfile_name = None
+        super(VolumeTarget, self).__init__(self._get_touchfile_name())
     
     def _get_touchfile_name(self):
         if self.__touchfile_name is not None:

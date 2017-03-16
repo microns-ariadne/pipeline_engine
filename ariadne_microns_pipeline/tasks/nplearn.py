@@ -1,6 +1,7 @@
 import enum
 import h5py
 import luigi
+import multiprocessing
 import numpy as np
 import os
 import rh_config
@@ -105,25 +106,32 @@ class NeuroproofLearnRunMixin:
             pred_path = os.path.join(tempdir, "pred.h5")
             watershed_path = os.path.join(tempdir, "watershed.h5")
             gt_path = os.path.join(tempdir, "gt.h5")
+            #
+            # Here, we use multiprocessing to launch the writes. On the surface
+            # of it, this looks like we're using multiple processes to do
+            # the writes in parallel, but more importantly
+            #
+            #            NeuroproofLearnTask
+            #                /           \
+            #       Write processes   Neuroproof
+            #
+            # the handles opened by the write processes take place in a child
+            # process which ends before Neuroproof starts and the HDF5 library
+            # should close the handles before Neuroproof starts.
+            #
+            pool = multiprocessing.Pool(3)
+            pred_process = pool.apply_async(
+                write_prob_volume, 
+                args=[prob_target, additional_map_targets, pred_path])
+            seg_process = pool.apply_async(
+                write_seg_volume, 
+                args=(watershed_path, seg_target))
+            gt_process = pool.apply_async(
+                write_gt_volume,
+                args=(gt_target, gt_path))
+            pool.close()
+            pool.join()
             
-            prob_volume = prob_target.imread().astype(np.float32) / 255.
-            prob_volume = [prob_volume, 1-prob_volume]
-            for tgt in additional_map_targets:
-                prob_volume.append(tgt.imread().astype(np.float32) / 255.)
-            prob_volume = np.array(prob_volume)
-            prob_volume = prob_volume.transpose(3, 2, 1, 0)
-            rh_logger.logger.report_event("%s: writing pred.h5" % task_name)
-            with h5py.File(pred_path, "w") as fd:
-                fd.create_dataset("volume/predictions", data=prob_volume)
-                del prob_volume
-            with h5py.File(watershed_path, "w") as fd:
-                seg_volume = seg_target.imread().astype(np.int32)
-                fd.create_dataset("stack", data=seg_volume)
-                del seg_volume
-            gt_volume = gt_target.imread().astype(np.int32)
-            with h5py.File(gt_path, "w") as fd:
-                fd.create_dataset("stack", data=gt_volume)
-            del gt_volume
             if self.wants_standard_neuroproof:
                 #
                 # Run the Neuroproof_stack_learn application
@@ -167,15 +175,9 @@ class NeuroproofLearnRunMixin:
             else:
                 ld_library_path = self.neuroproof_ld_library_path
             env["LD_LIBRARY_PATH"] = ld_library_path
-            #
-            # Execute. There's often some wierdness with HDF5 where
-            # file handles are inherited by the child process and sad
-            # things happen. So I experimented with isolation until I came
-            # up with the formula below.
-            #
-            args = args[0] + ' "' + '" "'.join(args[1:]) + '"'
-            rh_logger.logger.report_event(args)
-            subprocess.check_call(args, env=env, shell=True)
+
+            rh_logger.logger.report_event(" ".join(args))
+            subprocess.check_call(args, env=env)
 
         finally:
             try:
@@ -187,7 +189,43 @@ class NeuroproofLearnRunMixin:
                 # on disk.
                 #
                 rh_logger.logger.report_exception()
-                
+
+def write_gt_volume(gt_target, gt_path):
+    '''Write the ground truth volume out to an HDF5 file
+    
+    :param gt_target: the ground-truth volume
+    :param gt_path: the name of the HDF5 file to write.
+    '''
+    gt_volume = gt_target.imread().astype(np.int32)
+    with h5py.File(gt_path, "w") as fd:
+        fd.create_dataset("stack", data=gt_volume)
+
+def write_seg_volume(watershed_path, seg_target):
+    '''Write the watershed out to an hdf5 file for Neuroproof
+    
+    :param watershed_path: the path to the HDF5 file to write
+    :param seg_target: the volume to write
+    '''
+    with h5py.File(watershed_path, "w") as fd:
+        seg_volume = seg_target.imread().astype(np.int32)
+        fd.create_dataset("stack", data=seg_volume)
+
+def write_prob_volume(prob_target, additional_map_targets, pred_path):
+    '''Write Neuroproof's probabilities hdf file
+    
+    :param prob_target: the membrane probabilities volume
+    :param additional_map_targets: a list of additional volumes to write
+    out to the probabilities file.
+    :param pred_path: the name of the HDF5 file to write
+    '''
+    prob_volume = prob_target.imread().astype(np.float32) / 255.
+    prob_volume = [prob_volume, 1-prob_volume]
+    for tgt in additional_map_targets:
+        prob_volume.append(tgt.imread().astype(np.float32) / 255.)
+    prob_volume = np.array(prob_volume)
+    prob_volume = prob_volume.transpose(3, 2, 1, 0)
+    with h5py.File(pred_path, "w") as fd:
+        fd.create_dataset("volume/predictions", data=prob_volume)
 
 
 class NeuroproofLearnTask(
