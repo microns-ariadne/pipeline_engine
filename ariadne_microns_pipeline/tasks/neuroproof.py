@@ -117,14 +117,16 @@ class NeuroproofRunMixin:
         rh_logger.logger.report_event("Neuroproof watershed: %s" % h5file)
         rh_logger.logger.report_event("Neuroproof probabilities: %s" % probfile)
         pool = multiprocessing.Pool(2)
-        pool.apply_async(
+        seg_result = pool.apply_async(
             write_seg_volume,
             args=(h5file, seg_volume, "segmentation"))
-        pool.apply_async(
+        prob_result = pool.apply_async(
             write_prob_volume,
             args=(prob_volume, additional_maps, probfile, "probabilities"))
         pool.close()
         pool.join()
+        seg_result.get()
+        prob_result.get()
         outfile = tempfile.mktemp(".h5")
         rh_logger.logger.report_event("Neuroproof output: %s" % outfile)
         
