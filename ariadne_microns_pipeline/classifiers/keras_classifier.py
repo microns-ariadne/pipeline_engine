@@ -92,6 +92,10 @@ class KerasClassifier(AbstractPixelClassifier):
     def __bind_cuda(cls):
         if cls.has_bound_cuda:
             return
+        if "MICRONS_IPC_WORKER_GPU" in os.environ:
+            device = int(os.environ["MICRONS_IPC_WORKER_GPU"])
+            os.environ["THEANO_FLAGS"]="device=gpu%d" % device
+            return
         import keras
         if KerasClassifier.__keras_backend() != 'theano':
             logger.report_event("Using Tensorflow")
