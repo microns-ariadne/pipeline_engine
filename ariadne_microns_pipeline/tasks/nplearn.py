@@ -204,6 +204,7 @@ def write_seg_volume(watershed_path, seg_target, dataset_name):
     '''
     with h5py.File(watershed_path, "w") as fd:
         seg_volume = seg_target.imread().astype(np.int32)
+        seg_volume.transpose(2, 1, 0)
         fd.create_dataset(dataset_name, data=seg_volume)
 
 def write_prob_volume(prob_target, additional_map_targets, pred_path, 
