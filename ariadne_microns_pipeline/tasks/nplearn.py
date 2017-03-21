@@ -121,10 +121,14 @@ class NeuroproofLearnRunMixin:
             #
             pool = multiprocessing.Pool(3)
             dataset_name = "stack"
+            if not self.wants_standard_neuroproof:
+                dataset_name = "volume/predictions";
             pred_process = pool.apply_async(
                 write_prob_volume, 
                 args=[prob_target, additional_map_targets, pred_path, 
                       dataset_name])
+            if not self.wants_standard_neuroproof:
+                dataset_name = "stack"
             seg_process = pool.apply_async(
                 write_seg_volume, 
                 args=(watershed_path, seg_target, dataset_name))
@@ -221,7 +225,7 @@ def write_prob_volume(prob_target, additional_map_targets, pred_path,
     for tgt in additional_map_targets:
         prob_volume.append(tgt.imread().astype(np.float32) / 255.)
     prob_volume = np.array(prob_volume)
-    prob_volume = prob_volume.transpose(1, 2, 3, 0)
+    prob_volume = prob_volume.transpose(3, 2, 1, 0)
     with h5py.File(pred_path, "w") as fd:
         fd.create_dataset(dataset_name, data=prob_volume)
 

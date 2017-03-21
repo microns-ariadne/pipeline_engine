@@ -100,7 +100,7 @@ class NeuroproofRunMixin:
         if self.wants_standard_neuroproof:
             self.run_standard()
         else:
-            self.run_optimized()
+            self.run_optimized_with_copy()
 
     def run_standard(self):
         '''Run the out-of-the-box neuroproof'''
@@ -171,6 +171,74 @@ class NeuroproofRunMixin:
             with h5py.File(outfile, "r") as fd:
                 self.output().imwrite(
                     fd["segmentation"][:].astype(np.uint32))
+        finally:
+            os.remove(h5file)
+            os.remove(probfile)
+            if os.path.exists(outfile):
+                os.remove(outfile)
+    
+    def run_optimized_with_copy(self):
+        '''Run the MIT neuroproof, but copying everything'''
+        inputs = self.input()
+        prob_volume = inputs.next()
+        seg_volume = inputs.next()
+        additional_maps = list(inputs)
+        h5file = tempfile.mktemp(".h5")
+        probfile = tempfile.mktemp(".h5")
+        rh_logger.logger.report_event("Neuroproof watershed: %s" % h5file)
+        rh_logger.logger.report_event("Neuroproof probabilities: %s" % probfile)
+        pool = multiprocessing.Pool(2)
+        seg_result = pool.apply_async(
+            write_seg_volume,
+            args=(h5file, seg_volume, "stack"))
+        prob_result = pool.apply_async(
+            write_prob_volume,
+            args=(prob_volume, additional_maps, probfile, "volume/predictions"))
+        pool.close()
+        pool.join()
+        seg_result.get()
+        prob_result.get()
+        outfile = tempfile.mktemp(".h5")
+        rh_logger.logger.report_event("Neuroproof output: %s" % outfile)
+        try:
+            args = [self.neuroproof,
+                    h5file,
+                    probfile,
+                    self.classifier_filename,
+                    "--output-file", outfile,
+                    "--threshold", str(self.threshold),
+                    "--watershed-threshold", str(self.watershed_threshold)]
+            rh_logger.logger.report_event(" ".join(args))
+            
+            #
+            # Inject the custom LD_LIBRARY_PATH into the subprocess environment
+            #
+            env = os.environ.copy()
+            if "LD_LIBRARY_PATH" in env:
+                ld_library_path = self.neuroproof_ld_library_path + os.pathsep +\
+                    env["LD_LIBRARY_PATH"]
+            else:
+                ld_library_path = self.neuroproof_ld_library_path
+            env["LD_LIBRARY_PATH"] = ld_library_path
+            self.configure_env(env)
+            #
+            # Do the dirty deed...
+            #
+            subprocess.check_call(args, env=env, close_fds=True)
+            #
+            # There's an apparent bug in Neuroproof where it writes
+            # the output to "fo.h5" for example, when you've asked it
+            # to send the output to "foo.h5"
+            #
+            alt_outfile = os.path.splitext(outfile)[0][:-1] + ".h5"
+            if (not os.path.exists(outfile)) and os.path.exists(alt_outfile):
+                outfile=alt_outfile
+            #
+            # Finish the output volume
+            #
+            with h5py.File(outfile, "r") as fd:
+                self.output().imwrite(
+                    fd["stack"][:].astype(np.uint32))
         finally:
             os.remove(h5file)
             os.remove(probfile)

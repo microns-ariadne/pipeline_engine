@@ -343,11 +343,27 @@ void run_prediction(PredictOptions& options)
     size_t ext_pos = options.prediction_filename.find_last_of('.');
     bool is_hdf5 = false;
     bool is_json = false;
+    bool watershed_is_hdf5 = false;
+    bool output_is_hdf5 = false;
+
     if (ext_pos != string::npos) {
 	std:string ext = options.prediction_filename.substr(ext_pos);
 	is_hdf5 = ((ext == ".hdf5") || (ext == ".h5"));
 	is_json = (ext == ".json");
     }
+
+    ext_pos = options.watershed_filename.find_last_of(".");
+    if (ext_pos != string::npos) {
+	std::string ext = options.watershed_filename.substr(ext_pos);
+	watershed_is_hdf5 = ((ext == ".hdf5") || (ext == ".h5"));
+    }
+
+    ext_pos = options.output_filename.find_last_of(".");
+    if (ext_pos != string::npos) {
+	std::string ext = options.output_filename.substr(ext_pos);
+	output_is_hdf5 = ((ext == ".hdf5") || (ext == ".h5"));
+    }
+
     vector<VolumeProbPtr> prob_list;
     if (is_json) {
 	get_json_files(options.prediction_filename,
@@ -355,16 +371,30 @@ void run_prediction(PredictOptions& options)
 		       ws_input_files,
 		       output_files);
     } else if (is_hdf5) {
+	std::cout << "Reading probabilities file" << options.prediction_filename << std::endl;
 	prob_list = VolumeProb::create_volume_array(
 	    options.prediction_filename.c_str(), PRED_DATASET_NAME);
-        get_dir_files(options.watershed_filename, ws_input_files);
+	if (! watershed_is_hdf5) {
+	    get_dir_files(options.watershed_filename, ws_input_files);
+	}   
     } else {
 	get_dir_files(options.prediction_filename, prob_input_files);
-        get_dir_files(options.watershed_filename, ws_input_files);
+	if (! watershed_is_hdf5) {
+	    get_dir_files(options.watershed_filename, ws_input_files);
+	}
 	prob_list = VolumeProb::create_volume_from_images(prob_input_files);
     }    
-    VolumeLabelPtr initial_labels = cilk_spawn VolumeLabelData::create_volume_from_images_seg(ws_input_files);
-    
+    VolumeLabelPtr initial_labels;
+    if (watershed_is_hdf5) {
+	const char *pWatershedFilename = options.watershed_filename.c_str();
+	std::cout << "Reading watershed file " << options.watershed_filename << std::endl;
+        initial_labels = VolumeLabelData::create_volume(
+	    pWatershedFilename, SEG_DATASET_NAME, true);
+    } else {
+	VolumeLabelPtr tmp = cilk_spawn VolumeLabelData::create_volume_from_images_seg(
+	    ws_input_files);
+	initial_labels = tmp;
+    }
     
     // create watershed volume from the oversegmentation file.
     EdgeClassifier* eclfr;
@@ -541,6 +571,14 @@ void run_prediction(PredictOptions& options)
 	std::vector<Label_t> mapping;
 	compress_labels(pLabels, mapping);
 	write_labels(pLabels, output_files, mapping);
+    } else if (output_is_hdf5) {
+	std::cout << "Writing " << options.output_filename << std::endl;
+	VolumeLabelPtr pLabels = stack.get_labelvol();
+	pLabels->rebase_labels();
+	std::vector<Label_t> mapping;
+	compress_labels(pLabels, mapping);
+	vigra::writeHDF5(
+	    options.output_filename.c_str(), SEG_DATASET_NAME, *pLabels);
     } else {
 	stack.serialize_stack(options.output_filename.c_str(),
 	            options.graph_filename.c_str(), options.location_prob);
