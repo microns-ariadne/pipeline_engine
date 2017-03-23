@@ -122,7 +122,8 @@ class NeuroproofRunMixin:
             args=(h5file, seg_volume, "segmentation"))
         prob_result = pool.apply_async(
             write_prob_volume,
-            args=(prob_volume, additional_maps, probfile, "probabilities"))
+            args=(prob_volume, additional_maps, probfile, "probabilities", 
+                  False))
         pool.close()
         pool.join()
         seg_result.get()

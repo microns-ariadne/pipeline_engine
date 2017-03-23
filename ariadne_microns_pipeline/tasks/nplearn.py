@@ -211,7 +211,7 @@ def write_seg_volume(watershed_path, seg_target, dataset_name):
         fd.create_dataset(dataset_name, data=seg_volume)
 
 def write_prob_volume(prob_target, additional_map_targets, pred_path, 
-                      dataset_name):
+                      dataset_name, transpose=True):
     '''Write Neuroproof's probabilities hdf file
     
     :param prob_target: the membrane probabilities volume
@@ -219,13 +219,19 @@ def write_prob_volume(prob_target, additional_map_targets, pred_path,
     out to the probabilities file.
     :param pred_path: the name of the HDF5 file to write
     :param dataset_name: the HDF5 dataset's key name
+    :param transpose: True for Ilastik-style volumes (x, y, z, c) for
+                      neuroproof_graph_learn. False for z, y, x, c volumes
+                      for Neuroproof_stack.
     '''
     prob_volume = prob_target.imread().astype(np.float32) / 255.
     prob_volume = [prob_volume, 1-prob_volume]
     for tgt in additional_map_targets:
         prob_volume.append(tgt.imread().astype(np.float32) / 255.)
     prob_volume = np.array(prob_volume)
-    prob_volume = prob_volume.transpose(3, 2, 1, 0)
+    if transpose:
+        prob_volume = prob_volume.transpose(3, 2, 1, 0)
+    else:
+        prob_volume = prob_volume.transpose(1, 2, 3, 0)
     with h5py.File(pred_path, "w") as fd:
         fd.create_dataset(dataset_name, data=prob_volume)
 
