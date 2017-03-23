@@ -10,6 +10,8 @@ import shutil
 import subprocess
 import tempfile
 
+from .neuroproof_common import NeuroproofVersion
+from .neuroproof_common import write_seg_volume, write_prob_volume
 from .utilities import RequiresMixin, RunMixin, CILKCPUMixin
 from ..targets.factory import TargetFactory
 from ..parameters import VolumeParameter, DatasetLocationParameter
@@ -78,8 +80,11 @@ class NeuroproofLearnRunMixin:
         description="Automatically prune useless features")
     use_mito = luigi.BoolParameter(
         description="Set delayed mito agglomeration")
-    wants_standard_neuroproof = luigi.BoolParameter(
-        description="Use the run convention for Neuroproof_stack_learn")
+    neuroproof_version = luigi.EnumParameter(
+        enum=NeuroproofVersion,
+        default=NeuroproofVersion.MIT,
+        description="The command-line convention to be used to run the "
+        "Neuroproof binary")
     
     def ariadne_run(self):
         '''Run neuroproof_graph_learn in a subprocess'''
@@ -120,15 +125,32 @@ class NeuroproofLearnRunMixin:
             # should close the handles before Neuroproof starts.
             #
             pool = multiprocessing.Pool(3)
-            dataset_name = "stack"
-            if not self.wants_standard_neuroproof:
+            if self.neuroproof_version != NeuroproofVersion.MINIMAL:
+                #
+                # neuroproof_graph_predict has a hardcoded dataset name
+                #
                 dataset_name = "volume/predictions";
+                #
+                # neuroproof_graph_predict has the predictions in the
+                # Ilastik convention: x, y, z, c
+                #
+                transpose = True
+            else:
+                #
+                # Neuroproof_stack_learn can take any dataset name
+                #
+                dataset_name = "stack"
+                #
+                # Neuroproof_stack_learn has the predictions in the standard
+                # format: z, y, x, c
+                #
+                transpose = False
+            duplicate = self.neuroproof_version == NeuroproofVersion.MIT
             pred_process = pool.apply_async(
                 write_prob_volume, 
                 args=[prob_target, additional_map_targets, pred_path, 
-                      dataset_name])
-            if not self.wants_standard_neuroproof:
-                dataset_name = "stack"
+                      dataset_name, transpose, duplicate])
+            dataset_name = "stack"
             seg_process = pool.apply_async(
                 write_seg_volume, 
                 args=(watershed_path, seg_target, dataset_name))
@@ -141,7 +163,7 @@ class NeuroproofLearnRunMixin:
             seg_process.get()
             gt_process.get()
             
-            if self.wants_standard_neuroproof:
+            if self.neuroproof_version == NeuroproofVersion.MINIMAL:
                 #
                 # Run the Neuroproof_stack_learn application
                 #
@@ -198,43 +220,6 @@ class NeuroproofLearnRunMixin:
                 # on disk.
                 #
                 rh_logger.logger.report_exception()
-
-def write_seg_volume(watershed_path, seg_target, dataset_name):
-    '''Write the watershed out to an hdf5 file for Neuroproof
-    
-    :param watershed_path: the path to the HDF5 file to write
-    :param seg_target: the volume to write
-    :param dataset_name: the HDF5 dataset's key name
-    '''
-    with h5py.File(watershed_path, "w") as fd:
-        seg_volume = seg_target.imread().astype(np.int32)
-        fd.create_dataset(dataset_name, data=seg_volume)
-
-def write_prob_volume(prob_target, additional_map_targets, pred_path, 
-                      dataset_name, transpose=True):
-    '''Write Neuroproof's probabilities hdf file
-    
-    :param prob_target: the membrane probabilities volume
-    :param additional_map_targets: a list of additional volumes to write
-    out to the probabilities file.
-    :param pred_path: the name of the HDF5 file to write
-    :param dataset_name: the HDF5 dataset's key name
-    :param transpose: True for Ilastik-style volumes (x, y, z, c) for
-                      neuroproof_graph_learn. False for z, y, x, c volumes
-                      for Neuroproof_stack.
-    '''
-    prob_volume = prob_target.imread().astype(np.float32) / 255.
-    prob_volume = [prob_volume, 1-prob_volume]
-    for tgt in additional_map_targets:
-        prob_volume.append(tgt.imread().astype(np.float32) / 255.)
-    prob_volume = np.array(prob_volume)
-    if transpose:
-        prob_volume = prob_volume.transpose(3, 2, 1, 0)
-    else:
-        prob_volume = prob_volume.transpose(1, 2, 3, 0)
-    with h5py.File(pred_path, "w") as fd:
-        fd.create_dataset(dataset_name, data=prob_volume)
-
 
 class NeuroproofLearnTask(
     NeuroproofLearnTaskMixin,

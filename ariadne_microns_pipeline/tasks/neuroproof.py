@@ -5,6 +5,7 @@ the executable's location.
 '''
 
 from cv2 import imread, imwrite
+import enum
 import h5py
 import json
 import luigi
@@ -18,7 +19,8 @@ import rh_logger
 from ..parameters import VolumeParameter, DatasetLocationParameter
 from ..parameters import MultiDatasetLocationParameter
 from ..targets.factory import TargetFactory
-from .nplearn import write_seg_volume, write_prob_volume
+from .neuroproof_common import write_seg_volume, write_prob_volume
+from .neuroproof_common import NeuroproofVersion
 from utilities import RequiresMixin, RunMixin, CILKCPUMixin
 
 class NeuroproofTaskMixin:
@@ -92,15 +94,20 @@ class NeuroproofRunMixin:
         default=0,
         description="Threshold used for removing small bodies as a "
                     "post-processing step")
-    wants_standard_neuroproof = luigi.BoolParameter(
-        description = "Use the standard interface to Neuroproof")
+    neuroproof_version = luigi.EnumParameter(
+        enum=NeuroproofVersion,
+        default=NeuroproofVersion.MIT,
+        description="The command-line convention to be used to run the "
+        "Neuroproof binary")
     
     def ariadne_run(self):
         '''Run the neuroproof subprocess'''
-        if self.wants_standard_neuroproof:
+        if self.neuroproof_version == NeuroproofVersion.MINIMAL:
             self.run_standard()
-        else:
+        elif self.neuroproof_version == NeuroproofVersion.FLY_EM:
             self.run_optimized_with_copy()
+        else:
+            self.run_optimized()
 
     def run_standard(self):
         '''Run the out-of-the-box neuroproof'''
