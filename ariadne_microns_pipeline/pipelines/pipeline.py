@@ -7,6 +7,7 @@ from ..tasks.connected_components import JoiningMethod
 from ..tasks.connected_components import FakeAllConnectedComponentsTask
 from ..tasks.find_seeds import SeedsMethodEnum, Dimensionality
 from ..tasks.match_synapses import MatchMethod
+from ..tasks.neuroproof_common import NeuroproofVersion
 from ..tasks.nplearn import StrategyEnum
 from ..targets.classifier_target import PixelClassifierTarget
 from ..targets.hdf5_target import HDF5FileTarget
@@ -234,8 +235,11 @@ class PipelineTaskMixin:
         default=[],
         description="The names of additional classifier classes "
                     "that are fed into Neuroproof as channels")
-    wants_standard_neuroproof=luigi.BoolParameter(
-        description="Use the standard Neuroproof build and interface")
+    neuroproof_version = luigi.EnumParameter(
+        enum=NeuroproofVersion,
+        default=NeuroproofVersion.MIT,
+        description="The command-line convention to be used to run the "
+        "Neuroproof binary")
     nplearn_strategy = luigi.EnumParameter(
         enum=StrategyEnum,
         default=StrategyEnum.all,
@@ -1040,7 +1044,8 @@ class PipelineTaskMixin:
                             prob_location=classifier_task.output_location,
                             input_seg_location=seg_task.output_location,
                             output_seg_location=output_seg_location,
-                            classifier_filename=self.neuroproof_classifier_path)
+                            classifier_filename=self.neuroproof_classifier_path,
+                            neuroproof_version=self.neuroproof_version)
                         np_task.threshold=self.np_threshold
                         additional_tasks = [ 
                             additional_classifier_tasks[k][zi, yi, xi]
@@ -1052,8 +1057,6 @@ class PipelineTaskMixin:
                         np_task.cpu_count = self.np_cores
                         np_task.set_requirement(classifier_task)
                         np_task.set_requirement(seg_task)
-                        np_task.wants_standard_neuroproof =\
-                            self.wants_standard_neuroproof
                         map(np_task.set_requirement, additional_tasks)
                         np_tasks[zi, yi, xi] = np_task
                         self.register_dataset(np_task.output())
@@ -1833,7 +1836,7 @@ class PipelineTaskMixin:
                 num_iterations=self.nplearn_num_iterations,
                 prune_feature=self.prune_feature,
                 use_mito=self.use_mito,
-                wants_standard_neuroproof=self.wants_standard_neuroproof) 
+                neuroproof_version=self.neuroproof_version) 
         self.neuroproof_learn_task.cpu_count = self.nplearn_cpu_count
         map(self.neuroproof_learn_task.set_requirement,
             self.nplearn_block_tasks)

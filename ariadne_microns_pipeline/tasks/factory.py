@@ -23,6 +23,7 @@ from .mask import MaskBorderTask
 from .match_neurons import MatchNeuronsTask
 from .match_synapses import MatchSynapsesTask
 from .neuroproof import NeuroproofTask
+from .neuroproof_common import NeuroproofVersion
 from .nplearn import NeuroproofLearnTask, StrategyEnum
 from .segment import \
      SegmentTask, SegmentCC2DTask, SegmentCC3DTask, UnsegmentTask, \
@@ -472,7 +473,7 @@ class AMTaskFactory(object):
         
     def gen_neuroproof_task(
         self, volume, prob_location, input_seg_location, output_seg_location,
-        classifier_filename):
+        classifier_filename, neuroproof_version):
         '''Run Neuroproof on an oversegmented volume
         
         :param volume: the volume being Neuroproofed
@@ -481,6 +482,8 @@ class AMTaskFactory(object):
         :param output_seg_location: where to write the corrected segmentation
         :param classifier_filename: the classifier trained to assess merge/no
         merge decisions.
+        :param np_version: the version of the Neuroproof binary - one
+        of the NeuroproofVersion enums.
         '''
         neuroproof, ld_library_path = \
             self.__get_neuroproof_config("neuroproof_graph_predict")
@@ -490,7 +493,8 @@ class AMTaskFactory(object):
                               output_seg_location=output_seg_location,
                               neuroproof=neuroproof,
                               neuroproof_ld_library_path=ld_library_path,
-                              classifier_filename=classifier_filename)
+                              classifier_filename=classifier_filename,
+                              neuroproof_version=neuroproof_version)
 
     def gen_neuroproof_learn_task(self,
                                   volume,
@@ -502,7 +506,7 @@ class AMTaskFactory(object):
                                   num_iterations=1,
                                   prune_feature=True,
                                   use_mito=False,
-                                  wants_standard_neuroproof=False):
+                                  neuroproof_version=NeuroproofVersion.MIT):
         '''Generate a task to learn a Neuroproof classifier
         
         :param volume: the volume for the probability, segmentation and
@@ -517,9 +521,8 @@ class AMTaskFactory(object):
         :param prune_feature: True to prune features with low predictive
                values
         :param use_mito: True to use a mitochondrial channel.
-        :param wants_standard_neuroproof: use neuroproof_mininmal's build
-        of Neuroproof_stack_learn instead of this repo's build of
-        neuroproof_graph_learn
+        :param neuroproof_version: choose from among the Neuroproof binary
+        command-line formats - MIT, FLY_EM or MINIMAL
         '''
         neuroproof, ld_library_path = self.__get_neuroproof_config(
             "neuroproof_graph_learn")
@@ -535,7 +538,7 @@ class AMTaskFactory(object):
             num_iterations=num_iterations,
             prune_feature=prune_feature,
             use_mito=use_mito,
-            wants_standard_neuroproof=wants_standard_neuroproof)
+            neuroproof_version=neuroproof_version)
     
     def gen_mask_border_task(
         self, volume, prob_location, mask_location, threshold=250):
