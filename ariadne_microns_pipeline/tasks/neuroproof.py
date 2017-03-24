@@ -32,9 +32,9 @@ class NeuroproofTaskMixin(DatasetMixin):
         '''Yield the probability volume target and segmentation volume target'''
         loading_plans = [self.input_seg_loading_plan_path,
                          self.prob_loading_plan_path
-                         ] + self.additional_locations
+                         ] + list(self.additional_loading_plan_paths)
         for loading_plan in loading_plans:
-            for tgt in DestVolumeReader(loading_plan):
+            for tgt in DestVolumeReader(loading_plan).get_source_targets():
                 yield tgt
                 
     def estimate_memory_usage(self):
@@ -43,16 +43,17 @@ class NeuroproofTaskMixin(DatasetMixin):
         m1 = (3685308 + 152132) * 1000
         v2 = np.prod([1436, 1436, 65])
         m2 = (1348048 + 152100) * 1000
+        volume = self.output().volume
         #
         # Model is Ax + B + ALx where x is the output volume and AL is the
         # number of additional locations.
         #
         B = (v1 * m2 - v2 * m1) / (v1 - v2)
         A = (float(m1) - B) / v1
-        v = np.prod([self.volume.width, 
-                     self.volume.height, 
-                     self.volume.depth])
-        AL = len(self.additional_locations)
+        v = np.prod([volume.width, 
+                     volume.height, 
+                     volume.depth])
+        AL = len(self.additional_loading_plan_paths)
         return int(A * v + AL * v + B)
 
 

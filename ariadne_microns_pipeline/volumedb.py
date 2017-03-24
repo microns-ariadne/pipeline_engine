@@ -792,7 +792,7 @@ class VolumeDB(object):
         assert isinstance(loading_plan, LoadingPlanObj)
         loading_plan_path = get_loading_plan_path(
             self.get_datatype_root(loading_plan.dataset_type.name),
-            loading_plan_id, loading_plan.volume.volume,
+            loading_plan_id, loading_plan.volume.volume(),
             loading_plan.dataset_type.name)
         return loading_plan_path
     
@@ -1111,7 +1111,7 @@ class VolumeDB(object):
         '''Get the canonical path to the dataset's "done" file'''
         dataset = self.session.query(DatasetObj).filter(
             DatasetObj.dataset_id == dataset_id).first()
-        return _get_dataset_path_by_dataset(self, dataset)
+        return self._get_dataset_path_by_dataset(dataset)
     
     def _get_dataset_path_by_dataset(self, dataset):
         persistence = dataset.dataset_type.persistence
@@ -1121,7 +1121,7 @@ class VolumeDB(object):
         else:
             root = self.temp_dir
         volume = Volume(dataset.volume.x0, dataset.volume.y0, dataset.volume.z0,
-                        dataset.volume.x1 - datset.volume.x0,
+                        dataset.volume.x1 - dataset.volume.x0,
                         dataset.volume.y1 - dataset.volume.y0,
                         dataset.volume.z1 - dataset.volume.z0)
         return get_storage_plan_path(root, dataset.dataset_id, volume, 
@@ -1135,7 +1135,7 @@ class VolumeDB(object):
         '''
         volume = self.session.query(VolumeObj).filter(
             DatasetObj.dataset_id == dataset_id and 
-            VolumeObj.volume_id == DatasetObj.volume_id)
+            VolumeObj.volume_id == DatasetObj.volume_id).first()
         return Volume(volume.x0, volume.y0, volume.z0,
                       volume.x1 - volume.x0,
                       volume.y1 - volume.y0,
@@ -1148,10 +1148,9 @@ class VolumeDB(object):
         :returns: a list of .done file locations
         '''
         datasets = self.session.query(DatasetObj).filter(
-            sqlalchemy.exists(
                 DatasetObj.dataset_id == DatasetDependentObj.dataset_id and
-                DatasetDependentObj.loading_plan_id == loading_plan_id)).all()
-        return map(self.__get_dataset_path_by_dataset, datasets)
+                DatasetDependentObj.loading_plan_id == loading_plan_id).all()
+        return map(self._get_dataset_path_by_dataset, datasets)
     
     def get_loading_plan_volume(self, loading_plan_id):
         '''Get the volume for a loading plan
@@ -1162,7 +1161,7 @@ class VolumeDB(object):
         '''
         volume = self.session.query(VolumeObj).filter(
             VolumeObj.volume_id == LoadingPlanObj.volume_id and
-            LoadingPlanObj.loading_plan_id == loading_plan_id)
+            LoadingPlanObj.loading_plan_id == loading_plan_id).first()
         return Volume(volume.x0, volume.y0, volume.z0,
                           volume.x1 - volume.x0,
                           volume.y1 - volume.y0,

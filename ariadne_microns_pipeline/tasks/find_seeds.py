@@ -76,9 +76,10 @@ class FindSeedsTaskMixin:
         #
         # Model is Ax + B where x is volume in voxels
         #
+        volume = DestVolumeReader(self.prob_loading_plan_path).volume
         B = (v1 * m2 - v2 * m1) / (v1 - v2)
         A = (float(m1) - B) / v1
-        v = np.prod([self.volume.width, self.volume.height, self.volume.depth])
+        v = np.prod([volume.width, volume.height, volume.depth])
         return int(A * v + B)
 
 

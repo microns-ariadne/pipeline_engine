@@ -245,7 +245,7 @@ class AMTaskFactory(object):
         #
         task = lp(ClassifyTask(classifier_path=classifier_path,
                                image_loading_plan=loading_plan,
-                               prob_plans=prob_plans,
+                               prob_plans=to_hashable(prob_plans),
                                class_names=datasets,
                                done_file=done_file_location))
         #
@@ -350,7 +350,6 @@ class AMTaskFactory(object):
         # Create the task
         #
         task = sp ( plp ( mlp ( slp ( SegmentTask(
-            volume=volume, 
             prob_loading_plan_path=prob_load_plan_path,
             mask_loading_plan_path=mask_load_plan_path,
             seed_loading_plan_path=seeds_load_plan_path,
@@ -544,7 +543,6 @@ class AMTaskFactory(object):
         #
         storage_plan, sp = self.storage_plan(volume, output_dataset_name)
         return slp ( nlp ( sp ( FindSynapsesTask(
-            volume=volume,
             synapse_map_loading_plan_path=synprob_loading_plan_path,
             neuron_segmentation_loading_plan_path=neuron_loading_plan_path,
             storage_plan = storage_plan,
@@ -605,7 +603,6 @@ class AMTaskFactory(object):
         #
         storage_plan, sp = self.storage_plan(volume, output_dataset_name)
         return tlp ( rlp ( nlp ( sp ( FindSynapsesTask(
-            volume=volume,
             transmitter_map_loading_plan_path=transmitter_loading_plan_path,
             receptor_map_loading_plan_path=receptor_loading_plan_path,
             neuron_segmentation_loading_plan_path=neuron_loading_plan_path,
@@ -673,12 +670,11 @@ class AMTaskFactory(object):
             transmitter_loading_plan_path = EMPTY_LOCATION
             receptor_loading_plan_path = EMPTY_LOCATION
         task = slp ( nlp ( ConnectSynapsesTask(
-            volume=volume,
             synapse_seg_load_plan_path=synapse_load_plan,
             neuron_seg_load_plan_path=neuron_load_plan,
-            transmitter_probability_map_loading_plan_path=
+            transmitter_probability_map_load_plan_path=
             transmitter_loading_plan_path,
-            receptor_probability_map_loading_plan_path=
+            receptor_probability_map_load_plan_path=
             receptor_loading_plan_path,
             output_location=output_location,
             xy_dilation=xy_dilation,
@@ -840,15 +836,14 @@ class AMTaskFactory(object):
         storage_plan, sp = self.storage_plan(volume, output_dataset_name)
         neuroproof, ld_library_path = \
             self.__get_neuroproof_config("neuroproof_graph_predict")
-        task = plp ( slp ( sp ( NeuroproofTask(volume=volume,
-                              prob_loading_plan_path=prob_loading_plan_path,
-                              additional_loading_plan_paths=
-                              additional_loading_plan_paths,
-                              input_seg_location=input_seg_loading_plan_path,
-                              storage_plan=storage_plan,
-                              neuroproof=neuroproof,
-                              neuroproof_ld_library_path=ld_library_path,
-                              classifier_filename=classifier_filename))))
+        task = plp ( slp ( sp ( NeuroproofTask(
+            prob_loading_plan_path=prob_loading_plan_path,
+            additional_loading_plan_paths=additional_loading_plan_paths,
+            input_seg_loading_plan_path=input_seg_loading_plan_path,
+            storage_plan=storage_plan,
+            neuroproof=neuroproof,
+            neuroproof_ld_library_path=ld_library_path,
+            classifier_filename=classifier_filename))))
         for lp in additional_lps:
             task = lp(task)
         return task

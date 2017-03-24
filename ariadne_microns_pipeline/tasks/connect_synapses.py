@@ -53,14 +53,15 @@ class ConnectSynapsesTaskMixin:
         m1 = 4008223 * 1000
         v2 = np.prod([1888, 1416, 42])
         m2 = 2294840 * 1000
+        volume = DestVolumeReader(self.synapse_seg_load_plan_path).volume
         #
         # Model is Ax + B where x is the output volume
         #
         B = (v1 * m2 - v2 * m1) / (v1 - v2)
         A = (float(m1) - B) / v1
-        v = np.prod([self.volume.width, 
-                     self.volume.height, 
-                     self.volume.depth])
+        v = np.prod([volume.width, 
+                     volume.height, 
+                     volume.depth])
         return int(A * v + B)
 
 class ConnectSynapsesRunMixin:

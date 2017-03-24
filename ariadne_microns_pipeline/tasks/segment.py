@@ -42,12 +42,13 @@ class SegmentTaskMixin(DatasetMixin):
         m1 = 3510513 * 1000
         v2 = np.prod([1888, 1416, 42])
         m2 = 1929795 * 1000
+        volume = self.output().volume
         #
         # Model is Ax + B where x is volume in voxels
         #
         B = (v1 * m2 - v2 * m1) / (v1 - v2)
         A = (float(m1) - B) / v1
-        v = np.prod([self.volume.width, self.volume.height, self.volume.depth])
+        v = np.prod([volume.width, volume.height, volume.depth])
         return int(A * v + B)
 
 class SegmentRunMixin:
@@ -398,12 +399,13 @@ class ZWatershedTaskMixin(DatasetMixin):
         m1 = 10003584 * 1000
         v2 = np.prod([512, 512, 40])
         m2 = 1710532 * 1000
+        volume = self.output().volume
         #
         # Model is Ax + B where x is volume in voxels
         #
         B = (v1 * m2 - v2 * m1) / (v1 - v2)
         A = (float(m1) - B) / v1
-        v = np.prod([self.volume.width, self.volume.height, self.volume.depth])
+        v = np.prod([volume.width, volume.height, volume.depth])
         return int(A * v + B)
     
 

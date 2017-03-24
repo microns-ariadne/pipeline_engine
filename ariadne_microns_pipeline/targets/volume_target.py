@@ -1,6 +1,9 @@
 import luigi
+import numpy as np
 import json
 import os
+import rh_logger
+import time
 
 from ..parameters import Volume, EMPTY_DATASET_ID, EMPTY_LOADING_PLAN_ID
 from ..volumedb import VolumeDB
@@ -17,8 +20,9 @@ def write_storage_plan(volume_db, dataset_id):
     assert isinstance(volume_db, VolumeDB)
     
     path = os.path.splitext(volume_db.get_dataset_path(dataset_id))[0] + ".plan"
+    blocks = []
     for location, volume \
-        in volume_db.get_subvolume_locations_by_dataset_id(self.dataset_id):
+        in volume_db.get_subvolume_locations_by_dataset_id(dataset_id):
         blocks.append([volume.to_dictionary(), location])
     dtype = volume_db.get_dataset_dtype_by_dataset_id(dataset_id)
     volume = volume_db.get_dataset_volume(dataset_id)
@@ -32,6 +36,9 @@ def write_storage_plan(volume_db, dataset_id):
              datatype=dtype,
              dataset_name=volume_db.get_dataset_name_by_dataset_id(dataset_id),
              dataset_id=dataset_id)
+    path_dir = os.path.dirname(path)
+    if not os.path.exists(path_dir):
+        os.makedirs(path_dir)
     with open(path, "w") as fd:
         json.dump(d, fd)
 
@@ -235,21 +242,22 @@ class DestVolumeReader(object):
 
     @property
     def volume(self):
-        if __volume is None:
-            with open(self.storage_plan_path, "r") as fd:
+        if self.__volume is None:
+            with open(self.loading_plan_path, "r") as fd:
                 d = json.load(fd)
                 depth, height, width = d["dimensions"]
                 self.__volume = Volume(d["x"], d["y"], d["z"],
                                        width, height, depth)
-        return __volume
+        return self.__volume
     
     def get_source_targets(self):
         '''Return the SrcVolumeTargets required to read this volume'''
-        with open(self.storage_plan_path, "r") as fd:
+        with open(self.loading_plan_path, "r") as fd:
             d = json.load(fd)
         tgts = []
         for path in d["dataset_done_files"]:
             tgts.append(SrcVolumeTarget(os.path.splitext(path)[0] + ".plan"))
+        return tgts
     
     def imread(self):
         '''Read the volume'''

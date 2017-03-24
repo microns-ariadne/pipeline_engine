@@ -21,14 +21,15 @@ class MaskBorderTaskMixin(DatasetMixin):
         m1 = 716834 * 1000
         v2 = np.prod([1888, 1416, 42])
         m2 = 468952 * 1000
+        volume = self.output().volume
         #
         # Model is Ax + B where x is the output volume
         #
         B = (v1 * m2 - v2 * m1) / (v1 - v2)
         A = (float(m1) - B) / v1
-        v = np.prod([self.volume.width, 
-                     self.volume.height, 
-                     self.volume.depth])
+        v = np.prod([volume.width, 
+                     volume.height, 
+                     volume.depth])
         return int(A * v + B)
 
 

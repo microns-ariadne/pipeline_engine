@@ -57,7 +57,8 @@ class ClassifyTaskMixin:
     def process_resources(self):
         '''Ask for the resources required by the classifier'''
         resources = self.resources.copy()
-        resources.update(self.get_classifier_target().get_resources(self.volume))
+        volume = DestVolumeReader(self.image_loading_plan).volume
+        resources.update(self.get_classifier_target().get_resources(volume))
         #
         # Add the process memory
         #

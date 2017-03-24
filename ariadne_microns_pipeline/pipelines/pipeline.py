@@ -451,20 +451,20 @@ class PipelineTaskMixin:
                     "use as context when extracting the slice to be joined, "
                     "joining slices in the z direction")
 
-    def get_dirs(self, x, y, z):
+    def get_dir(self, x, y, z):
         '''Return a directory suited for storing a file with the given offset
         
         Create a hierarchy of directories in order to limit the number
         of files in any one directory.
         '''
-        return [os.path.join(temp_dir,
-                             self.experiment,
-                             self.sample,
-                             self.dataset,
-                             self.channel,
-                             str(x),
-                             str(y),
-                             str(z)) for temp_dir in self.temp_dirs]
+        return os.path.join(self.temp_dir,
+                            self.experiment,
+                            self.sample,
+                            self.dataset,
+                            self.channel,
+                            str(x),
+                            str(y),
+                            str(z))
     
     @property
     def wants_connectivity(self):
@@ -818,6 +818,7 @@ class PipelineTaskMixin:
                         minimum_distance_z=self.minimum_distance_z)
                     self.datasets[stask.output().path] = stask
                     self.tasks.append(stask)
+                    self.seed_tasks[zi, yi, xi] = stask
                     
     def generate_watershed_tasks(self):
         '''Run watershed on each pixel '''
@@ -831,8 +832,8 @@ class PipelineTaskMixin:
                     seeds_task = self.seed_tasks[zi, yi, xi]
                     stask = self.factory.gen_segmentation_task(
                         volume=volume,
-                        prob_dataset=MEMBRANE_DATASET,
-                        mask_dataset=MASK_DATASET,
+                        prob_dataset_name=MEMBRANE_DATASET,
+                        mask_dataset_name=MASK_DATASET,
                         seeds_dataset_name=SEEDS_DATASET,
                         seeds_src_task=seeds_task,
                         seg_dataset_name=SEG_DATASET,
@@ -907,9 +908,9 @@ class PipelineTaskMixin:
             additional_dataset_names = [
                 Y_AFFINITY_DATASET, Z_AFFINITY_DATASET]
         additional_dataset_names += self.additional_neuroproof_channels
-        for zi in range(classifier_tasks.shape[0]):
-            for yi in range(classifier_tasks.shape[1]):
-                for xi in range(classifier_tasks.shape[2]):
+        for zi in range(self.n_z):
+            for yi in range(self.n_y):
+                for xi in range(self.n_x):
                     volume = self.get_block_volume(xi, yi, zi)
                     src_task = self.segmentation_tasks[zi, yi, xi]
                     np_task = self.factory.gen_neuroproof_task(
@@ -917,11 +918,11 @@ class PipelineTaskMixin:
                         prob_dataset_name=prob_dataset_name,
                         additional_dataset_names=additional_dataset_names,
                         input_seg_dataset_name=SEG_DATASET,
-                        output_seg_dataset_name=NP_DATASET,
+                        output_dataset_name=NP_DATASET,
                         classifier_filename=self.neuroproof_classifier_path,
                         input_seg_src_task=src_task)
                     np_task.threshold=self.np_threshold
-                    np_tasks[zi, yi, xi] = np_task
+                    self.np_tasks[zi, yi, xi] = np_task
                     self.datasets[np_task.output().path] = np_task
                     self.tasks.append(np_task)
     
@@ -1010,8 +1011,8 @@ class PipelineTaskMixin:
                         volume = Volume(x0, y0, z0, x1-x0, y1-y0, z1-z0)
                         ptask = self.np_tasks[zi, yi, xi]
                         output_location = os.path.join(
-                            self.get_dirs(
-                                self.xs[xi], self.ys[yi], self.zs[zi])[0],
+                            self.get_dir(
+                                self.xs[xi], self.ys[yi], self.zs[zi]),
                             "segmentation_statistics.json")
                         stask = self.factory.gen_segmentation_statistics_task(
                             volume=volume, 
@@ -1056,11 +1057,11 @@ class PipelineTaskMixin:
                         ntask = self.np_tasks[zi, yi, xi]
                         volume = ntask.volume
                         seg_location = ntask.output_seg_location
-                        skel_root = self.get_dirs(self.xs[xi],
-                                                  self.ys[yi],
-                                                  self.zs[zi])
+                        skel_root = self.get_dir(self.xs[xi],
+                                                 self.ys[yi],
+                                                 self.zs[zi])
                         skel_location = os.path.join(
-                            skel_root[0], SKEL_DIR_NAME)
+                            skel_root, SKEL_DIR_NAME)
                         stask = self.factory.gen_skeletonize_task(
                             volume=volume,
                             segmentation_location=seg_location,
@@ -1248,9 +1249,9 @@ class PipelineTaskMixin:
                     volume = self.get_block_volume(xi, yi, zi)
                     stask = self.factory.gen_find_synapses_task(
                         volume=volume,
-                        syn_location=ctask_loc,
-                        neuron_segmentation=np_loc,
-                        output_location=stask_loc,
+                        synapse_prob_dataset_name=SYNAPSE_DATASET,
+                        neuron_segmentation_dataset_name=NP_DATASET,
+                        output_dataset_name=SYN_SEG_DATASET,
                         threshold=self.synapse_threshold,
                         erosion_xy=self.synapse_xy_erosion,
                         erosion_z=self.synapse_z_erosion,
@@ -1260,9 +1261,8 @@ class PipelineTaskMixin:
                         max_size_2d=self.synapse_max_size_2d,
                         min_size_3d=self.min_synapse_area,
                         min_slice=self.min_synapse_depth)
-                    stask.set_requirement(ctask)
-                    stask.set_requirement(nptask)
-                    self.register_dataset(stask.output())
+                    self.tasks.append(stask)
+                    self.datasets[stask.output().path] = stask
                     self.synapse_segmentation_tasks[zi, yi, xi] = stask
     
     def generate_synapse_tr_segmentation_tasks(self):
@@ -1274,21 +1274,13 @@ class PipelineTaskMixin:
         for zi in range(self.n_z):
             for yi in range(self.n_y):
                 for xi in range(self.n_x):
-                    ttask = self.transmitter_classifier_tasks[zi, yi, xi]
-                    rtask = self.receptor_classifier_tasks[zi, yi, xi]
-                    nptask = self.np_tasks[zi, yi, xi]
-                    volume = ttask.output().volume
-                    ttask_loc = ttask.output().dataset_location
-                    rtask_loc = rtask.output().dataset_location
-                    np_loc = nptask.output().dataset_location
-                    stask_loc = self.get_dataset_location(
-                        volume, SYN_SEG_DATASET)
+                    volume = self.get_block_volume(xi, yi, zi)
                     stask = self.factory.gen_find_synapses_tr_task(
                         volume=volume,
-                        transmitter_location=ttask_loc,
-                        receptor_location=rtask_loc,
-                        neuron_segmentation=np_loc,
-                        output_location=stask_loc,
+                        transmitter_dataset_name=SYNAPSE_TRANSMITTER_DATASET,
+                        receptor_dataset_name=SYNAPSE_RECEPTOR_DATASET,
+                        neuron_dataset_name=NP_DATASET,
+                        output_dataset_name=SYN_SEG_DATASET,
                         threshold=self.synapse_threshold,
                         erosion_xy=self.synapse_xy_erosion,
                         erosion_z=self.synapse_z_erosion,
@@ -1298,10 +1290,8 @@ class PipelineTaskMixin:
                         max_size_2d=self.synapse_max_size_2d,
                         min_size_3d=self.min_synapse_area,
                         min_slice=self.min_synapse_depth)
-                    stask.set_requirement(ttask)
-                    stask.set_requirement(rtask)
-                    stask.set_requirement(nptask)
-                    self.register_dataset(stask.output())
+                    self.tasks.append(stask)
+                    self.datasets[stask.output().path] = stask
                     self.synapse_segmentation_tasks[zi, yi, xi] = stask
                     
     
@@ -1324,8 +1314,8 @@ class PipelineTaskMixin:
                     segtask = self.synapse_segmentation_tasks[zi, yi, xi]
                     ntask = self.np_tasks[zi, yi, xi]
                     output_location = os.path.join(
-                        self.get_dirs(
-                            self.xs[xi], self.ys[yi], self.zs[zi])[0],
+                        self.get_dir(
+                            self.xs[xi], self.ys[yi], self.zs[zi]),
                         "synapse_connectivity.json")
                     
                     sctask = self.factory.gen_connect_synapses_task(
@@ -1410,7 +1400,7 @@ class PipelineTaskMixin:
                     synapse_seg_task = \
                         self.synapse_segmentation_tasks[zi, yi, xi]
                     synapse_match_location = os.path.join(
-                        self.get_dirs(x0, y0, z0)[0], "synapse-match.json")
+                        self.get_dir(x0, y0, z0), "synapse-match.json")
                     synapse_match_task = self.factory.gen_match_synapses_task(
                         volume=volume,
                         gt_dataset_name=SYN_SEG_GT_DATASET,
@@ -1430,7 +1420,7 @@ class PipelineTaskMixin:
                     # Match GT neurons against detected neurons
                     #
                     neuron_match_location = os.path.join(
-                        self.get_dirs(x0, y0, z0)[0], "neuron-match.json")
+                        self.get_dir(x0, y0, z0), "neuron-match.json")
                     neuron_seg_task = self.np_tasks[zi, yi, xi]
                     neuron_match_task=self.factory.gen_match_neurons_task(
                         volume=volume,
@@ -1444,7 +1434,7 @@ class PipelineTaskMixin:
                     # Match GT synapses against GT neurons
                     #
                     gt_sn_location = os.path.join(
-                        self.get_dirs(x0, y0, z0)[0], "gt_synapse_neuron.json")
+                        self.get_dir(x0, y0, z0), "gt_synapse_neuron.json")
                     gt_sn_task = self.factory.gen_connect_synapses_task(
                         volume=volume,
                         neuron_location=gt_neuron_task.output()\
@@ -1597,6 +1587,10 @@ class PipelineTaskMixin:
     def compute_requirements(self):
         '''Compute the requirements for this task'''
         if not hasattr(self, "requirements"):
+            import cProfile
+            import pstats
+            pr = cProfile.Profile()
+            pr.enable()
             try:
                 rh_logger.logger.report_event("Assembling pipeline")
             except:
@@ -1611,6 +1605,8 @@ class PipelineTaskMixin:
             self.datasets = {}
             self.tasks = []
             try:
+                if not os.path.isdir(self.root_dir):
+                    os.makedirs(self.root_dir)
                 self.init_db()
                 self.factory = AMTaskFactory(self.volume_db_url, 
                                              self.volume_db)
@@ -1723,19 +1719,19 @@ class PipelineTaskMixin:
                 #
                 rh_logger.logger.report_event("Writing loading plans")
                 for loading_plan_id in self.volume_db.get_loading_plan_ids():
-                    loading_plan_path = volume_db.get_loading_plan_path(
+                    loading_plan_path = self.volume_db.get_loading_plan_path(
                         loading_plan_id)
                     directory = os.path.dirname(loading_plan_path)
                     if not os.path.exists(directory):
                         os.makedirs(directory)
-                    write_loading_plan(loading_plan_path, volume_db, 
+                    write_loading_plan(loading_plan_path, self.volume_db, 
                                       loading_plan_id)
                 #
                 # Write the storage plans
                 #
                 rh_logger.logger.report_event("Writing storage plans")
                 for dataset_id in self.volume_db.get_dataset_ids():
-                    write_storage_plan(volume_db, dataset_id)
+                    write_storage_plan(self.volume_db, dataset_id)
                 #
                 # Hook up dependencies.
                 #
@@ -1774,6 +1770,11 @@ class PipelineTaskMixin:
             except:
                 rh_logger.logger.report_exception()
                 raise
+            finally:
+                with open("/tmp/profile.log", "w") as fd:
+                    pr.disable()
+                    ps = pstats.Stats(pr, stream=fd).sort_stats("cumulative")
+                    ps.print_stats()
     
     def requires(self):
         self.compute_requirements()
