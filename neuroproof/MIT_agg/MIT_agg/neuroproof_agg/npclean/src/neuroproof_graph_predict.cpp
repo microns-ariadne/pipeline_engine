@@ -336,6 +336,11 @@ void get_json_files(std::string path,
     Json::Value config = d["config"];
     bool use_loading_plans = 
 	(config.isObject() && (! config["use-loading-plans"].empty()));
+    if (use_loading_plans) {
+	std::cout << "Using loading plans to retrieve volumes" << endl;
+    } else {
+	std::cout << "Retrieving volumes via PngVolumeTargets" << endl;
+    }
     for (int i=0; i < probabilities.size(); i++) {
 	Json::Value probability = probabilities[i];
 	std::vector<VolumeProbPtr> tmp;

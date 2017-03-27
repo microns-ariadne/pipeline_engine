@@ -38,7 +38,7 @@ class FindSynapsesTaskMixin:
                              self.receptor_map_loading_plan]
         else:
             loading_plans = [self.synapse_map_loading_plan_path]
-        if not self.erode_with_neurons:
+        if self.erode_with_neurons:
             loading_plans.append(self.neuron_segmentation_loading_plan_path)
         for loading_plan in loading_plans:
             for tgt in DestVolumeReader(loading_plan).get_source_targets():

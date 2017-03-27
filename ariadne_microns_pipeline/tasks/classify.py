@@ -11,7 +11,7 @@ from ..targets.volume_target import DestVolumeReader, SrcVolumeTarget
 from ..parameters import VolumeParameter
 from ..parameters import Volume
 from ..ipc.protocol import *
-from .utilities import RequiresMixin, RunMixin, DatasetMixin
+from .utilities import RequiresMixin, RunMixin
 
 
 class ClassifyTaskMixin:
@@ -133,7 +133,7 @@ class ClassifyRunMixin:
     
     def ariadne_run(self):
         '''Run the classifier on the input volume to produce the outputs'''
-        classifier_target, image_target = list(self.input())
+        classifier_target = self.input().next()
         classifier = classifier_target.classifier
         if classifier.run_via_ipc():
             context = zmq.Context(1)
@@ -173,18 +173,20 @@ class ClassifyRunMixin:
         else:
             self()
         with self.output().open("w") as fd:
-            json.dump(self.prob_plans, fd)
+            json.dump(dict(self.prob_plans), fd)
     
     def __call__(self):
-        classifier_target, image_target = list(self.input())
+        classifier_target = self.input().next()
         classifier = classifier_target.classifier
-        image = image_target.imread()
+        reader = DestVolumeReader(self.image_loading_plan)
+        image = reader.imread()
         probs = classifier.classify(
-            image, self.volume.x, self.volume.y, self.volume.z)
+            image, reader.volume.x, reader.volume.y, reader.volume.z)
         
-        output_target = self.output()
         for class_name, dataset_name in self.class_names.items():
-            output_target.imwrite(dataset_name, probs[class_name])
+            prob_plan = self.prob_plans[dataset_name]
+            output_target = SrcVolumeTarget(prob_plan)
+            output_target.imwrite(probs[class_name])
 
 class ClassifyTask(ClassifyTaskMixin, ClassifyRunMixin, 
                    RequiresMixin, RunMixin, luigi.Task):

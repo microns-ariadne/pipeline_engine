@@ -921,6 +921,7 @@ class PipelineTaskMixin:
                         output_dataset_name=NP_DATASET,
                         classifier_filename=self.neuroproof_classifier_path,
                         input_seg_src_task=src_task)
+                    np_task.cpu_count = self.np_cores
                     np_task.threshold=self.np_threshold
                     self.np_tasks[zi, yi, xi] = np_task
                     self.datasets[np_task.output().path] = np_task
@@ -1587,10 +1588,6 @@ class PipelineTaskMixin:
     def compute_requirements(self):
         '''Compute the requirements for this task'''
         if not hasattr(self, "requirements"):
-            import cProfile
-            import pstats
-            pr = cProfile.Profile()
-            pr.enable()
             try:
                 rh_logger.logger.report_event("Assembling pipeline")
             except:
@@ -1770,11 +1767,6 @@ class PipelineTaskMixin:
             except:
                 rh_logger.logger.report_exception()
                 raise
-            finally:
-                with open("/tmp/profile.log", "w") as fd:
-                    pr.disable()
-                    ps = pstats.Stats(pr, stream=fd).sort_stats("cumulative")
-                    ps.print_stats()
     
     def requires(self):
         self.compute_requirements()

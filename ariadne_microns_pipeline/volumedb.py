@@ -435,6 +435,26 @@ class VolumeDB(object):
         self.session.close()
         return value is None
     
+    def copy_db(self, dest_url):
+        '''Copy the database schema and content to another database
+        
+        :param dest_url: the SQLAlchemy URL of the other database
+        '''
+        dest_engine = sqlalchemy.create_engine(dest_url)
+        Session = sessionmaker()
+        Session.configure(bind=self.engine)
+        session=Session()
+        Base.metadata.drop_all(dest_engine)
+        Base.metadata.create_all(dest_engine)
+        
+        for table in DatasetTypeObj, DatasetIDObj, VolumeObj, DatasetObj, \
+            DatasetSubvolumeObj, SubvolumeLocationObj, SubvolumeLinkObj, \
+            LoadingPlanIDObj, LoadingPlanObj, SubvolumeDependentObj:
+            objs = self.session.query(table).all()
+            map(self.session.expunge, objs)
+            map(session.merge, objs)
+        session.commit()
+        
     ######################################################
     #
     # Workflow items - the build process
@@ -625,6 +645,34 @@ class VolumeDB(object):
                 VolumeObj.z0.op("<", is_comparison=True)(z1)))
         return dataset_objs.all()
     
+    def find_loading_plan_id_by_type_and_volume(self, dataset_name, volume):
+        '''Find the ID of the loading plan that loads the given dataset volume
+        
+        This can be used either to retrieve a known loading plan or to search
+        for a possibly precreated one, e.g. the membrane loading plan created
+        by BorderMaskTask for FindSeedsTask and subsequent.
+        
+        There should only be one loading plan per unique dataset & volume.
+        
+        :param dataset_name: the name of the dataset to be loaded
+        :param volume: the volume to be loaded from the dataset
+        :returns: None if there is no such loading plan, otherwise the loading
+        plan ID of the already-existing loading plan
+        '''
+        result = self.session.query(LoadingPlanObj.loading_plan_id).filter(
+            sqlalchemy.and_(
+                LoadingPlanObj.volume_id == VolumeObj.volume_id,
+                VolumeObj.x0 == volume.x,
+                VolumeObj.y0 == volume.y,
+                VolumeObj.z0 == volume.z,
+                VolumeObj.x1 == volume.x1,
+                VolumeObj.y1 == volume.y1,
+                VolumeObj.z1 == volume.z1,
+                LoadingPlanObj.dataset_type_id == 
+                DatasetTypeObj.dataset_type_id,
+                DatasetTypeObj.name == dataset_name
+                )).first()
+        return result if result is None else result[0]
     def get_loading_plan_id(self):
         '''Get a loading_plan_id in preparation for requesting a dataset
         '''
@@ -686,7 +734,8 @@ class VolumeDB(object):
                 ddo = DatasetDependentObj(dataset=dataset_obj,
                                           loading_plan=loading_plan)
                 self.session.add(ddo)
-
+        self.session.commit()
+        
         for dataset_obj in self.session.query(DatasetObj):
             assert isinstance(dataset_obj, DatasetObj)
             x0 = dataset_obj.volume.x0
@@ -1133,9 +1182,8 @@ class VolumeDB(object):
         :param dataset_id: the ID of the dataset to be retrieved
         :returns: a ariadne_microns_pipeline.parameters.volume
         '''
-        volume = self.session.query(VolumeObj).filter(
-            DatasetObj.dataset_id == dataset_id and 
-            VolumeObj.volume_id == DatasetObj.volume_id).first()
+        volume = self.session.query(DatasetObj).filter(
+            DatasetObj.dataset_id == dataset_id).first().volume
         return Volume(volume.x0, volume.y0, volume.z0,
                       volume.x1 - volume.x0,
                       volume.y1 - volume.y0,
@@ -1148,8 +1196,9 @@ class VolumeDB(object):
         :returns: a list of .done file locations
         '''
         datasets = self.session.query(DatasetObj).filter(
-                DatasetObj.dataset_id == DatasetDependentObj.dataset_id and
-                DatasetDependentObj.loading_plan_id == loading_plan_id).all()
+            sqlalchemy.and_(
+                DatasetObj.dataset_id == DatasetDependentObj.dataset_id,
+                DatasetDependentObj.loading_plan_id == loading_plan_id)).all()
         return map(self._get_dataset_path_by_dataset, datasets)
     
     def get_loading_plan_volume(self, loading_plan_id):
@@ -1160,8 +1209,9 @@ class VolumeDB(object):
         the dataset's extent
         '''
         volume = self.session.query(VolumeObj).filter(
-            VolumeObj.volume_id == LoadingPlanObj.volume_id and
-            LoadingPlanObj.loading_plan_id == loading_plan_id).first()
+            sqlalchemy.and_(
+                VolumeObj.volume_id == LoadingPlanObj.volume_id,
+                LoadingPlanObj.loading_plan_id == loading_plan_id)).first()
         return Volume(volume.x0, volume.y0, volume.z0,
                           volume.x1 - volume.x0,
                           volume.y1 - volume.y0,
@@ -1172,10 +1222,10 @@ class VolumeDB(object):
         
         :param loading_plan_id: the ID of the loading plan record
         '''
-        return self.session.query(DatasetTypeObj.name).filter(
-            DatasetTypeObj.dataset_type_id == LoadingPlanObj.dataset_type_id and
+        return self.session.query(DatasetTypeObj.name).filter(sqlalchemy.and_(
+            DatasetTypeObj.dataset_type_id == LoadingPlanObj.dataset_type_id,
             LoadingPlanObj.loading_plan_id == loading_plan_id
-            ).first()[0]
+            )).first()[0]
     
     def get_loading_plan_dataset_type(self, loading_plan_id):
         '''Get the loading plan's Numpy dtype, e.g. "uint8"
@@ -1183,9 +1233,11 @@ class VolumeDB(object):
         :param loading_plan_id: the ID of the loading plan record
         '''
         return self.session.query(DatasetTypeObj.datatype).filter(
-            DatasetTypeObj.dataset_type_id == LoadingPlanObj.dataset_type_id and
-            LoadingPlanObj.loading_plan_id == loading_plan_id
-            ).first()[0]
+            sqlalchemy.and_(
+                DatasetTypeObj.dataset_type_id == 
+                LoadingPlanObj.dataset_type_id,
+                LoadingPlanObj.loading_plan_id == loading_plan_id
+            )).first()[0]
     
     def get_loading_plan_dataset_ids(self, loading_plan_id):
         '''Get the dataset_ids for the datasets referenced by a loading plan

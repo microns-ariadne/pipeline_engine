@@ -108,7 +108,8 @@ class NeuroproofRunMixin:
         # "invert" is False by default.
         #
         probabilities = \
-            [self.prob_loading_plan_path] + self.additional_loading_plan_paths
+            [self.prob_loading_plan_path] + \
+            list(self.additional_loading_plan_paths)
         watershed = self.input_seg_loading_plan_path
         config_path = \
             os.path.splitext(self.classifier_filename)[0] + "_config.json"

@@ -97,13 +97,21 @@ class AMTaskFactory(object):
         instance which will register the loading plan when the task is
         piped into it.
         '''
-        loading_plan_id = self.volume_db.get_loading_plan_id()
+        loading_plan_id = \
+            self.volume_db.find_loading_plan_id_by_type_and_volume(
+                dataset_name, volume)
+        if loading_plan_id is not None:
+            magic_obj = self.__Null()
+        else:
+            loading_plan_id = self.volume_db.get_loading_plan_id()
+            magic_obj = self.__LP(
+                self.volume_db, volume, loading_plan_id,  dataset_name, 
+                src_task)
         root = self.volume_db.get_datatype_root(dataset_name)
         loading_plan_path = get_loading_plan_path(
             root, loading_plan_id, volume, 
             dataset_name)
-        return loading_plan_path, self.__LP(
-            self.volume_db, volume, loading_plan_id,  dataset_name, src_task)
+        return loading_plan_path, magic_obj
         
     class __SP(object):
         '''Class to handle context for creating a storage plan.

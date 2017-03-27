@@ -3,6 +3,7 @@ import numpy as np
 import json
 import os
 import rh_logger
+import tifffile
 import time
 
 from ..parameters import Volume, EMPTY_DATASET_ID, EMPTY_LOADING_PLAN_ID
@@ -72,13 +73,15 @@ class SrcVolumeTarget(luigi.LocalTarget):
     
     '''
     
-    def __init__(self, storage_plan_path):
+    def __init__(self, storage_plan_path, compression=0):
         '''Initialize the target with the pathnames and file name pattern
 
         :param storage_plan: the path to the storage plan file, e.g. as
         written by write_storage_plan()
+        :param compression: the degree of compression for the .tif file.
         '''
         self.storage_plan_path = storage_plan_path
+        self.compression=compression
         done_file = os.path.splitext(storage_plan_path)[0] + ".done"
         self.__volume = None
         super(SrcVolumeTarget, self).__init__(done_file)
@@ -164,8 +167,8 @@ class SrcVolumeTarget(luigi.LocalTarget):
                              sx0 - x0: sx1 - x0].astype(datatype)
                 fd.save(block, 
                         photometric='minisblack',
-                        compress=compression,
-                        description=dataset.dataset_type.name,
+                        compress=self.compression,
+                        description=dataset_name,
                         metadata=metadata)
         rh_logger.logger.report_metric("Dataset store time (sec)",
                                        time.time() - t0)
@@ -263,7 +266,7 @@ class DestVolumeReader(object):
         '''Read the volume'''
         t0 = time.time()
         with open(self.loading_plan_path, "r") as fd:
-            d = json.load(d)
+            d = json.load(fd)
         x0 = self.volume.x
         x1 = self.volume.x1
         y0 = self.volume.y
@@ -288,8 +291,8 @@ class DestVolumeReader(object):
                svolume.z1 <= z0:
                 rh_logger.logger.report_event(
                     "Ignoring block %d:%d, %d:%d, %d:%d from load plan" %
-                (svolume.x0, svolume.x1, svolume.y0, svolume.y1,
-                 svolume.z0, svolume.z1))
+                (svolume.x, svolume.x1, svolume.y, svolume.y1,
+                 svolume.z, svolume.z1))
                 continue
                 
             with tifffile.TiffFile(tif_path) as fd:
@@ -333,7 +336,7 @@ class DestVolumeReader(object):
                     block = block[:, :, x0-svolume.x:]
                     sx0 = x0
                 else:
-                    sx0 = svolume.x0
+                    sx0 = svolume.x
                 if svolume.x1 > x1:
                     block = block[:, :, :x1 - sx0]
                     sx1 = x1
