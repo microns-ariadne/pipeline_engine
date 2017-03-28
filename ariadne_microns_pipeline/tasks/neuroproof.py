@@ -117,8 +117,8 @@ class NeuroproofRunMixin:
             config = json.load(open(config_path, "r"))
         else:
             config = {}
-        config["use-loading-plan"] = True
-        config["use-storage-plan"] = True
+        config["use-loading-plans"] = True
+        config["use-storage-plans"] = True
         d = dict(config=config,
                  probabilities=probabilities,
                  watershed=watershed,

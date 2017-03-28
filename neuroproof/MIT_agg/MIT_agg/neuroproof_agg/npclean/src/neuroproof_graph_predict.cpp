@@ -174,12 +174,14 @@ void get_dir_files(
  *
  * path - path to the load plan file
  * volumedata - read the volume data in here
+ * transpose - store the array as z, y, x instead of x, y, z
  *
  * See the README.md file for the format of this file.
  */
 template <typename T> void read_loading_plan(
     std::string path,
-    VolumeData<T> &volumedata)
+    VolumeData<T> &volumedata,
+    bool transpose)
 {
     Json::Reader reader;
     Json::Value d;
@@ -200,26 +202,54 @@ template <typename T> void read_loading_plan(
     Json::UInt x0 = d["x"].asUInt();
     Json::UInt y0 = d["y"].asUInt();
     Json::UInt z0 = d["z"].asUInt();
-    volumedata.reshape(vigra::MultiArrayShape<3>::type(
-        width, height, depth));
+    std::cout << "Total volume: x=" << x0 << " y=" << y0 << " z=" << z0;
+    std::cout << " width=" << width << " height=" << height << " depth=" << depth << std::endl;
+    if (transpose) {
+	volumedata.reshape(vigra::MultiArrayShape<3>::type(
+	    depth, height, width));
+    } else {
+	volumedata.reshape(vigra::MultiArrayShape<3>::type(
+	    width, height, depth));
+    }
     
     Json::Value blocks = d["blocks"];
     cilk_for (int i=0; i < blocks.size(); i++) {
-	Json::Value subvolume = blocks[i][0];
+	Json::Value subvolume = blocks[i][1];
 	Json::UInt svx0 = subvolume["x"].asUInt();
 	Json::UInt svy0 = subvolume["y"].asUInt();
 	Json::UInt svz0 = subvolume["z"].asUInt();
 	Json::UInt svx1 = svx0 + subvolume["width"].asUInt();
 	Json::UInt svy1 = svy0 + subvolume["height"].asUInt();
 	Json::UInt svz1 = svz0 + subvolume["depth"].asUInt();
-	Json::Value location = blocks[i][1];
+	Json::Value location = blocks[i][0];
+	std::cout << "Reading block from " << location << std::endl;
+	std::cout << "   x=" << svx0 << ":" << svx1 << std::endl;
+	std::cout << "   y=" << svy0 << ":" << svy1 << std::endl;
+	std::cout << "   z=" << svz0 << ":" << svz1 << std::endl;
 	vigra::MultiArray<3, T> subvolumedata;
 	vigra::importVolume(subvolumedata, location.asString());
+	std::cout << "   TIFF file size: x=" << subvolumedata.shape(0);
+	std::cout << " y=" << subvolumedata.shape(1);
+	std::cout << " z=" << subvolumedata.shape(2) << endl;
+	if (subvolumedata.shape(0) != svx1-svx0) {
+	    throw ErrMsg("Tiff file size differs in x direction");
+	}
+	if (subvolumedata.shape(1) != svy1-svy0) {
+	    throw ErrMsg("Tiff file size differs in y direction");
+	}
+	if (subvolumedata.shape(2) != svz1-svz0) {
+	    throw ErrMsg("Tiff file size differs in z direction");
+	}
 	for (int z=svz0; z<svz1; ++z) {
 	    for (int y=svy0; y < svy1; ++y) {
 		for (int x=svx0; x < svx1; ++x) {
-		    volumedata(x-x0, y-y0, z-z0) = 
-		        subvolumedata(x-svx0, y-svy0, z-svz0);
+		    if (transpose) {
+			volumedata(z-z0, y-y0, x-x0) =
+			    subvolumedata(x-svx0, y-svy0, z-svz0);
+		    } else {
+			volumedata(x-x0, y-y0, z-z0) = 
+			    subvolumedata(x-svx0, y-svy0, z-svz0);
+		    }
 		}
 	    }
 	}
@@ -341,28 +371,29 @@ void get_json_files(std::string path,
     } else {
 	std::cout << "Retrieving volumes via PngVolumeTargets" << endl;
     }
+    /* Probabilities dimensions are z, y, x */
+    MultiArray<3, float>::difference_type transposition(2, 1, 0);
     for (int i=0; i < probabilities.size(); i++) {
 	Json::Value probability = probabilities[i];
-	std::vector<VolumeProbPtr> tmp;
+	VolumeProbPtr tmp;
 	if (use_loading_plans) {
-	    VolumeProbPtr pvp = VolumeProb::create_volume();
-	    tmp.push_back(pvp);
-	    read_loading_plan(probability.asString(), *tmp[0]);
+	    tmp = VolumeProb::create_volume();
+	    read_loading_plan(probability.asString(), *tmp, false);
 	} else {
 	    std::vector<std::string> file_names;
 	    for (int j=0; j < probability.size(); j++) {
 		file_names.push_back(probability[j].asString());
 	    }
 	    tmp = VolumeProb::create_volume_from_images(
-		file_names);
-	    prob_list.push_back(tmp[0]);
-	    /*
-	     * The membrane probabilities appear as the first and second on the
-	     * list, hence the duplication of element 0 below.
-	     */
-	    if (i == 0) {
-		prob_list.push_back(tmp[0]);
-	    }
+		file_names)[0];
+	}
+	/*
+	 * The membrane probabilities appear as the first and second on the
+	 * list, hence the duplication of element 0 below.
+	 */
+	prob_list.push_back(tmp);
+	if (i == 0) {
+	    prob_list.push_back(tmp);
 	}
     }
     /*
@@ -401,7 +432,7 @@ void get_json_files(std::string path,
     Json::Value watershed = d["watershed"];
     if (use_loading_plans) {
 	pLabels = VolumeLabelData::create_volume();
-	read_loading_plan(watershed.asString(), *pLabels);
+	read_loading_plan(watershed.asString(), *pLabels, false);
     } else {
 	std::vector<std::string> ws_input_files;
 	for (int i=0; i < watershed.size(); i++) {
@@ -525,18 +556,27 @@ void run_prediction(PredictOptions& options)
  
     // TODO: move feature handling to stack (load classifier if file provided)
     // create feature manager and load classifier
+    cout << "Building feature manager with " << prob_list.size() << " channels" << endl;
+    for (int i=0; i < prob_list.size(); i++) {
+	cout << "   " << (i+1) << " dimensions=" << (*prob_list[i]).shape(0)
+	     << ", " << (*prob_list[i]).shape(1)
+	     << ", " << (*prob_list[i]).shape(2) << endl;
+    }
     FeatureMgrPtr feature_manager(new FeatureMgr(prob_list.size()));
     feature_manager->set_basic_features(); 
-
+    cout << "Set feature manager classifier" << endl;
     feature_manager->set_classifier(eclfr);   	 
 
     // create stack to hold segmentation state
+    cout << "Create BioStack" << endl;
     BioStack stack(initial_labels); 
+    cout << "Set BioStack's feature manager" << endl;
     stack.set_feature_manager(feature_manager);
+    cout << "Set BioStack's probability list" << endl;
     stack.set_prob_list(prob_list);
 
     start = boost::posix_time::microsec_clock::local_time();
-    cout<<"Building RAG ..."; 	
+    cout<<"Building RAG ...";
     stack.build_rag(false);
     cout<<"done with "<< stack.get_num_labels()<< " nodes\n";
     now = boost::posix_time::microsec_clock::local_time();

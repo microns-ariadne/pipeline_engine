@@ -42,6 +42,7 @@ LDFLAGS+=-lcilkrts -ljsoncpp -lhdf5 -lhdf5_hl -lvigraimpex -lopencv_core
 LDFLAGS+=-lopencv_imgproc -lopencv_highgui -lopencv_ml -lboost_program_options
 LDFLAGS+=-ltiff
 LDFLAGS+=-lboost_filesystem -lboost_thread -lboost_system -lstdc++ -lgcc_s #-lprofiler
+#LDFLAGS+=-lmcheck
 
 SOURCES_NP_LEARN=$(wildcard src/neuroproof_graph_learn.cpp Stack/*.cpp Classifier/*.cpp FeatureManager/*.cpp BioPriors/*.cpp Algorithms/*.cpp EdgeEditor/*.cpp Rag/*.cpp SemiSupervised/*.cpp)
 SOURCES_NP_PREDICT=$(wildcard src/neuroproof_graph_predict.cpp Stack/*.cpp Classifier/*.cpp FeatureManager/*.cpp BioPriors/*.cpp Algorithms/*.cpp EdgeEditor/*.cpp Rag/*.cpp SemiSupervised/*.cpp)
