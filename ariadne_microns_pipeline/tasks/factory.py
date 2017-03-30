@@ -411,7 +411,7 @@ class AMTaskFactory(object):
         else:
             task_class = SegmentCC3DTask
         task = sp ( plp ( mlp ( task_class(
-            prob_loading_plan_path=prob_loading_plan_path,
+            prob_loading_plan_path=prob_load_plan_path,
             mask_loading_plan_path=mask_load_plan_path,
             storage_plan=storage_plan,
             threshold=threshold,
