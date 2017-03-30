@@ -9,6 +9,7 @@ h5py>=2.5.0
 pandas>=0.15.0
 rh_logger
 scipy>=0.14.0
+scikit-image
 scikit-learn
 sqlalchemy
 luigi>=2.1.1

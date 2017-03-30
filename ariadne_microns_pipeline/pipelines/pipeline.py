@@ -1108,12 +1108,13 @@ class PipelineTaskMixin:
             # There's only a single block, so fake doing AllConnectedComponents
             input_task = self.np_tasks[0, 0, 0]
             np_tgt = input_task.output()
+            volume = self.get_block_volume(0, 0, 0)
             self.all_connected_components_task = \
-                FakeAllConnectedComponentsTask(
-                    volume=np_tgt.volume,
-                    location=np_tgt.dataset_location,
+                self.factory.gen_fake_all_connected_components_task(
+                    volume=volume,
+                    dataset_name=NP_DATASET,
                     output_location=self.get_connectivity_graph_location())
-            self.all_connected_components_task.set_requirement(input_task)
+            self.tasks.append(self.all_connected_components_task)
             return
         #
         # Build the all-connected-components task
@@ -1501,8 +1502,7 @@ class PipelineTaskMixin:
         if self.connectivity_graph_location != EMPTY_LOCATION:
             return self.connectivity_graph_location
         elif self.wants_connectivity:
-            return os.path.join(self.temp_dirs[0],
-                                ALL_CONNECTED_COMPONENTS_JSON)
+            return os.path.join(self.temp_dir, ALL_CONNECTED_COMPONENTS_JSON)
         return None
     
     def generate_stitched_segmentation_task(self):

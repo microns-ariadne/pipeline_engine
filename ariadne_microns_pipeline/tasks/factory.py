@@ -10,6 +10,7 @@ from .download_from_butterfly import DownloadFromButterflyTask
 from .classify import ClassifyTask
 from .connected_components import AllConnectedComponentsTask
 from .connected_components import ConnectedComponentsTask
+from .connected_components import FakeAllConnectedComponentsTask
 from .connected_components import VolumeRelabelingTask
 from .connect_synapses import ConnectSynapsesTask
 from .connect_synapses import AggregateSynapseConnectionsTask
@@ -968,6 +969,15 @@ class AMTaskFactory(object):
         '''
         return AllConnectedComponentsTask(input_locations=input_locations,
                                           output_location=output_location)
+    
+    def gen_fake_all_connected_components_task(
+        self, volume, dataset_name, output_location):
+        '''Generate a connectivity graph file for a single location'''
+        loading_plan, lp = self.loading_plan(volume, dataset_name)
+        return lp(FakeAllConnectedComponentsTask(
+            volume=volume,
+            loading_plan=loading_plan,
+            output_location=output_location))
     
     def gen_volume_relabeling_task(
         self, dataset_name, input_volumes, relabeling_location, 
