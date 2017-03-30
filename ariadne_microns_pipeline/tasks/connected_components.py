@@ -572,10 +572,9 @@ class FakeAllConnectedComponentsRunMixin:
         components = np.where(np.bincount(seg.flatten()) != 0)[0]
         if components[0] == 0:
             components = components[1:]
-        volumes = [[ tgt.volume.to_dictionary(), 
+        volumes = [[ self.volume.to_dictionary(), 
                      [[_, _] for _ in components]]]
-        locations = [[ tgt.volume.to_dictionary(),
-                      tgt.dataset_location.to_dictionary()]]
+        locations = [[ self.volume.to_dictionary(), self.loading_plan]]
         d = dict(count=len(components),
                  volumes=volumes,
                  locations=locations,
@@ -631,7 +630,7 @@ class VolumeRelabelingRunMixin:
         #
         # Read the local->global mappings
         #
-        with open(self.relabeling_Location, "r") as fd:
+        with open(self.relabeling_location, "r") as fd:
             mappings = json.load(fd)
         #
         # Make a dictionary of all the candidate volumes

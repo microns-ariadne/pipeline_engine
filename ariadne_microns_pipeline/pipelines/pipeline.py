@@ -104,9 +104,6 @@ ALL_CONNECTED_COMPONENTS_JSON = "connected-components.json"
 '''Signals that the channel isn't available (e.g. no ground truth)'''
 NO_CHANNEL = "no-channel"
 
-'''Prepended to stitched versions of dataset names for nplearn'''
-NPLEARN_PREFIX = "nplearn-"
-
 class PipelineTaskMixin:
     '''The Ariadne-Microns pipeline'''
     
@@ -560,6 +557,8 @@ class PipelineTaskMixin:
                                "The markup for synapse ground-truth")
         self.register_datatype(SYN_SEG_GT_DATASET, UINT32,
                                "The ground-truth synapse segmentation")
+        self.register_datatype(FINAL_SEGMENTATION, UINT32,
+                               "The stitched global segmentation")
         
         
     def compute_extents(self):
@@ -1112,7 +1111,7 @@ class PipelineTaskMixin:
             self.all_connected_components_task = \
                 self.factory.gen_fake_all_connected_components_task(
                     volume=volume,
-                    dataset_name=NP_DATASET,
+                    dataset_name=SEG_DATASET,
                     output_location=self.get_connectivity_graph_location())
             self.tasks.append(self.all_connected_components_task)
             return
@@ -1538,44 +1537,42 @@ class PipelineTaskMixin:
         #
         self.np_tasks = self.segmentation_tasks
         self.generate_connectivity_graph_tasks()
-        inputs = [dict(volume=_.output().volume,
-                       location=_.output().dataset_location)
-                  for _ in self.segmentation_tasks.flatten()]
-        output_location = self.get_dataset_location(self.volume,
-                                                    NPLEARN_PREFIX+SEG_DATASET)
+        inputs = []
+        for zi in range(self.n_z):
+            for yi in range(self.n_y):
+                for xi in range(self.n_x):
+                    inputs.append(
+                        dict(volume=self.get_block_volume(xi, yi, zi),
+                             task=self.np_tasks[zi, yi, xi]))
         self.volume_relabeling_task = \
             self.factory.gen_volume_relabeling_task(
+                dataset_name=SEG_DATASET,
                 input_volumes=inputs,
                 relabeling_location=
                 self.all_connected_components_task.output_location,
                 output_volume=self.volume,
-                output_location=output_location)
-        map(self.volume_relabeling_task.set_requirement,
-            self.segmentation_tasks.flatten())
+                output_dataset_name=FINAL_SEGMENTATION)
         self.volume_relabeling_task.set_requirement(
             self.all_connected_components_task)
+        self.tasks.append(self.volume_relabeling_task)
+        self.datasets[self.volume_relabeling_task.output().path] = \
+            self.volume_relabeling_task
     
     def generate_nplearn_task(self):
         '''Make the task that trains neuroproof'''
-        prob_location = self.nplearn_block_tasks[0].output().dataset_location
-        seg_location = self.volume_relabeling_task.output().dataset_location
-        gt_location = self.ground_truth_task.output().dataset_location
         self.neuroproof_learn_task = \
             self.factory.gen_neuroproof_learn_task(
                 volume=self.volume,
-                prob_location=prob_location,
-                seg_location=seg_location,
-                gt_location=gt_location,
+                prob_dataset_name=MEMBRANE_DATASET,
+                seg_dataset_name=FINAL_SEGMENTATION,
+                gt_dataset_name=GT_DATASET,
                 output_location=self.neuroproof_classifier_path,
                 strategy=self.nplearn_strategy,
                 num_iterations=self.nplearn_num_iterations,
                 prune_feature=self.prune_feature,
                 use_mito=self.use_mito) 
         self.neuroproof_learn_task.cpu_count = self.nplearn_cpu_count
-        map(self.neuroproof_learn_task.set_requirement,
-            self.nplearn_block_tasks)
-        self.neuroproof_learn_task.set_requirement(self.volume_relabeling_task)
-        self.neuroproof_learn_task.set_requirement(self.ground_truth_task)
+        self.tasks.append(self.neuroproof_learn_task)
     
     def compute_requirements(self):
         '''Compute the requirements for this task'''
@@ -1746,8 +1743,6 @@ class PipelineTaskMixin:
                     self.requirements.append(self.all_connected_components_task)
                 if self.wants_synapse_statistics:
                     self.requirements.append(self.synapse_statistics_task)
-                self.requirements += \
-                    self.synapse_connectivity_tasks.flatten().tolist()
                 #
                 # (maybe) generate the statistics tasks
                 #

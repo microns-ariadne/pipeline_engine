@@ -889,7 +889,6 @@ class AMTaskFactory(object):
         gt_loading_plan, glp = self.loading_plan(volume, gt_dataset_name)
         
         return plp ( slp ( glp ( NeuroproofLearnTask(
-            volume=volume,
             prob_loading_plan_path=prob_loading_plan,
             seg_loading_plan_path=seg_loading_plan,
             gt_loading_plan_path=gt_loading_plan,
@@ -1007,14 +1006,13 @@ class AMTaskFactory(object):
             loading_plan, lp = self.loading_plan(volume, dataset_name, task)
             loading_plans.append(loading_plan)
             lp_objects.append(lp)
-        storage_plan, sp = self.storage_plan(volume, output_dataset_name)
-        task = sp | VolumeRelabelingTask(
+        storage_plan, sp = self.storage_plan(output_volume, output_dataset_name)
+        task = sp ( VolumeRelabelingTask(
             input_volumes=loading_plans,
             relabeling_location=relabeling_location,
-            output_volume=output_volume,
-            storage_plan=storage_plan)
+            storage_plan=storage_plan))
         for lp in lp_objects:
-            lp | task
+            lp(task)
         return task
     
     #########################

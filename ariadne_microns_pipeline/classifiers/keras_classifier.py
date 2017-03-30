@@ -92,6 +92,8 @@ class KerasClassifier(AbstractPixelClassifier):
     def __bind_cuda(cls):
         if cls.has_bound_cuda:
             return
+        if "THEANO_FLAGS" in os.environ:
+            return
         if "MICRONS_IPC_WORKER_GPU" in os.environ:
             device = int(os.environ["MICRONS_IPC_WORKER_GPU"])
             os.environ["THEANO_FLAGS"]="device=gpu%d" % device

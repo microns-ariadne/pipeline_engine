@@ -41,7 +41,8 @@ class NeuroproofLearnTaskMixin:
     def input(self):
         loading_plans = [self.prob_loading_plan_path,
                          self.seg_loading_plan_path,
-                         self.gt_loading_plan_path] + self.additional_locations
+                         self.gt_loading_plan_path] + \
+            list(self.additional_locations)
         for loading_plan in loading_plans:
             for tgt in DestVolumeReader(loading_plan).get_source_targets():
                 yield tgt
