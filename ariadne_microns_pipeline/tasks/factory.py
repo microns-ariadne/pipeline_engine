@@ -689,7 +689,7 @@ class AMTaskFactory(object):
             z_dilation=z_dilation,
             min_contact=min_contact)))
         for additional_lp in  additional_lps:
-            task = additional_lp | task
+            task = additional_lp(task)
         return task
     
     def gen_aggregate_connect_synapses_task(
