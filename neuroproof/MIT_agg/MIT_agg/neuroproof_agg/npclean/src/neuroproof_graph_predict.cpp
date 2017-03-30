@@ -289,8 +289,6 @@ template <typename T> void write_storage_plan(
     Json::UInt x0 = d["x"].asUInt();
     Json::UInt y0 = d["y"].asUInt();
     Json::UInt z0 = d["z"].asUInt();
-    volumedata.reshape(vigra::MultiArrayShape<3>::type(
-        width, height, depth));
     
     Json::Value blocks = d["blocks"];
     cilk_for (int i=0; i < blocks.size(); i++) {
@@ -305,19 +303,29 @@ template <typename T> void write_storage_plan(
 	Json::UInt svy1 = svy0 + height;
 	Json::UInt svz1 = svz0 + depth;
 	Json::Value location = blocks[i][1];
+	cout << "Writing " << location << endl;
+	cout << "  x=" << svx0 << ":" << svx1;
+	cout << "  y=" << svy0 << ":" << svy1;
+	cout << "  z=" << svz0 << ":" << svz1;
 	vigra::MultiArrayView<3, T> subarray = volumedata.subarray(
 	    vigra::Shape3(svx0 - x0, svy0 - y0, svz0 - z0),
 	    vigra::Shape3(svx1 - x0, svy1 - y0, svz1 - z0));
+	
 	vigra::MultiArray<3, T> output_volume;
 	output_volume.reshape(vigra::Shape3(width, height, depth));
 	for (int x=0; x < width; ++x) {
 	    for (int y=0; y < height; ++y) {
 		for (int z=0; z < depth; ++z) {
-		    output_volume(x, y, z) = mapping[subarray(x, y, z)];
+		    output_volume(x, y, z) = (unsigned char)(mapping[subarray(x, y, z)]);
 		}
 	    }
 	}
-	vigra::exportVolume(output_volume, location.asString());
+	vigra::VolumeExportInfo info(location.asString().c_str());
+	info.setFileType("MULTIPAGE");
+	/* This is a RLE. Other options are PACKBITS, DEFLATE and LZW */
+	info.setCompression("RLE");
+	info.setPixelType("UINT32");
+	vigra::exportVolume(output_volume, info);
     }
     std::cout << "Finished writing volume" << std::endl;
 }
@@ -371,14 +379,19 @@ void get_json_files(std::string path,
     } else {
 	std::cout << "Retrieving volumes via PngVolumeTargets" << endl;
     }
-    /* Probabilities dimensions are z, y, x */
-    MultiArray<3, float>::difference_type transposition(2, 1, 0);
     for (int i=0; i < probabilities.size(); i++) {
 	Json::Value probability = probabilities[i];
 	VolumeProbPtr tmp;
 	if (use_loading_plans) {
 	    tmp = VolumeProb::create_volume();
 	    read_loading_plan(probability.asString(), *tmp, false);
+	    for (int z=0; z<(*tmp).shape(2); z++) {
+		for (int y=0; y<(*tmp).shape(1); y++) {
+		    for (int x=0; x<(*tmp).shape(0); x++) {
+			(*tmp)(x, y, z) = (*tmp)(x, y, z) / 255.0;
+		    }
+		}
+	    }
 	} else {
 	    std::vector<std::string> file_names;
 	    for (int j=0; j < probability.size(); j++) {
@@ -487,7 +500,7 @@ void store_segmentation(std::string path,
 		    rgb[2] = val >> 16;
 		}
 	    }
-    	    cv::imwrite(output.asString().c_str(), plane);
+    	    cv::imwrite(output[i].asString().c_str(), plane);
 	}
     }
 
@@ -568,7 +581,11 @@ void run_prediction(PredictOptions& options)
     feature_manager->set_classifier(eclfr);   	 
 
     // create stack to hold segmentation state
-    cout << "Create BioStack" << endl;
+    cout << "Create BioStack with labels volume:"
+         << " x=" << (*initial_labels).shape(0)
+	 << " y=" << (*initial_labels).shape(1)
+	 << " z=" << (*initial_labels).shape(2)
+	 << endl;
     BioStack stack(initial_labels); 
     cout << "Set BioStack's feature manager" << endl;
     stack.set_feature_manager(feature_manager);
@@ -576,7 +593,7 @@ void run_prediction(PredictOptions& options)
     stack.set_prob_list(prob_list);
 
     start = boost::posix_time::microsec_clock::local_time();
-    cout<<"Building RAG ...";
+    cout<<"Building RAG ..." << endl;
     stack.build_rag(false);
     cout<<"done with "<< stack.get_num_labels()<< " nodes\n";
     now = boost::posix_time::microsec_clock::local_time();

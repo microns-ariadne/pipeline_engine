@@ -152,7 +152,19 @@ class NeuroproofRunMixin:
             #
             # Finish the output volume
             #
-            output_target.finish_imwrite(np.dtype(np.uint32))
+            # We collect some summary statistics here that are added to
+            # the JSON file.
+            #
+            data = output_target.imread()
+            d = json.load(open(output_target.storage_plan_path))
+            areas = np.bincount(data.ravel())
+            areas[0] = 0
+            labels = np.where(areas > 0)[0]
+            areas = areas[labels]
+            d["areas"] = areas.tolist()
+            d["labels"] = labels.tolist()
+            with output_target.open("w") as fd:
+                json.dump(d, fd)
         finally:
             os.remove(json_path)
 

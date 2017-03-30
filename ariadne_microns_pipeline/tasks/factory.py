@@ -500,7 +500,6 @@ class AMTaskFactory(object):
         segmentation_loading_plan_path, lp = self.loading_plan(
             volume, segmentation_dataset_name, src_task)
         return lp ( SkeletonizeTask(
-            volume=volume,
             segmentation_loading_plan_path=segmentation_loading_plan_path,
             skeleton_location=skeleton_location,
             xy_nm=xy_nm, z_nm=z_nm, 
@@ -945,14 +944,14 @@ class AMTaskFactory(object):
             overlap_volume, dataset_name, src_task2)
         full2, f2lp = self.loading_plan(volume2, dataset_name, src_task2)
         
-        return c1lp | f1lp | c2lp | f2lp | ConnectedComponentsTask(
+        return c1lp( f1lp( c2lp( f2lp( ConnectedComponentsTask(
             volume1=volume1,
             cutout_loading_plan1_path=cutout1,
             segmentation_loading_plan1_path=full1,
             volume2=volume2,
             cutout_loading_plan2_path=cutout2,
             segmentation_loading_plan2_path=full2,
-            output_location=output_location)
+            output_location=output_location)))))
     
     def gen_all_connected_components_task(
         self, input_locations, output_location):

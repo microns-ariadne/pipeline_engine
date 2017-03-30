@@ -9,6 +9,49 @@ import time
 from ..parameters import Volume, EMPTY_DATASET_ID, EMPTY_LOADING_PLAN_ID
 from ..volumedb import VolumeDB
 
+# Compression = 0
+#    Time per call = 1.04
+#    Time per gVoxel = 31.04
+#    Compression = 400.04 %
+# Compression = 1
+#    Time per call = 1.09
+#    Time per gVoxel = 32.40
+#    Compression = 11.97 %
+# Compression = 2
+#    Time per call = 1.06
+#    Time per gVoxel = 31.69
+#    Compression = 10.96 %
+# Compression = 3
+#   Time per call = 1.06
+#    Time per gVoxel = 31.50
+#    Compression = 10.07 %
+# Compression = 4
+#    Time per call = 2.72
+#    Time per gVoxel = 81.01
+#    Compression = 8.80 %
+# Compression = 5
+#    Time per call = 2.78
+#    Time per gVoxel = 82.87
+#    Compression = 8.04 %
+# Compression = 6
+#    Time per call = 3.16
+#    Time per gVoxel = 93.96
+#    Compression = 6.13 %
+# Compression = 7
+#    Time per call = 3.30
+#    Time per gVoxel = 98.30
+#    Compression = 6.04 %
+# Compression = 8
+#    Time per call = 5.02
+#    Time per gVoxel = 149.50
+#    Compression = 5.47 %
+# Compression = 9
+#    Time per call = 7.96
+#    Time per gVoxel = 237.01
+#    Compression = 5.38 %
+'''The compression factor for the tiff file.'''
+COMPRESSION = 3
+
 def write_storage_plan(volume_db, dataset_id):
     '''Write the plan for storing a dataset to disk
     
@@ -20,7 +63,9 @@ def write_storage_plan(volume_db, dataset_id):
     '''
     assert isinstance(volume_db, VolumeDB)
     
-    path = os.path.splitext(volume_db.get_dataset_path(dataset_id))[0] + ".plan"
+    done_path = volume_db.get_dataset_path(dataset_id)
+    path = os.path.splitext(done_path)[0] + ".plan"
+    
     blocks = []
     for location, volume \
         in volume_db.get_subvolume_locations_by_dataset_id(dataset_id):
@@ -73,7 +118,7 @@ class SrcVolumeTarget(luigi.LocalTarget):
     
     '''
     
-    def __init__(self, storage_plan_path, compression=0):
+    def __init__(self, storage_plan_path, compression=COMPRESSION):
         '''Initialize the target with the pathnames and file name pattern
 
         :param storage_plan: the path to the storage plan file, e.g. as
@@ -113,6 +158,13 @@ class SrcVolumeTarget(luigi.LocalTarget):
             tif_dir = os.path.dirname(tif_path)
             if not os.path.isdir(tif_dir):
                 os.makedirs(tif_dir)
+    
+    def finish_imwrite(self):
+        '''Just copy the storage plan to the output done file destination'''
+        with open(self.storage_plan_path, "r") as fd:
+            d = json.load(fd)
+            with self.open("w") as fd:
+                json.dump(d, fd)        
     
     def imwrite(self, data):
         '''Write the data blocks to disk + the done file
@@ -174,6 +226,49 @@ class SrcVolumeTarget(luigi.LocalTarget):
                                        time.time() - t0)
         with self.open("w") as fd:
             json.dump(d, fd)
+    
+    def imread(self):
+        '''Read the volume after it's written
+        
+        This is needed by neuroproof so that the Python can read the
+        Neuroproof output.
+        '''
+        t0 = time.time()
+        with open(self.storage_plan_path, "r") as fd:
+            d = json.load(fd)
+        depth, height, width = d["dimensions"]
+        x0 = d["x"]
+        x1 = x0 + width
+        y0 = d["y"]
+        y1 = y0 + height
+        z0 = d["z"]
+        z1 = z0 + depth
+        datatype = getattr(np, d["datatype"])
+        dataset_name = d["dataset_name"]
+        dataset_id = d["dataset_id"]
+        
+        rh_logger.logger.report_event(
+            "Reading %s: %d:%d, %d:%d, %d:%d" %
+            (dataset_name, x0, x1, y0, y1, z0, z1))
+        data = np.zeros((z1-z0, y1-y0, x1-x0), datatype)
+        
+        for subvolume, tif_path in d["blocks"]:
+            svolume = Volume(**subvolume)
+            sx0 = svolume.x
+            sx1 = svolume.x1
+            sy0 = svolume.y
+            sy1 = svolume.y1
+            sz0 = svolume.z
+            sz1 = svolume.z1
+            tif_dir = os.path.dirname(tif_path)
+            block = tifffile.imread(tif_path)
+            data[sz0 - z0: sz1 - z0,
+                 sy0 - y0: sy1 - y0,
+                 sx0 - x0: sx1 - x0] = block
+        rh_logger.logger.report_metric("Dataset load time (sec)",
+                                       time.time() - t0)
+        return data
+        
 
 def write_loading_plan(loading_plan_path, volume_db, loading_plan_id):
     '''Write a loading plan to a file

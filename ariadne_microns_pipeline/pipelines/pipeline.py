@@ -300,6 +300,9 @@ class PipelineTaskMixin:
         description="Remove skeleton leaves if they are less than this factor "
         "of their parent's volume",
         default=.5)
+    skeleton_cores = luigi.IntParameter(
+        default=4,
+        description="Number of cores per skeleton task")
     wants_resegmentation = luigi.BoolParameter(
         description="Convert the 3D segmentation to 2D before Neuroproof",
         default=False)
@@ -458,10 +461,6 @@ class PipelineTaskMixin:
         of files in any one directory.
         '''
         return os.path.join(self.temp_dir,
-                            self.experiment,
-                            self.sample,
-                            self.dataset,
-                            self.channel,
                             str(x),
                             str(y),
                             str(z))
@@ -1052,25 +1051,28 @@ class PipelineTaskMixin:
         if self.wants_skeletonization:
             self.skeletonize_tasks = np.zeros((self.n_z, self.n_y, self.n_x),
                                               object)
+            #
+            # TODO - operate on the stitched segmentation
+            #
             for zi in range(self.n_z):
                 for yi in range(self.n_y):
                     for xi in range(self.n_x):
                         ntask = self.np_tasks[zi, yi, xi]
-                        volume = ntask.volume
-                        seg_location = ntask.output_seg_location
                         skel_root = self.get_dir(self.xs[xi],
                                                  self.ys[yi],
                                                  self.zs[zi])
+                        volume = self.get_block_volume(xi, yi, zi)
                         skel_location = os.path.join(
                             skel_root, SKEL_DIR_NAME)
                         stask = self.factory.gen_skeletonize_task(
                             volume=volume,
-                            segmentation_location=seg_location,
+                            segmentation_dataset_name=NP_DATASET,
                             skeleton_location=skel_location,
                             xy_nm=self.xy_nm,
                             z_nm=self.z_nm,
                             decimation_factor=self.skeleton_decimation_factor)
-                        stask.set_requirement(ntask)
+                        stask.cpu_count = self.skeleton_cores
+                        self.tasks.append(stask)
                         self.skeletonize_tasks[zi, yi, xi] = stask
     
     def generate_connectivity_graph_tasks(self):
@@ -1134,7 +1136,9 @@ class PipelineTaskMixin:
                 for xi in range(self.n_x-1):
                     left_task = self.np_tasks[zi, yi, xi]
                     left_tgt = left_task.output()
+                    left_tgt_volume = self.get_block_volume(xi, yi, zi)
                     right_task = self.np_tasks[zi, yi, xi+1]
+                    right_tgt_volume = self.get_block_volume(xi+1, yi, zi)
                     right_tgt = right_task.output()
                     #
                     # The overlap is at the average of the x end of the
@@ -1143,21 +1147,21 @@ class PipelineTaskMixin:
                     x = self.x_grid[xi+1]
                     overlap_volume = Volume(
                         x-self.halo_size_xy,
-                        left_tgt.volume.y,
-                        left_tgt.volume.z,
+                        left_tgt_volume.y,
+                        left_tgt_volume.z,
                         self.halo_size_xy * 2 + 1, 
-                        left_tgt.volume.height,
-                        left_tgt.volume.depth)
+                        left_tgt_volume.height,
+                        left_tgt_volume.depth)
                     filename = CONNECTED_COMPONENTS_PATTERN.format(
                         direction="x")
                     output_location = os.path.join(
-                            os.dirname(left_tgt.output().path), filename)
+                            os.path.dirname(left_tgt.path), filename)
                     task = self.factory.gen_connected_components_task(
                         dataset_name=NP_DATASET,
-                        volume1=left_tgt.volume,
+                        volume1=left_tgt_volume,
                         src_task1=left_task,
-                        volume2=right_tgt.volume,
-                        src_task_2=right_task,
+                        volume2=right_tgt_volume,
+                        src_task2=right_task,
                         overlap_volume=overlap_volume,
                         output_location=output_location)
                     self.tasks.append(task)
@@ -1174,26 +1178,28 @@ class PipelineTaskMixin:
                 for xi in range(self.n_x):
                     left_task = self.np_tasks[zi, yi, xi]
                     left_tgt = left_task.output()
+                    left_tgt_volume = self.get_block_volume(xi, yi, zi)
                     right_task = self.np_tasks[zi, yi+1, xi]
                     right_tgt = right_task.output()
+                    right_tgt_volume = self.get_block_volume(xi, yi+1, zi)
                     y = self.y_grid[yi+1]
                     overlap_volume = Volume(
-                        left_tgt.volume.x,
+                        left_tgt_volume.x,
                         y - self.halo_size_xy,
-                        left_tgt.volume.z,
-                        left_tgt.volume.width, 
+                        left_tgt_volume.z,
+                        left_tgt_volume.width, 
                         self.halo_size_xy * 2 + 1, 
-                        left_tgt.volume.depth)
+                        left_tgt_volume.depth)
                     filename = CONNECTED_COMPONENTS_PATTERN.format(
                             direction="y")
                     output_location = os.path.join(
-                        os.path.dirname(left_tgt.output().path), filename)
+                        os.path.dirname(left_tgt.path), filename)
                     task = self.factory.gen_connected_components_task(
                         dataset_name=NP_DATASET,
-                        volume1=left_tgt.volume,
+                        volume1=left_tgt_volume,
                         src_task1=left_task,
-                        volume2=right_tgt.volume,
-                        src_task_2=right_task,
+                        volume2=right_tgt_volume,
+                        src_task2=right_task,
                         overlap_volume=overlap_volume,
                         output_location=output_location)
                     self.tasks.append(task)
@@ -1210,24 +1216,27 @@ class PipelineTaskMixin:
                 for xi in range(self.n_x):
                     left_task = self.np_tasks[zi, yi, xi]
                     left_tgt = left_task.output()
+                    left_tgt_volume = self.get_block_volume(xi, yi, zi)
                     right_task = self.np_tasks[zi+1, yi, xi]
                     right_tgt = right_task.output()
+                    right_tgt_volume = self.get_block_volume(xi, yi, zi+1)
                     z = self.z_grid[zi+1]
                     overlap_volume = Volume(
-                        left_tgt.volume.x,
-                        left_tgt.volume.y,
+                        left_tgt_volume.x,
+                        left_tgt_volume.y,
                         z - self.halo_size_z,
-                        left_tgt.volume.width, 
-                        left_tgt.volume.height, 
+                        left_tgt_volume.width, 
+                        left_tgt_volume.height, 
                         self.halo_size_z * 2 + 1)
                     filename = CONNECTED_COMPONENTS_PATTERN.format(
                             direction="z")
                     output_location = os.path.join(
-                        os.path.dirname(left_tgt.output().path), filename)
+                        os.path.dirname(left_tgt.path), filename)
                     task = self.factory.gen_connected_components_task(
-                        volume1=left_tgt.volume,
+                        dataset_name=NP_DATASET,
+                        volume1=left_tgt_volume,
                         src_task1=left_task,
-                        volume2=right_tgt.volume,
+                        volume2=right_tgt_volume,
                         src_task2=right_task,
                         overlap_volume=overlap_volume,
                         output_location=output_location)
@@ -1500,19 +1509,9 @@ class PipelineTaskMixin:
         '''Generate the task that builds the HDF5 file with the segmentation
         
         '''
-        input_volumes = []
-        for task in self.np_tasks.flatten():
-            target = task.output()
-            input_volumes.append(
-                dict(volume=target.volume,
-                     location=target.dataset_location))
-        location = DatasetLocation(
-            [self.stitched_segmentation_location],
-            FINAL_SEGMENTATION,
-            self.get_pattern(FINAL_SEGMENTATION))
+        location = self.stitched_segmentation_location
         self.stitched_segmentation_task = \
             self.factory.gen_stitch_segmentation_task(
-                input_volumes=input_volumes,
                 connected_components_location=
                     self.all_connected_components_task.output().path,
                 output_volume=self.volume,
@@ -1522,13 +1521,6 @@ class PipelineTaskMixin:
         self.stitched_segmentation_task.z_padding = self.np_z_pad
         self.stitched_segmentation_task.set_requirement(
             self.all_connected_components_task)
-        #
-        # These are upstream dependencies of AllConnectedComponentsTask,
-        # but add them here anyway to make sure Luigi knows their outputs
-        # are needed.
-        #
-        for task in self.np_tasks.flatten():
-            self.stitched_segmentation_task.set_requirement(task)
         self.tasks.append(self.stitched_segmentation_task)
     
     ########################################################

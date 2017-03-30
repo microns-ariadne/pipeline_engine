@@ -140,21 +140,17 @@ class ConnectedComponentsRunMixin:
                            height=volume.height,
                            depth=volume.depth)
         #
-        # Compute the areas and find the labels with associated voxels
+        # Get the statistics from the source target.
         #
-        areas = np.bincount(seg1.ravel())
-        unique = np.where(areas)[0]
-        unique = unique[unique != 0]
-        areas = areas[unique]
-        d["1"]["labels"] = unique.tolist()
-        d["1"]["areas"] = areas.tolist()
-        d["1"]["location"] = self.segmentation_loading_plan1_path
-        areas = np.bincount(seg2.ravel())
-        unique = np.where(areas)[0]
-        unique = unique[unique != 0]
-        d["2"]["labels"] = unique.tolist()
-        d["2"]["areas"] = areas.tolist()
-        d["2"]["location"] = self.segmentation_loading_plan2_path
+        for i, src_tgt, location in zip(
+            ["1", "2"], 
+            self.input(),
+            [self.segmentation_loading_plan1_path,
+             self.segmentation_loading_plan2_path]):
+            src_json = json.load(open(src_tgt.path))
+            d[i]["labels"] = src_json["labels"]
+            d[i]["areas"] = src_json["areas"]
+            d[i]["location"] = location
         with self.output().open("w") as fd:
             json.dump(d, fd)
 

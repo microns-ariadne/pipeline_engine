@@ -39,6 +39,9 @@ class StitchSegmentationTaskMixin:
 
 class StitchSegmentationRunMixin:
     
+    dataset_name = luigi.Parameter(
+        default="stack",
+        description="The name for the dataset within the HDF5 file")
     xy_chunking = luigi.IntParameter(
         default=2048,
         description="The # of voxels in an HDF5 chunk in the x and y direction")
@@ -75,8 +78,10 @@ class StitchSegmentationRunMixin:
         with output_tgt.open("w") as fd:
             worker = multiprocessing.Process(
                 target = writer,
-                args = (queue, fd.name, output_tgt.dataset_path,
-                    (output_tgt.depth, output_tgt.height, output_tgt.width),
+                args = (queue, fd.name, self.dataset_name,
+                    (self.output_volume.depth, 
+                     self.output_volume.height, 
+                     self.output_volume.width),
                     kwds, result))
             worker.start()
             x0 = self.output_volume.x
@@ -154,7 +159,6 @@ class StitchSegmentationRunMixin:
             queue.join_thread()
             if result.value < 0:
                 raise Exception("Writer process failed. See log for details")
-            output_tgt.finish_volume()
             worker.join()
 
 def writer(queue, hdf_file, dataset_name, shape, create_dataset_kwds, result):

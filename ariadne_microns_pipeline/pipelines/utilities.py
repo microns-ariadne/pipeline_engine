@@ -22,22 +22,8 @@ class PipelineRunReportMixin:
     '''
     
     pipeline_report_location = luigi.Parameter(
-        default="/dev/null",
         description="Location for the timing report .csv")
 
-    def complete(self):
-        if self.pipeline_report_location == "/dev/null":
-            return all(map(lambda _:_.complete(), self.requires()))
-        else:
-            result = self.output().exists()
-            if result:
-                if not hasattr(rh_logger.logger, "logger"):
-                    rh_logger.logger.start_process("Luigi", "Starting logging")
-                rh_logger.logger.report_event(
-                    "Pipeline report file %s exists" % 
-                    self.pipeline_report_location)
-            return result
-        
     def output(self):
         return luigi.LocalTarget(self.pipeline_report_location)
     
@@ -62,8 +48,7 @@ class PipelineRunReportMixin:
             tasks[task].append(delta.total_seconds())
         task_names = sorted(tasks.keys())
         timings = map(lambda k:tasks[k], task_names)
-        if self.pipeline_report_location != "/dev/null":
-            self.write_pdf_report(task_names, timings)
+        self.write_pdf_report(task_names, timings)
             
         with self.output().open("w") as fd:
             writer = csv.writer(fd)

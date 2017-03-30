@@ -112,7 +112,7 @@ class ConnectSynapsesRunMixin:
         #
         neuron_target = DestVolumeReader(self.neuron_seg_load_plan_path)
         synapse_target = DestVolumeReader(self.synapse_seg_load_plan_path)
-        if self.transmitter_probability_map_location == EMPTY_LOCATION:
+        if self.transmitter_probability_map_load_plan_path == EMPTY_LOCATION:
             transmitter_target = None
             receptor_target = None
         else:
@@ -140,9 +140,9 @@ class ConnectSynapsesRunMixin:
         #
         if synapse_centers.shape[0] != 3:
             synapse_centers=synapse_centers.transpose()
-        synapse_centers[0] += self.volume.z
-        synapse_centers[1] += self.volume.y
-        synapse_centers[2] += self.volume.x
+        synapse_centers[0] += neuron_target.volume.z
+        synapse_centers[1] += neuron_target.volume.y
+        synapse_centers[2] += neuron_target.volume.x
         #
         # Use a rectangular structuring element for speed.
         #
@@ -283,14 +283,14 @@ class ConnectSynapsesRunMixin:
                 z=zc.tolist())
         else:
             neuron_1 = neuron_2 = synapses = np.zeros(0, int)
-            score_1, score_2 = np.zeros(0)
+            score_1 = score_2 = np.zeros(0)
             synapse_center_dict = dict(x=[], y=[], z=[])
-        volume = dict(x=self.volume.x,
-                      y=self.volume.y,
-                      z=self.volume.z,
-                      width=self.volume.width,
-                      height=self.volume.height,
-                      depth=self.volume.depth)
+        volume = dict(x=neuron_target.volume.x,
+                      y=neuron_target.volume.y,
+                      z=neuron_target.volume.z,
+                      width=neuron_target.volume.width,
+                      height=neuron_target.volume.height,
+                      depth=neuron_target.volume.depth)
         result = dict(volume=volume,
                       neuron_1=neuron_1.tolist(),
                       neuron_2=neuron_2.tolist(),

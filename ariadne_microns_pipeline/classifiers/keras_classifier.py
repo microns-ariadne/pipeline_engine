@@ -34,7 +34,10 @@ class KerasClassifier(AbstractPixelClassifier):
                  downsample_factor=1.0,
                  xy_trim_size=0,
                  z_trim_size=0,
-                 classes = ["membrane"]):
+                 classes = ["membrane"],
+                 mirrored=False,
+                 stretch_output=False,
+                 invert=False):
         '''Initialize from a model and weights
         
         :param model_path: path to JSON model file suitable for 
@@ -54,6 +57,11 @@ class KerasClassifier(AbstractPixelClassifier):
         :param z_trim_size: amount to trim from edge of segmentation in the Z
                            direction
         :param classes: an array of class names to be output
+        :param mirrored: If True, there is no external padding and the padded
+        regions of the input are filled with a mirroring of the input
+        :param stretch_output: if True, stretch the output intensity range
+        to between 0 and 255.
+        :param invert: If True, invert the probability map outputs
         '''
         self.xypad_size = xypad_size
         self.zpad_size = zpad_size
@@ -66,6 +74,9 @@ class KerasClassifier(AbstractPixelClassifier):
         self.xy_trim_size = xy_trim_size
         self.z_trim_size = z_trim_size
         self.classes = classes
+        self.mirrored = mirrored
+        self.stretch_output=stretch_output
+        self.invert = invert
 
     @staticmethod
     def __keras_backend():
@@ -80,6 +91,10 @@ class KerasClassifier(AbstractPixelClassifier):
     @classmethod
     def __bind_cuda(cls):
         if cls.has_bound_cuda:
+            return
+        if "MICRONS_IPC_WORKER_GPU" in os.environ:
+            device = int(os.environ["MICRONS_IPC_WORKER_GPU"])
+            os.environ["THEANO_FLAGS"]="device=gpu%d" % device
             return
         import keras
         if KerasClassifier.__keras_backend() != 'theano':
@@ -177,7 +192,10 @@ class KerasClassifier(AbstractPixelClassifier):
                     downsample_factor=self.downsample_factor,
                     xy_trim_size=self.xy_trim_size,
                     z_trim_size=self.z_trim_size,
-                    classes=self.classes)
+                    classes=self.classes,
+                    mirrored=self.mirrored,
+                    stretch_output=self.stretch_output,
+                    invert=self.invert)
     
     def __setstate__(self, state):
         '''Restore the state from the pickle'''
@@ -207,6 +225,18 @@ class KerasClassifier(AbstractPixelClassifier):
             self.classes = state["classes"]
         else:
             self.classes = ["membrane"]
+        if "mirrored" in state:
+            self.mirrored = state["mirrored"]
+        else:
+            self.mirrored = False
+        if "stretch_output" in state:
+            self.stretch_output = state["stretch_output"]
+        else:
+            self.stretch_output = False
+        if "invert" in state:
+            self.invert = state["invert"]
+        else:
+            self.invert = False
     
     def get_class_names(self):
         return self.classes
@@ -215,15 +245,21 @@ class KerasClassifier(AbstractPixelClassifier):
         return self.xypad_size + self.xy_trim_size
     
     def get_x_pad(self):
+        if self.mirrored:
+            return 0
         return self.get_x_pad_ds() * self.downsample_factor
     
     def get_y_pad_ds(self):
         return self.xypad_size + self.xy_trim_size
     
     def get_y_pad(self):
+        if self.mirrored:
+            return 0
         return self.get_y_pad_ds() * self.downsample_factor
     
     def get_z_pad(self):
+        if self.mirrored:
+            return 0
         return self.zpad_size + self.z_trim_size
     
     def run_via_ipc(self):
@@ -300,19 +336,26 @@ class KerasClassifier(AbstractPixelClassifier):
         if self.downsample_factor == 1 and \
            image.shape[1] >= self.block_size[1] and \
            image.shape[2] >= self.block_size[2]:
-            return image
-        image_out = []
-        for plane in image:
-            plane = zoom(plane, 1.0 / self.downsample_factor)
-            if plane.shape[0] < self.block_size[1] or \
-               plane.shape[1] < self.block_size[2]:
-                xs = max(plane.shape[1], self.block_size[2])
-                ys = max(plane.shape[0], self.block_size[1])
-                tmp = np.zeros((ys, xs), plane.dtype)
-                tmp[:plane.shape[0], :plane.shape[1]] = plane
-                plane = tmp
-            image_out.append(plane)
-        return np.array(image_out)
+            image_out = image
+        else:
+            image_out = []
+            for plane in image:
+                plane = zoom(plane, 1.0 / self.downsample_factor)
+                if plane.shape[0] < self.block_size[1] or \
+                   plane.shape[1] < self.block_size[2]:
+                    xs = max(plane.shape[1], self.block_size[2])
+                    ys = max(plane.shape[0], self.block_size[1])
+                    tmp = np.zeros((ys, xs), plane.dtype)
+                    tmp[:plane.shape[0], :plane.shape[1]] = plane
+                    plane = tmp
+                image_out.append(plane)
+            image_out = np.array(image_out)
+        if self.mirrored:
+            #
+            # Pad and mirror
+            #
+            image_out = self.mirror_block(image_out)
+        return image_out
     
     def preprocessor(self, image):
         '''The preprocessor thread: run normalization and make blocks'''
@@ -322,6 +365,9 @@ class KerasClassifier(AbstractPixelClassifier):
         # the downsampled size.
         #
         image = self.downsample_and_pad_image(image)
+        logger.report_event(
+            "Image after downsampling and padding: %d, %d, %d" % 
+            (image.shape[0], image.shape[1], image.shape[2]))
         #
         # Coordinates:
         #
@@ -335,19 +381,23 @@ class KerasClassifier(AbstractPixelClassifier):
         # The last block ends at the edge of the image.
         #
         output_block_size = self.block_size - \
-            np.array([self.get_z_pad()*2, 
+            np.array([self.zpad_size*2, 
                       self.get_y_pad_ds()*2, 
                       self.get_x_pad_ds()*2])
+        xpad_ds = self.get_x_pad_ds()
+        ypad_ds = self.get_y_pad_ds()
+        input_block_size = self.block_size
+        
         z0 = self.get_z_pad()
-        z1 = image.shape[0] - self.get_z_pad()
+        z1 = image.shape[0] - self.zpad_size
         n_z = 1 + int((z1-z0 - 1) / output_block_size[0])
         zs = np.linspace(z0, z1, n_z+1).astype(int)
-        y0 = self.get_y_pad_ds()
-        y1 = image.shape[1] - self.get_y_pad_ds()
+        y0 = ypad_ds
+        y1 = image.shape[1] - ypad_ds
         n_y = 1 + int((y1-y0 - 1) / output_block_size[1])
         ys = np.linspace(y0, y1, n_y+1).astype(int)
-        x0 = self.get_x_pad_ds()
-        x1 = image.shape[2] - self.get_x_pad_ds()
+        x0 = xpad_ds
+        x1 = image.shape[2] - xpad_ds
         n_x = 1 + int((x1-x0 - 1) / output_block_size[2])
         xs = np.linspace(x0, x1, n_x+1).astype(int)
         t0 = time.time()
@@ -359,31 +409,34 @@ class KerasClassifier(AbstractPixelClassifier):
         #
         for zi in range(n_z):
             if zi == n_z-1:
-                z0a = image.shape[0] - self.block_size[0]
+                z0a = image.shape[0] - input_block_size[0]
                 z1a = image.shape[0]
             else:
                 z0a = zs[zi] - self.get_z_pad()
-                z1a = z0a + self.block_size[0]
+                z1a = z0a + input_block_size[0]
             z0b = z0a
-            z1b = z1a - self.get_z_pad() * 2
+            if self.mirrored:
+                z1b = z0b + output_block_size[0]
+            else:
+                z1b = z1a - self.get_z_pad() * 2
             for yi in range(n_y):
                 if yi == n_y - 1:
-                    y0a = max(0, image.shape[1] - self.block_size[1])
+                    y0a = max(0, image.shape[1] - input_block_size[1])
                     y1a = image.shape[1]
                 else:
-                    y0a = ys[yi] - self.get_y_pad_ds()
-                    y1a = y0a + self.block_size[1]
+                    y0a = ys[yi] - ypad_ds
+                    y1a = y0a + input_block_size[1]
                 y0b = y0a
-                y1b = y1a - self.get_y_pad_ds() * 2
+                y1b = y1a - ypad_ds * 2
                 for xi in range(n_x):
                     if xi == n_x-1:
-                        x0a = max(0, image.shape[2] - self.block_size[2])
+                        x0a = max(0, image.shape[2] - input_block_size[2])
                         x1a = image.shape[2]
                     else:
-                        x0a = xs[xi] - self.get_x_pad_ds()
-                        x1a = x0a + self.block_size[2]
+                        x0a = xs[xi] - xpad_ds
+                        x1a = x0a + input_block_size[2]
                     x0b = x0a
-                    x1b = x1a - self.get_x_pad_ds() * 2
+                    x1b = x1a - xpad_ds * 2
                     block = np.array([norm_img[z][y0a:y1a, x0a:x1a]
                                       for z in range(z0a, z1a)])
                     if block.shape[0] == 1:
@@ -398,9 +451,43 @@ class KerasClassifier(AbstractPixelClassifier):
                             block.shape = [1, 1] + list(block.shape)
                         else:
                             block.shape = [1] + list(block.shape) + [1]
+                    #
+                    # 
                     self.pred_queue.put((block, x0b, x1b, y0b, y1b, z0b, z1b))
         self.pred_queue.put([None] * 7)
     
+    def mirror_image_layer(self, img):
+        '''Mirror one x/y plane'''
+        cropSize = self.xypad_size
+        mirror_image = np.zeros((img.shape[0]+2*cropSize, img.shape[0]+2*cropSize))
+        length = img.shape[0]
+        mirror_image[cropSize:cropSize+length,cropSize:cropSize+length]=img
+        mirror_image[0:cropSize,0:cropSize]=np.rot90(img[0:cropSize,0:cropSize],2)
+        mirror_image[-cropSize:,0:cropSize]=np.rot90(img[-cropSize:,0:cropSize],2)
+        mirror_image[0:cropSize,-cropSize:]=np.rot90(img[0:cropSize,-cropSize:],2)
+        mirror_image[-cropSize:,-cropSize:]=np.rot90(img[-cropSize:,-cropSize:],2)
+    
+        mirror_image[0:cropSize,cropSize:cropSize+length]=np.flipud(img[0:cropSize,0:length])
+        mirror_image[cropSize:cropSize+length,0:cropSize]=np.fliplr(img[0:length,0:cropSize])
+        mirror_image[cropSize:cropSize+length,-cropSize:]=np.fliplr(img[0:length,-cropSize:])
+        mirror_image[-cropSize:,cropSize:cropSize+length]=np.flipud(img[-cropSize:,0:length])
+    
+        return mirror_image
+    
+    def mirror_block(self, block):
+        '''Mirror the padding regions of a block'''
+        bigblock = np.zeros((block.shape[0] + self.zpad_size * 2,
+                             block.shape[1] + self.xypad_size * 2,
+                             block.shape[2] + self.xypad_size * 2),
+                            block.dtype)
+
+        for z in range(self.zpad_size, self.zpad_size+block.shape[0]):
+            bigblock[z] = self.mirror_image_layer(block[z-self.zpad_size])
+        for z in range(self.zpad_size):
+            bigblock[z] = bigblock[self.zpad_size * 2 - z]
+            bigblock[-z-1] = bigblock[-self.zpad_size * 2 - 1 + z]
+        return bigblock
+        
     def prediction_processor(self):
         '''Run a thread to process predictions'''
         try:
@@ -461,8 +548,19 @@ class KerasClassifier(AbstractPixelClassifier):
                     y1b = self.out_image.shape[2]
                     pred = pred[:, :, :y1b - y0b, :]
                     logger.report_event("Fixing Y padding): " + str(pred.shape))
+                if self.stretch_output:
+                    for z in range(pred.shape[0]):
+                        pred_min = pred[z].min()
+                        pred_max = pred[z].max()
+                        pred[z] = (pred[z] - pred_min) / \
+                            (pred_max - pred_min + np.finfo(pred.dtype).eps)
+                else:
+                    pred = np.clip(pred, 0, 1)
+                if self.invert:
+                    logger.report_event("Inverting output")
+                    pred = 1 - pred
                 self.out_image[:, z0b:z1b, y0b:y1b, x0b:x1b] = \
-                    (np.clip(pred, 0, 1) * 255).astype(np.uint8)
+                    (pred * 255).astype(np.uint8)
         except:
             self.exception = sys.exc_value
             logger.report_exception()
