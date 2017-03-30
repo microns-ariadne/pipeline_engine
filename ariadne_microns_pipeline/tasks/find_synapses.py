@@ -23,7 +23,7 @@ class FindSynapsesTaskMixin:
     transmitter_map_loading_plan_path = luigi.Parameter(
         default = EMPTY_LOCATION,
         description = "The location of the synapse transmitter probability map")
-    receptor_map_loading_plan = luigi.Parameter(
+    receptor_map_loading_plan_path = luigi.Parameter(
         default = EMPTY_LOCATION,
         description = "The location of the synapse receptor probability map")
     neuron_segmentation_loading_plan_path = luigi.Parameter(
@@ -35,7 +35,7 @@ class FindSynapsesTaskMixin:
     def input(self):
         if self.wants_dual_probability_maps:
             loading_plans = [self.transmitter_map_loading_plan_path,
-                             self.receptor_map_loading_plan]
+                             self.receptor_map_loading_plan_path]
         else:
             loading_plans = [self.synapse_map_loading_plan_path]
         if self.erode_with_neurons:
