@@ -1767,10 +1767,18 @@ class PipelineTaskMixin:
     def ariadne_run(self):
         '''Write the optional index file'''
         if self.index_file_location != EMPTY_LOCATION:
-            for key in self.datasets:
-                self.datasets[key] = \
-                    [(dict(k), v) for k, v in self.datasets[key].items()]
-            json.dump(self.datasets, open(self.index_file_location, "w"))
+            result = dict(experiment=self.experiment,
+                          sample=self.sample,
+                          dataset=self.dataset,
+                          channel=self.channel)
+            for storage_plan_path in self.datasets:
+                storage_plan = json.load(open(storage_plan_path))
+                if dataset_name not in result:
+                    result[dataset_name] = []
+                ds = result[dataset_name]
+                for volume, image_filename_path in storage_plan["blocks"]:
+                    ds.append((volume, image_filename_path))
+            json.dump(result, open(self.index_file_location, "w"))
 
 class PipelineTask(PipelineTaskMixin, PipelineRunReportMixin, luigi.Task):
     task_namespace = "ariadne_microns_pipeline"

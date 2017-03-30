@@ -17,7 +17,7 @@ To install the pipeline engine's Python dependency:
     > cd pipeline_engine
     > git checkout use_luigi
     > pip install --process-dependency-links --trusted-host github.com .
-    
+
 In addition, you will have to compile Neuroproof and install either the Keras
 or Caffe back-end.
 
@@ -392,8 +392,8 @@ partner of each synapse
 The index file is a global index into the subvolume data for each channel
 produced by the analysis. The file contains a single dictionary object.
 The keys of this object are the names of the channels and the values are
-lists of two-tuples of volume (see [Volume object](#volume-object)) and dataset location
-(see [Dataset location object](#dataset-location-object)).
+lists of two-tuples of volume (see [Volume object](#volume-object)) and the
+path to the multi-plane .TIF file that contains the data for that volume.
 
 The microns-volume script [ariadne_microns_pipeline/scripts/microns_volume.py]
 has an example of how to use the index.json file to read an arbitrary
