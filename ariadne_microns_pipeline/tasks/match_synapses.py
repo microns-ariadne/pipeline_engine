@@ -33,12 +33,12 @@ class MatchSynapsesTaskMixin:
         "Location for the .json file containing the synapse matches")
     
     def has_mask(self):
-        return self.mask_location != EMPTY_LOCATION
+        return self.mask_loading_plan_path!= EMPTY_LOCATION
     
     def input(self):
         loading_plans = [self.gt_loading_plan_path, 
                          self.detected_loading_plan_path]
-        if self.has_mask:
+        if self.has_mask():
             loading_plans.append(self.mask_loading_plan_path)
         for loading_plan in loading_plans:
             for tgt in DestVolumeReader(loading_plan).get_source_targets():

@@ -1410,7 +1410,8 @@ class PipelineTaskMixin:
                     synapse_seg_task = \
                         self.synapse_segmentation_tasks[zi, yi, xi]
                     synapse_match_location = os.path.join(
-                        self.get_dir(x0, y0, z0), "synapse-match.json")
+                        self.get_dir(volume.x, volume.y, volume.z), 
+                        "synapse-match.json")
                     synapse_match_task = self.factory.gen_match_synapses_task(
                         volume=volume,
                         gt_dataset_name=SYN_SEG_GT_DATASET,
@@ -1430,7 +1431,8 @@ class PipelineTaskMixin:
                     # Match GT neurons against detected neurons
                     #
                     neuron_match_location = os.path.join(
-                        self.get_dir(x0, y0, z0), "neuron-match.json")
+                        self.get_dir(volume.x, volume.y, volume.z),
+                        "neuron-match.json")
                     neuron_seg_task = self.np_tasks[zi, yi, xi]
                     neuron_match_task=self.factory.gen_match_neurons_task(
                         volume=volume,
@@ -1444,19 +1446,17 @@ class PipelineTaskMixin:
                     # Match GT synapses against GT neurons
                     #
                     gt_sn_location = os.path.join(
-                        self.get_dir(x0, y0, z0), "gt_synapse_neuron.json")
+                        self.get_dir(volume.x, volume.y, volume.z), 
+                        "gt_synapse_neuron.json")
                     gt_sn_task = self.factory.gen_connect_synapses_task(
                         volume=volume,
-                        neuron_location=gt_neuron_task.output()\
-                                                      .dataset_location,
-                        synapse_location=synapse_gt_seg_task.output()\
-                                                            .dataset_location,
+                        neuron_dataset_name=NP_DATASET,
+                        synapse_dataset_name=SYN_SEG_DATASET,
                         xy_dilation=self.gt_neuron_synapse_xy_dilation,
                         z_dilation=self.gt_neuron_synapse_z_dilation,
                         min_contact=self.gt_neuron_synapse_min_contact,
                         output_location=gt_sn_location)
-                    gt_sn_task.set_requirement(gt_neuron_task)
-                    gt_sn_task.set_requirement(synapse_gt_seg_task)
+                    self.tasks.append(gt_sn_task)
                     gt_neuron_synapse_tasks[zi, yi, xi] = gt_sn_task
         
         #
@@ -1484,7 +1484,6 @@ class PipelineTaskMixin:
         #
         self.synapse_statistics_task.set_requirement(
             self.all_connected_components_task)
-        self.synapse_statistics_task.set_requirement(synapse_gt_task)
         map(self.synapse_statistics_task.set_requirement,
             gt_neuron_synapse_tasks.flatten())
         map(self.synapse_statistics_task.set_requirement, 

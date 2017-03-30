@@ -726,7 +726,6 @@ class AMTaskFactory(object):
         detected_loading_plan, dlp = self.loading_plan(
             volume, detected_dataset_name, detected_src_task)
         return glp ( dlp ( MatchNeuronsTask(
-            volume=volume,
             gt_load_plan_path=gt_loading_plan,
             detected_load_plan_path=detected_loading_plan,
             output_location=output_location)))
@@ -757,7 +756,6 @@ class AMTaskFactory(object):
             mask_loading_plan, mlp = self.loading_plan(
                 volume, mask_dataset_name)
         return glp ( dlp ( mlp ( MatchSynapsesTask(
-            volume=volume,
             gt_loading_plan_path=gt_loading_plan,
             detected_loading_plan_path=detected_loading_plan,
             mask_loading_plan_path=mask_loading_plan,
@@ -1048,12 +1046,11 @@ class AMTaskFactory(object):
         gt_load_plan, glp = self.loading_plan(volume, gt_seg_dataset_name)
         pred_load_plan, plp = self.loading_plan(
             volume, pred_seg_dataset_name, pred_src_task)
-        return glp | plp | SegmentationStatisticsTask(
-            volume=volume,
+        return glp ( plp ( SegmentationStatisticsTask(
             ground_truth_loading_plan_path=gt_load_plan,
             test_loading_plan_path=pred_load_plan,
             connectivity=connectivity,
-            output_path=output_location)
+            output_path=output_location)))
     
     def gen_segmentation_report_task(self,
                                      statistics_locations,
