@@ -401,8 +401,6 @@ class AMTaskFactory(object):
         else:
             mask_load_plan_path = EMPTY_LOCATION
             mlp = self.__Null()
-        seeds_load_plan_path, slp = self.loading_plan(
-            volume, seeds_dataset_name)
         #
         # Get the storage plan for the segmentation
         #
