@@ -110,10 +110,12 @@ class VolumeObj(Base):
 
     def volume(self):
         '''Return the parameters.Volume style volume for this obj'''
-        return Volume(int(self.x0), int(self.y0), int(self.z0),
-                      int(self.x1 - self.x0),
-                      int(self.y1 -self.y0),
-                      int(self.z1-self.z0))
+        return Volume(int(np.round(self.x0)), 
+                      int(np.round(self.y0)),
+                      int(np.round(self.z0)),
+                      int(np.round(self.x1 - self.x0)),
+                      int(np.round(self.y1 -self.y0)),
+                      int(np.round(self.z1-self.z0)))
 
 class TaskObj(Base):
     '''A Luigi task'''
@@ -740,12 +742,7 @@ class VolumeDB(object):
         0:10, 0:10, 0:5 and 0:10, 0:10, 5:10.
         '''
         for loading_plan in self.session.query(LoadingPlanObj):
-            volume = Volume(loading_plan.volume.x0,
-                            loading_plan.volume.y0,
-                            loading_plan.volume.z0,
-                            loading_plan.volume.x1 - loading_plan.volume.x0,
-                            loading_plan.volume.y1 - loading_plan.volume.y0,
-                            loading_plan.volume.z1 - loading_plan.volume.z0)
+            volume = loading_plan.volume.volume()
             for dataset_obj in self.find_datasets_by_type_and_volume(
                 loading_plan.dataset_type.name, volume):
                 if loading_plan.src_task is not None and \
@@ -758,25 +755,26 @@ class VolumeDB(object):
         
         for dataset_obj in self.session.query(DatasetObj):
             assert isinstance(dataset_obj, DatasetObj)
-            x0 = dataset_obj.volume.x0
-            x1 = dataset_obj.volume.x1
+            volume = dataset_obj.volume.volume()
+            x0 = volume.x
+            x1 = volume.x1
             x = set([x0, x1])
-            y0 = dataset_obj.volume.y0
-            y1 = dataset_obj.volume.y1
+            y0 = volume.y
+            y1 = volume.y1
             y = set([y0, y1])
-            z0 = dataset_obj.volume.z0
-            z1 = dataset_obj.volume.z1
+            z0 = volume.z
+            z1 = volume.z1
             z = set([z0, z1])
             #
             # Find the shard points
             #
             for ddo in dataset_obj.dependents:
-                volume = ddo.loading_plan.volume
-                x0a = volume.x0
+                volume = ddo.loading_plan.volume.volume()
+                x0a = volume.x
                 x1a = volume.x1
-                y0a = volume.y0
+                y0a = volume.y
                 y1a = volume.y1
-                z0a = volume.z0
+                z0a = volume.z
                 z1a = volume.z1
                 if x0a > x0:
                     x.add(x0a)
@@ -807,12 +805,13 @@ class VolumeDB(object):
                         self.session.add(subvolume)
                         volumes = set()
                         for ddo in dataset_obj.dependents:
-                            x0b = ddo.loading_plan.volume.x0
-                            x1b = ddo.loading_plan.volume.x1
-                            y0b = ddo.loading_plan.volume.y0
-                            y1b = ddo.loading_plan.volume.y1
-                            z0b = ddo.loading_plan.volume.z0
-                            z1b = ddo.loading_plan.volume.z1
+                            volumeb = ddo.loading_plan.volume.volume()
+                            x0b = volumeb.x
+                            x1b = volumeb.x1
+                            y0b = volumeb.y
+                            y1b = volumeb.y1
+                            z0b = volumeb.z
+                            z1b = volumeb.z1
                             key = (x0b, x1b, y0b, y1b, z0b, z1b)
                             if x0a >= x0b and x1a <= x1b and \
                                y0a >= y0b and y1a <= y1b and \
@@ -836,14 +835,15 @@ class VolumeDB(object):
                 root = self.target_dir
             else:
                 root = self.temp_dir
+            svolume = subvolume.volume.volume()
             leaf_dir = "%s_%09d-%09d_%09d-%09d_%09d-%09d_%d.tif" % (
-                dataset_name, subvolume.volume.x0, subvolume.volume.x1,
-                subvolume.volume.y0, subvolume.volume.y1,
-                subvolume.volume.z0, subvolume.volume.z1,
+                dataset_name, svolume.x, svolume.x1,
+                svolume.y, svolume.y1,
+                svolume.z, svolume.z1,
                 subvolume.subvolume_id)
             location = os.path.join(
-                root, str(subvolume.volume.x0), str(subvolume.volume.y0),
-                str(subvolume.volume.z0), leaf_dir)
+                root, str(svolume.x), str(svolume.y),
+                str(svolume.z), leaf_dir)
             self.session.add(SubvolumeLocationObj(
                 subvolume=subvolume,
                 location=location,
@@ -877,7 +877,7 @@ class VolumeDB(object):
         return get_storage_plan_path(
             self.get_datatype_root(dataset.dataset_type.name),
             dataset_id,
-            dataset.volume.volume,
+            dataset.volume.volume(),
             dataset.dataset_type.name)
     
     def get_dependencies(self, task):
@@ -973,11 +973,7 @@ class VolumeDB(object):
         for subvolume_location, volume in \
             self.session.query(SubvolumeLocationObj, VolumeObj).filter(
                 sqlalchemy.and_(*clauses)):
-            result.append((subvolume_location.location,
-                           Volume(volume.x0, volume.y0, volume.z0,
-                                  volume.x1-volume.x0,
-                                  volume.y1-volume.y0,
-                                  volume.z1-volume.z0)))
+            result.append((subvolume_location.location, volume.volume()))
         return result
     
     def get_subvolume_locations_by_dataset_id(self, dataset_id):
@@ -1023,12 +1019,13 @@ class VolumeDB(object):
         loading_plan = self.session.query(LoadingPlanObj).filter(
             LoadingPlanObj.loading_plan_id == loading_plan_id).first()
         assert isinstance(loading_plan, LoadingPlanObj)
-        x0 = loading_plan.volume.x0
-        x1 = loading_plan.volume.x1
-        y0 = loading_plan.volume.y0
-        y1 = loading_plan.volume.y1
-        z0 = loading_plan.volume.z0
-        z1 = loading_plan.volume.z1
+        volume = loading_plan.volume.volume()
+        x0 = volume.x
+        x1 = volume.x1
+        y0 = volume.y
+        y1 = volume.y1
+        z0 = volume.z
+        z1 = volume.z1
         rh_logger.logger.report_event(
             "Loading %s: %d:%d, %d:%d, %d:%d" % (
                 loading_plan.dataset_type.name,
@@ -1052,25 +1049,26 @@ class VolumeDB(object):
             SubvolumeLocationObj, VolumeObj).filter(
                 sqlalchemy.and_(*clauses)):
             tif_path = subvolume_location.location
-            if svolume.x0 >= x1 or\
-               svolume.y0 >= y1 or\
-               svolume.z0 >= z1 or \
+            svolume = svolume.volume()
+            if svolume.x >= x1 or\
+               svolume.y >= y1 or\
+               svolume.z >= z1 or \
                svolume.x1 <= x0 or \
                svolume.y1 <= y0 or \
                svolume.z1 <= z0:
                 rh_logger.logger.report_event(
                     "Ignoring block %d:%d, %d:%d, %d:%d from load plan" %
-                (svolume.x0, svolume.x1, svolume.y0, svolume.y1,
-                 svolume.z0, svolume.z1))
+                (svolume.x, svolume.x1, svolume.y, svolume.y1,
+                 svolume.z, svolume.z1))
                 continue
                 
             with tifffile.TiffFile(tif_path) as fd:
                 block = fd.asarray()
-                if svolume.x0 == x0 and \
+                if svolume.x == x0 and \
                    svolume.x1 == x1 and \
-                   svolume.y0 == y0 and \
+                   svolume.y == y0 and \
                    svolume.y1 == y1 and \
-                   svolume.z0 == z0 and \
+                   svolume.z == z0 and \
                    svolume.z1 == z1:
                     # Cheap win, return the block
                     rh_logger.logger.report_metric("Dataset load time (sec)",
@@ -1081,31 +1079,31 @@ class VolumeDB(object):
                 #
                 # Defensively trim the block to within x0:x1, y0:y1, z0:z1
                 #
-                if svolume.z0 < z0:
-                    block = block[z0-svolume.z0:]
+                if svolume.z < z0:
+                    block = block[z0-svolume.z:]
                     sz0 = z0
                 else:
-                    sz0 = svolume.z0
+                    sz0 = svolume.z
                 if svolume.z1 > z1:
                     block = block[:z1 - sz0]
                     sz1 = z1
                 else:
                     sz1 = svolume.z1
-                if svolume.y0 < y0:
-                    block = block[:, y0-svolume.y0:]
+                if svolume.y < y0:
+                    block = block[:, y0-svolume.y:]
                     sy0 = y0
                 else:
-                    sy0 = svolume.y0
+                    sy0 = svolume.y
                 if svolume.y1 > y1:
                     block = block[:, :y1 - sy0]
                     sy1 = y1
                 else:
                     sy1 = svolume.y1
-                if svolume.x0 < x0:
-                    block = block[:, :, x0-svolume.x0:]
+                if svolume.x < x0:
+                    block = block[:, :, x0-svolume.x:]
                     sx0 = x0
                 else:
-                    sx0 = svolume.x0
+                    sx0 = svolume.x
                 if svolume.x1 > x1:
                     block = block[:, :, :x1 - sx0]
                     sx1 = x1
@@ -1128,12 +1126,12 @@ class VolumeDB(object):
         dataset = self.session.query(DatasetObj).filter(
             DatasetObj.dataset_id == dataset_id).first()
         assert isinstance(dataset, DatasetObj)
-        x0 = dataset.volume.x0
-        x1 = dataset.volume.x1
-        y0 = dataset.volume.y0
-        y1 = dataset.volume.y1
-        z0 = dataset.volume.z0
-        z1 = dataset.volume.z1
+        x0 = dataset.volume.volume().x
+        x1 = dataset.volume.volume().x1
+        y0 = dataset.volume.volume().y
+        y1 = dataset.volume.volume().y1
+        z0 = dataset.volume.volume().z
+        z1 = dataset.volume.volume().z1
         datatype = getattr(np, dataset.dataset_type.datatype)
         
         rh_logger.logger.report_event(
@@ -1152,11 +1150,12 @@ class VolumeDB(object):
             SubvolumeLocationObj, VolumeObj).filter(
                 sqlalchemy.and_(*clauses)):
             tif_path = subvolume_location.location
-            sx0 = svolume.x0
+            svolume = svolume.volume()
+            sx0 = svolume.x
             sx1 = svolume.x1
-            sy0 = svolume.y0
+            sy0 = svolume.y
             sy1 = svolume.y1
-            sz0 = svolume.z0
+            sz0 = svolume.z
             sz1 = svolume.z1
             tif_dir = os.path.dirname(tif_path)
             if not os.path.isdir(tif_dir):
@@ -1226,10 +1225,7 @@ class VolumeDB(object):
             sqlalchemy.and_(
                 VolumeObj.volume_id == LoadingPlanObj.volume_id,
                 LoadingPlanObj.loading_plan_id == loading_plan_id)).first()
-        return Volume(volume.x0, volume.y0, volume.z0,
-                          volume.x1 - volume.x0,
-                          volume.y1 - volume.y0,
-                          volume.z1 - volume.z0)
+        return volume.volume()
     
     def get_loading_plan_dataset_name(self, loading_plan_id):
         '''Get the loading plan's dataset name, e.g. "image"

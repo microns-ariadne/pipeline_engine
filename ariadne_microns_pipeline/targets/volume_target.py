@@ -311,7 +311,7 @@ def write_simple_loading_plan(
     :param dataset_name: the name of the dataset, e.g. "image"
     :param dtype: the Numpy dtype, e.g. "uint8
     '''
-    blocks = [(image_filename, volume.to_dictionary)]
+    blocks = [(image_filename, volume.to_dictionary())]
     d = dict(
         dimensions=[volume.depth, volume.height, volume.width],
         x=volume.x,
