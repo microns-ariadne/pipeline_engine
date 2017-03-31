@@ -96,6 +96,18 @@ class VolumeObj(Base):
                          "x0", "y0", "z0", "x1", "y1", "z1",
                          unique=True),
         )
+    @classmethod
+    def create(cls, engine):
+        '''Create the database table
+        
+        We use the special rtree extension to make searches faster
+        
+        :param engine: a database engine, e.g. from sqlalchemy.create_engine
+        '''
+        engine.execute(
+            ("create virtual table %s using "
+             "rtree(volume_id, x0, x1, y0, y1, z0, z1)") % cls.__tablename__)
+
     def volume(self):
         '''Return the parameters.Volume style volume for this obj'''
         return Volume(self.x0, self.y0, self.z0,
@@ -422,6 +434,12 @@ class VolumeDB(object):
         self.mode = mode
         if mode == "w":
             Base.metadata.drop_all(self.engine)
+            try:
+                VolumeObj.create(self.engine)
+            except:
+                rh_logger.logger.report_exception()
+                rh_logger.logger.report_event(
+                    "Support for spatial querying disabled")
             Base.metadata.create_all(self.engine)
 
     def __enter__(self):
