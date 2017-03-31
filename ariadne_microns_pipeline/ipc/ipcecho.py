@@ -13,6 +13,7 @@ import argparse
 import cPickle
 import os
 import rh_logger
+import time
 import uuid
 import zmq
 
@@ -26,6 +27,15 @@ class Work:
         rh_logger.logger.report_event(self.phrase)
         return self.phrase
 
+class KerasWork:
+    '''This is work that should make Keras/Theano bind to a port'''
+    def __call__(self):
+        rh_logger.logger.report_event("Importing Keras")
+        t0 = time.time()
+        import keras
+        rh_logger.logger.report_metric("Keras import time (sec)", 
+                                       time.time() - t0)
+
 class Fail:
     def __call__(self):
         raise Exception("I *&^%ed up")
@@ -37,6 +47,8 @@ def process_args():
                         help="Network address of the broker")
     parser.add_argument("--fail", default=False, action="store_true",
                         help="Throw an exeption instead of echoing")
+    parser.add_argument("--keras", default=False, action="store_true",
+                        help="Import Keras to initiate binding to a GPU")
     parser.add_argument("phrase",
                         help="Phrase to echo")
     args = parser.parse_args()
@@ -53,6 +65,8 @@ def main():
     poll.register(socket, zmq.POLLIN)
     if args.fail:
         work = Fail()
+    elif args.keras:
+        work = KerasWork()
     else:
         work = Work(args.phrase)
     socket.send(cPickle.dumps(work))
