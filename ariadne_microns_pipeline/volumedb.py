@@ -445,7 +445,9 @@ class VolumeDB(object):
                 rh_logger.logger.report_event(
                     "Support for spatial querying disabled")
             Base.metadata.create_all(self.engine)
-
+        self.loading_plan_ids = {}
+        self.all_volumes = {}
+        
     def __enter__(self):
         return self
     
@@ -456,6 +458,15 @@ class VolumeDB(object):
             self.session.commit()
         self.session.close()
         return value is None
+    
+    def cleanup(self):
+        '''Get rid of any cache / state
+        
+        This should be called after any sustained operation to clear out
+        cached objects.
+        '''
+        self.session.expunge_all()
+        self.all_volumes = {}
     
     def copy_db(self, dest_url):
         '''Copy the database schema and content to another database
@@ -592,14 +603,20 @@ class VolumeDB(object):
         y1 = y0 + volume.height
         z0 = volume.z
         z1 = z0 + volume.depth
+        key = (x0, x1, y0, y1, z0, z1)
+        if key in self.all_volumes:
+            return self.all_volumes[key]
+        
         volume_objs = self.session.query(VolumeObj).filter_by(
                 x0=x0, x1=x1, y0=y0, y1=y1, z0=z0, z1=z1).all()
         if len(volume_objs) > 0:
+            self.all_volumes[key] = volume_objs[0]
             return volume_objs[0]
         volume_obj = VolumeObj(x0=x0, x1=x1, y0=y0, y1=y1, z0=z0, z1=z1)
         self.session.add(volume_obj)
         if commit:
             self.session.commit()
+        self.all_volumes[key] = volume_obj
         return volume_obj
     
     def get_dataset_id(self):
@@ -681,6 +698,9 @@ class VolumeDB(object):
         :returns: None if there is no such loading plan, otherwise the loading
         plan ID of the already-existing loading plan
         '''
+        key = self._get_loading_plan_key(dataset_name, volume)
+        if key in self.loading_plan_ids:
+            return self.loading_plan_ids[key]
         result = self.session.query(LoadingPlanObj.loading_plan_id).filter(
             sqlalchemy.and_(
                 LoadingPlanObj.volume_id == VolumeObj.volume_id,
@@ -694,7 +714,17 @@ class VolumeDB(object):
                 DatasetTypeObj.dataset_type_id,
                 DatasetTypeObj.name == dataset_name
                 )).first()
-        return result if result is None else result[0]
+        if result is None:
+            return result
+        self.loading_plan_ids[key] = result[0]
+        return result[0]
+    
+    @staticmethod
+    def _get_loading_plan_key(dataset_name, volume):
+        key = (dataset_name, volume.x, volume.y, volume.z,
+               volume.width, volume.height, volume.depth)
+        return key
+    
     def get_loading_plan_id(self):
         '''Get a loading_plan_id in preparation for requesting a dataset
         '''
@@ -730,6 +760,8 @@ class VolumeDB(object):
             loading_plan.src_task_id = src_task_obj.task_id
         self.session.add(loading_plan)
         self.session.commit()
+        key = self._get_loading_plan_key(dataset_name, volume)
+        self.loading_plan_ids[key] = loading_plan_id
         return loading_plan.loading_plan_id
     
     def compute_subvolumes(self):
@@ -752,6 +784,7 @@ class VolumeDB(object):
                                           loading_plan=loading_plan)
                 self.session.add(ddo)
         self.session.commit()
+        self.cleanup()
         
         for dataset_obj in self.session.query(DatasetObj):
             assert isinstance(dataset_obj, DatasetObj)
@@ -825,6 +858,7 @@ class VolumeDB(object):
                                 self.session.add(SubvolumeDependentObj(
                                     subvolume=subvolume,
                                     task_id=ddo.loading_plan.task_id))
+        self.cleanup()
         #
         # Assign locations
         #
@@ -848,6 +882,7 @@ class VolumeDB(object):
                 subvolume=subvolume,
                 location=location,
                 persistence=persistence))
+        self.cleanup()
         self.session.commit()
     
     def get_loading_plan_path(self, loading_plan_id):
