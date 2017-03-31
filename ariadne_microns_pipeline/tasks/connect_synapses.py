@@ -83,7 +83,8 @@ class ConnectSynapsesRunMixin:
     
     def report_empty_result(self):
         '''Report a result with no synapses.'''
-        result = dict(volume=self.volume.to_dictionary(),
+        neuron_target = DestVolumeReader(self.neuron_seg_load_plan_path)
+        result = dict(volume=neuron_target.volume.to_dictionary(),
                       neuron_1=[],
                       neuron_2=[],
                       synapse=[],
