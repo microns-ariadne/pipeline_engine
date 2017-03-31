@@ -218,7 +218,7 @@ class ClassifyShimTask(RequiresMixin, luigi.Task):
         return shim
     
     def input(self):
-        yield self.requirements[0].output()
+        yield self.requirements.copy().pop().output()
     
     def output(self):
         return SrcVolumeTarget(self.storage_plan_path)

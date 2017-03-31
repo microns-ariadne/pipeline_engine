@@ -42,8 +42,8 @@ class RequiresMixin:
     
     def set_requirement(self, requirement):
         if not hasattr(self, "requirements"):
-            self.requirements = []
-        self.requirements.append(requirement)
+            self.requirements = set()
+        self.requirements.add(requirement)
     
     def requires(self):
         if not hasattr(self, "requirements"):

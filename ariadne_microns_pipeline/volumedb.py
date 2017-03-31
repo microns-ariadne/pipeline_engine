@@ -110,8 +110,10 @@ class VolumeObj(Base):
 
     def volume(self):
         '''Return the parameters.Volume style volume for this obj'''
-        return Volume(self.x0, self.y0, self.z0,
-                      self.x1 - self.x0, self.y1 -self.y0, self.z1-self.z0)
+        return Volume(int(self.x0), int(self.y0), int(self.z0),
+                      int(self.x1 - self.x0),
+                      int(self.y1 -self.y0),
+                      int(self.z1-self.z0))
 
 class TaskObj(Base):
     '''A Luigi task'''
@@ -1187,10 +1189,7 @@ class VolumeDB(object):
             root = self.target_dir
         else:
             root = self.temp_dir
-        volume = Volume(dataset.volume.x0, dataset.volume.y0, dataset.volume.z0,
-                        dataset.volume.x1 - dataset.volume.x0,
-                        dataset.volume.y1 - dataset.volume.y0,
-                        dataset.volume.z1 - dataset.volume.z0)
+        volume = dataset.volume.volume()
         return get_storage_plan_path(root, dataset.dataset_id, volume, 
                                     dataset_name)
 
@@ -1202,10 +1201,7 @@ class VolumeDB(object):
         '''
         volume = self.session.query(DatasetObj).filter(
             DatasetObj.dataset_id == dataset_id).first().volume
-        return Volume(volume.x0, volume.y0, volume.z0,
-                      volume.x1 - volume.x0,
-                      volume.y1 - volume.y0,
-                      volume.z1 - volume.z0)
+        return volume.volume()
     
     def get_dataset_paths_by_loading_plan_id(self, loading_plan_id):
         '''Get the .done file locations for a loading plan's datasets
