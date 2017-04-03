@@ -786,9 +786,25 @@ class VolumeDB(object):
         self.session.commit()
         self.cleanup()
         
+        #
+        # It might look stupid to download the database, but this
+        # speeds up things
+        #
+        all_volumes = {}
+        for volume in self.session.query(VolumeObj):
+            all_volumes[volume.volume_id] = volume
+        all_ddos = {}
+        for ddo in self.session.query(DatasetDependentObj):
+            if ddo.dataset_id not in all_ddos:
+                all_ddos[ddo.dataset_id] = []
+            all_ddos[ddo.dataset_id].append(ddo)
+        all_loading_plans = {}
+        for loading_plan in self.session.query(LoadingPlanObj):
+            all_loading_plans[loading_plan.loading_plan_id] = loading_plan
+            
         for dataset_obj in self.session.query(DatasetObj):
             assert isinstance(dataset_obj, DatasetObj)
-            volume = dataset_obj.volume.volume()
+            volume = all_volumes[dataset_obj.volume_id].volume()
             x0 = volume.x
             x1 = volume.x1
             x = set([x0, x1])
@@ -801,8 +817,9 @@ class VolumeDB(object):
             #
             # Find the shard points
             #
-            for ddo in dataset_obj.dependents:
-                volume = ddo.loading_plan.volume.volume()
+            for ddo in all_ddos[dataset_obj.dataset_id]:
+                loading_plan = all_loading_plans[ddo.loading_plan_id]
+                volume = all_volumes[loading_plan.volume_id].volume()
                 x0a = volume.x
                 x1a = volume.x1
                 y0a = volume.y
