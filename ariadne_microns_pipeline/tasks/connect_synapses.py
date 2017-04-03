@@ -122,8 +122,8 @@ class ConnectSynapsesRunMixin:
                 self.transmitter_probability_map_load_plan_path)
             receptor_target = DestVolumeReader(
                 self.receptor_probability_map_load_plan_path)
-            synapse = (transmitter_target.astype(np.uint16) +
-                       receptor_target.astype(np.uint16))
+            synapse = (transmitter_target.imread().astype(np.uint16) +
+                       receptor_target.imread().astype(np.uint16))
         #
         # get the centers of the synapses for reference
         #
