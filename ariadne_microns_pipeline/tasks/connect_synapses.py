@@ -116,12 +116,14 @@ class ConnectSynapsesRunMixin:
         if self.transmitter_probability_map_load_plan_path == EMPTY_LOCATION:
             transmitter_target = None
             receptor_target = None
+            synapse = synapse_target.imread()
         else:
             transmitter_target = DestVolumeReader(
                 self.transmitter_probability_map_load_plan_path)
             receptor_target = DestVolumeReader(
                 self.receptor_probability_map_load_plan_path)
-        synapse = synapse_target.imread()
+            synapse = (transmitter_target.astype(np.uint16) +
+                       receptor_target.astype(np.uint16))
         #
         # get the centers of the synapses for reference
         #
