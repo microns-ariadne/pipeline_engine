@@ -7,7 +7,7 @@ import rh_logger
 from scipy.ndimage import grey_dilation, grey_erosion, center_of_mass
 from scipy.sparse import coo_matrix
 
-from ..parameters import VolumeParameter, EMPTY_LOCATION
+from ..parameters import VolumeParameter, EMPTY_LOCATION, Volume
 from ..targets import DestVolumeReader
 from .utilities import RequiresMixin, RunMixin, SingleThreadedMixin
 from .connected_components import ConnectivityGraph
