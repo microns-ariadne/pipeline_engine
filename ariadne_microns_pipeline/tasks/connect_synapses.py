@@ -89,7 +89,7 @@ class ConnectSynapsesRunMixin:
                       neuron_2=[],
                       synapse=[],
                       synapse_centers=dict(x=[], y=[], z=[]))
-        if self.transmitter_probability_map_location != EMPTY_LOCATION:
+        if self.transmitter_probability_map_load_plan_path != EMPTY_LOCATION:
             result["transmitter_score_1"] = []
             result["transmitter_score_2"] = []
         with self.output().open("w") as fd:
