@@ -1607,23 +1607,19 @@ class PipelineTaskMixin:
                 #
                 rh_logger.logger.report_event("Making Butterfly download tasks")
                 self.generate_butterfly_tasks()
-                self.volume_db.cleanup()
                 rh_logger.logger.report_event("Making gt cutout tasks")
                 self.generate_gt_cutouts()
-                self.volume_db.cleanup()
                 #
                 # Step 2: run the pixel classifier on each
                 #
                 rh_logger.logger.report_event("Making classifier tasks")
                 self.generate_classifier_tasks()
-                self.volume_db.cleanup()
                 if not self.wants_affinity_segmentation:
                     #
                     # Step 4: make the border masks
                     #
                     rh_logger.logger.report_event("Making border mask tasks")
                     self.generate_border_mask_tasks()
-                    self.volume_db.cleanup()
                     if self.method != SeedsMethodEnum.ConnectedComponents:
                         #
                         # Step 5: find the seeds for the watershed
@@ -1631,16 +1627,13 @@ class PipelineTaskMixin:
                         rh_logger.logger.report_event(
                             "Making watershed seed tasks")
                         self.generate_seed_tasks()
-                        self.volume_db.cleanup()
                     #
                     # Step 6: run watershed
                     #
                     rh_logger.logger.report_event("Making watershed tasks")
                     self.generate_watershed_tasks()
-                    self.volume_db.cleanup()
                     if self.wants_resegmentation:
                         self.generate_resegmentation_tasks()
-                        self.volume_db.cleanup()
                 else:
                     #
                     # For affinity maps, run the z-watershed to produce
@@ -1648,7 +1641,6 @@ class PipelineTaskMixin:
                     #
                     rh_logger.logger.report_event("Making z-watershed tasks")
                     self.generate_z_watershed_tasks()
-                    self.volume_db.cleanup()
                 if self.wants_neuroproof_learn:
                     #
                     # Neuroproof Learn needs to have the segmentation relabeled
@@ -1656,11 +1648,9 @@ class PipelineTaskMixin:
                     rh_logger.logger.report_event(
                         "Making segmentation relabeling task")
                     self.generate_volume_relabeling_task()
-                    self.volume_db.cleanup()
                     rh_logger.logger.report_event(
                         "Making neuroproof learn task")
                     self.generate_nplearn_task()
-                    self.volume_db.cleanup()
                     self.requirements.append(self.neuroproof_learn_task)
                 else:
                     #
@@ -1668,13 +1658,11 @@ class PipelineTaskMixin:
                     #
                     rh_logger.logger.report_event("Making Neuroproof tasks")
                     self.generate_neuroproof_tasks()
-                    self.volume_db.cleanup()
                     #
                     # Step 8: Skeletonize Neuroproof
                     #
                     rh_logger.logger.report_event("Making skeletonize tasks")
                     self.generate_skeletonize_tasks()
-                    self.volume_db.cleanup()
                     #
                     # Step 9: Segment the synapses
                     #
@@ -1683,33 +1671,28 @@ class PipelineTaskMixin:
                         self.generate_synapse_tr_segmentation_tasks()
                     else:
                         self.generate_synapse_segmentation_tasks()
-                    self.volume_db.cleanup()
                     #
                     # Step 10: The connectivity graph.
                     #
                     rh_logger.logger.report_event("Making connectivity graph")
                     self.generate_connectivity_graph_tasks()
-                    self.volume_db.cleanup()
                     #
                     # Step 11: Connect synapses to neurites
                     #
                     rh_logger.logger.report_event("Connecting synapses and neurons")
                     requirements = self.generate_synapse_connectivity_tasks()
-                    self.volume_db.cleanup()
                     self.requirements += list(requirements)
                     #
                     # Step 12: find ground-truth synapses and compute statistics
                     #
                     rh_logger.logger.report_event("Comparing synapses to gt")
                     self.generate_synapse_statistics_tasks()
-                    self.volume_db.cleanup()
                     #
                     # Step 13: write out the stitched segmentation
                     #
                     if self.stitched_segmentation_location != EMPTY_LOCATION:
                         rh_logger.logger.report_event("Stitching segments")
                         self.generate_stitched_segmentation_task()
-                        self.volume_db.cleanup()
                         self.requirements.append(self.stitched_segmentation_task)
                 #
                 # Do the VolumeDB computation
@@ -1784,7 +1767,7 @@ class PipelineTaskMixin:
                           channel=self.channel)
             for storage_plan_path in self.datasets:
                 storage_plan = json.load(open(storage_plan_path))
-                if dataset_name not in result:
+                if storage_plan["dataset_name"] not in result:
                     result[dataset_name] = []
                 ds = result[dataset_name]
                 for volume, image_filename_path in storage_plan["blocks"]:

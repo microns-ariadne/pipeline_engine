@@ -12,11 +12,24 @@ import sqlalchemy
 import tifffile
 import time
 from sqlalchemy import Column,ForeignKeyConstraint, UniqueConstraint, ForeignKey
-from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.ext.declarative import declarative_base, DeclarativeMeta
 from sqlalchemy.orm import relationship, sessionmaker
 from .parameters import Volume
 
+class PKColumn(Column):
+    '''A database column that is an integer primary key'''
+    
+    def __init__(self, *args, **kwargs):
+        super(PKColumn, self).__init__(*args, primary_key=True, **kwargs)
+        self.table_id = 0
+        
+    def newid(self):
+        '''Get a new primary key ID'''
+        self.table_id += 1
+        return self.table_id
+
 Base = declarative_base()
+
 
 PATTERN="{x:09d}_{y:09d}_{z:09d}_{dataset_name:s}"
 
@@ -78,7 +91,7 @@ class Persistence(enum.Enum):
 class VolumeObj(Base):
     '''A volume in voxel-space'''
     __tablename__ = 'volumes'
-    volume_id = Column(sqlalchemy.Integer, primary_key=True)
+    volume_id = PKColumn(sqlalchemy.Integer)
     x0 = Column(sqlalchemy.Integer,
                 doc="The X origin of the volume in voxels")
     y0 = Column(sqlalchemy.Integer,
@@ -110,19 +123,21 @@ class VolumeObj(Base):
 
     def volume(self):
         '''Return the parameters.Volume style volume for this obj'''
-        return Volume(int(np.round(self.x0)), 
+        if not hasattr(self, "volume_"):
+            self.volume_ = Volume(int(np.round(self.x0)), 
                       int(np.round(self.y0)),
                       int(np.round(self.z0)),
                       int(np.round(self.x1 - self.x0)),
                       int(np.round(self.y1 -self.y0)),
                       int(np.round(self.z1-self.z0)))
+        return self.volume_
 
 class TaskObj(Base):
     '''A Luigi task'''
     
     __tablename__ = "tasks"
     
-    task_id = Column(sqlalchemy.Integer, primary_key=True)
+    task_id = PKColumn(sqlalchemy.Integer)
     luigi_id = Column(sqlalchemy.Text,
                       doc="Luigi's notion of the task's ID")
     task_class = Column(sqlalchemy.Text,
@@ -134,8 +149,7 @@ class TaskParameterObj(Base):
     '''A parameter of a task.'''
 
     __tablename__ = "task_parameters"
-    task_parameter_id = Column(
-        "task_parameter_id", sqlalchemy.Integer, primary_key=True)
+    task_parameter_id = PKColumn(sqlalchemy.Integer)
     task_id = Column(sqlalchemy.Integer,
                      ForeignKey(TaskObj.task_id),
                      doc="ID of the task associated with this parameter")
@@ -159,7 +173,7 @@ class DatasetTypeObj(Base):
     '''
     __tablename__ = "dataset_types"
     
-    dataset_type_id = Column(sqlalchemy.Integer, primary_key=True)
+    dataset_type_id = PKColumn(sqlalchemy.Integer)
     name = Column(sqlalchemy.Text,
                   doc="The dataset's name, e.g. \"image\".")
     persistence = Column(
@@ -177,29 +191,11 @@ class DatasetTypeObj(Base):
             UniqueConstraint("name"),
         )
 
-class DatasetIDObj(Base):
-    '''A table that only contains dataset_ids for the datasets table
-    
-    There's a chicken and egg problem - you can't make a task without its
-    parameters, especially critically defining ones like which dataset it
-    produces. Thus the workflow is:
-    
-    * Get a dataset_id
-    * Create your task
-    * Create a dataset with that ID
-    '''
-    __tablename__ = "dataset_ids"
-    dataset_id = Column(sqlalchemy.Integer, primary_key=True)
-    
 class DatasetObj(Base):
     '''A dataset is the voxel data taken on a given channel'''
     
     __tablename__ = "datasets"
-    dummy_id = Column(sqlalchemy.Integer, primary_key=True)
-    dataset_id = Column(sqlalchemy.Integer, 
-                        ForeignKey(DatasetIDObj.dataset_id),
-                        unique=True,
-                        index=True)
+    dataset_id = PKColumn(sqlalchemy.Integer)
     dataset_type_id = Column(
         sqlalchemy.Integer,
         ForeignKey(DatasetTypeObj.dataset_type_id),
@@ -235,7 +231,7 @@ class DatasetSubvolumeObj(Base):
     '''
     __tablename__ = "dataset_subvolumes"
     
-    subvolume_id = Column(sqlalchemy.Integer, primary_key=True)
+    subvolume_id =PKColumn(sqlalchemy.Integer)
     dataset_id = Column(
         sqlalchemy.Integer,
         ForeignKey(DatasetObj.dataset_id),
@@ -258,7 +254,7 @@ class SubvolumeLocationObj(Base):
 
     __tablename__ = "subvolume_locations"
     
-    subvolume_location_id = Column(sqlalchemy.Integer, primary_key=True)
+    subvolume_location_id = PKColumn(sqlalchemy.Integer)
     subvolume_id = Column(sqlalchemy.Integer,
                           ForeignKey(DatasetSubvolumeObj.subvolume_id),
                           doc="The subvolume associated with this location")
@@ -274,16 +270,6 @@ class SubvolumeLocationObj(Base):
         DatasetSubvolumeObj,
         primaryjoin=subvolume_id==DatasetSubvolumeObj.subvolume_id)
 
-class LoadingPlanIDObj(Base):
-    '''A table holding just loading_plan_id numbers
-    
-    You can't create a task with input volumes w/o having a loading plan ID
-    and you can't create a LoadingPlanObj without a task, so get the ID
-    first.
-    '''
-    __tablename__ = "loading_plan_ids"
-    loading_plan_id = Column(sqlalchemy.Integer, primary_key=True)
-
 class LoadingPlanObj(Base):
     '''A plan for loading a dataset over a volume
     
@@ -291,11 +277,7 @@ class LoadingPlanObj(Base):
     
     __tablename__ = "loading_plans"
     
-    dummy_id = Column(sqlalchemy.Integer, primary_key=True)
-    loading_plan_id = Column(sqlalchemy.Integer, 
-                             ForeignKey(LoadingPlanIDObj.loading_plan_id),
-                             unique=True,
-                             index=True)
+    loading_plan_id = PKColumn(sqlalchemy.Integer)
     task_id = Column(sqlalchemy.Integer, ForeignKey(TaskObj.task_id),
                      doc="The task ID of the requesting task")
     dataset_type_id = Column(sqlalchemy.Integer, 
@@ -326,8 +308,7 @@ class SubvolumeLinkObj(Base):
     These links let a dependent task collect its subvolumes
     '''
     __tablename__ = "subvolume_volume_links"
-    subvolume_volume_link_id = Column(sqlalchemy.Integer, 
-                                        primary_key=True)
+    subvolume_link_id = PKColumn(sqlalchemy.Integer)
     subvolume_id = Column(
         sqlalchemy.Integer,
         ForeignKey(DatasetSubvolumeObj.subvolume_id),
@@ -355,7 +336,7 @@ class DatasetDependentObj(Base):
 
     __tablename__ = "dataset_dependents"
     
-    dataset_dependent_id = Column(sqlalchemy.Integer, primary_key=True)
+    dataset_dependent_id = PKColumn(sqlalchemy.Integer)
     loading_plan_id = Column(sqlalchemy.Integer, 
                           ForeignKey(LoadingPlanObj.loading_plan_id))
     dataset_id = Column(sqlalchemy.Integer, ForeignKey(DatasetObj.dataset_id))
@@ -380,7 +361,7 @@ class SubvolumeDependentObj(Base):
     '''
 
     __tablename__ ="subvolume_dependents"
-    subvolume_dependent_id = Column(sqlalchemy.Integer, primary_key=True)
+    subvolume_dependent_id = PKColumn(sqlalchemy.Integer)
     subvolume_id = Column(sqlalchemy.Integer,
                           ForeignKey(DatasetSubvolumeObj.subvolume_id),
                           doc="The subvolume required by the task")
@@ -432,7 +413,7 @@ class VolumeDB(object):
         '''
         assert mode in ("r", "w", "a"), 'Mode must be one of "r", "w" or "a"'
         self.engine = sqlalchemy.create_engine(db_path)
-        Session = sessionmaker()
+        Session = sessionmaker(autocommit=False, autoflush=False)
         Session.configure(bind=self.engine)
         self.session=Session()
         self.mode = mode
@@ -445,8 +426,14 @@ class VolumeDB(object):
                 rh_logger.logger.report_event(
                     "Support for spatial querying disabled")
             Base.metadata.create_all(self.engine)
-        self.loading_plan_ids = {}
         self.all_volumes = {}
+        self.all_volumes_by_volume_id = {}
+        self.dataset_types = {}
+        self.dataset_types_by_id = {}
+        self.all_tasks = {}
+        self.all_loading_plans = {}
+        self.all_datasets = {}
+        self.all_loading_plans_by_type_and_volume = {}
         
     def __enter__(self):
         return self
@@ -465,8 +452,9 @@ class VolumeDB(object):
         This should be called after any sustained operation to clear out
         cached objects.
         '''
-        self.session.expunge_all()
-        self.all_volumes = {}
+        #self.session.expunge_all()
+        #self.all_volumes = {}
+        pass
     
     def copy_db(self, dest_url):
         '''Copy the database schema and content to another database
@@ -514,13 +502,16 @@ class VolumeDB(object):
         getattr(numpy, datatype) to retrieve the dataset's datatype
         :param doc: documentation describing the "meaning" of the data type
         '''
-        dataset_type = DatasetTypeObj(name=dataset_name,
-                                      persistence=persistence,
-                                      datatype=datatype)
+        dataset_type = DatasetTypeObj(
+            dataset_type_id=DatasetTypeObj.dataset_type_id.newid(),
+            name=dataset_name,
+            persistence=persistence,
+            datatype=datatype)
         if doc is not None:
             dataset_type.doc=doc
         self.session.add(dataset_type)
-        self.session.commit()
+        self.dataset_types[dataset_name] = dataset_type
+        self.dataset_types_by_id[dataset_type.dataset_type_id] = dataset_type
     
     def get_datatype_root(self, dataset_name):
         '''Given a dataset's name, return the root of its file system
@@ -531,15 +522,14 @@ class VolumeDB(object):
         
         :param dataset_name: the name of the dataset, e.g. "image"
         '''
-        persistence = self.session.query(DatasetTypeObj.persistence).filter(
-            DatasetTypeObj.name == dataset_name).first()[0]
+        dataset_type = self.get_dataset_type(dataset_name)
+        persistence = dataset_type.persistence
         return self.target_dir if persistence == Persistence.Permanent \
                else self.temp_dir
     
     def get_dataset_type(self, dataset_name):
         '''Get a dataset type from the database'''
-        return self.session.query(DatasetTypeObj).filter(
-            DatasetTypeObj.name==dataset_name).first()
+        return self.dataset_types[dataset_name]
     
     def get_dataset_name_by_dataset_id(self, dataset_id):
         '''Get the the dataset's type name from the dataset
@@ -563,7 +553,7 @@ class VolumeDB(object):
             DatasetObj.dataset_id == dataset_id).first()[0]
         return datatype
     
-    def get_or_create_task(self, task, commit=True):
+    def get_or_create_task(self, task):
         '''Register a task with the database
         
         :param task: a Luigi task
@@ -572,24 +562,23 @@ class VolumeDB(object):
         :returns: a TaskObj representation of the task
         '''
         assert isinstance(task, luigi.Task)
-        task_obj = self.session.query(TaskObj).filter_by(luigi_id=task.task_id)\
-            .first()
-        if task_obj is not None:
-            return task_obj
-        task_obj = TaskObj(luigi_id=task.task_id,
-                           task_class=task.task_family)
+        if task.task_id in self.all_tasks:
+            return self.all_tasks[task.task_id]
+        task_obj = TaskObj(
+            task_id=TaskObj.task_id.newid(),
+            luigi_id=task.task_id,
+            task_class=task.task_family)
         self.session.add(task_obj)
+        self.all_tasks[task.task_id] = task_obj
         for name, value in task.get_params():
             value = getattr(task, name)
             param = TaskParameterObj(name=name,
                                      value=repr(value),
                                      task=task_obj)
             self.session.add(param)
-        if commit:
-            self.session.commit()
         return task_obj
     
-    def get_or_create_volume_obj(self, volume, commit=True):
+    def get_or_create_volume_obj(self, volume):
         '''Get or create a volume object in the database
         
         :param volume: an ariadne_microns_pipeline.parameters.Volume
@@ -607,24 +596,18 @@ class VolumeDB(object):
         if key in self.all_volumes:
             return self.all_volumes[key]
         
-        volume_objs = self.session.query(VolumeObj).filter_by(
-                x0=x0, x1=x1, y0=y0, y1=y1, z0=z0, z1=z1).all()
-        if len(volume_objs) > 0:
-            self.all_volumes[key] = volume_objs[0]
-            return volume_objs[0]
-        volume_obj = VolumeObj(x0=x0, x1=x1, y0=y0, y1=y1, z0=z0, z1=z1)
+        volume_obj = VolumeObj(
+            volume_id=VolumeObj.volume_id.newid(),
+            x0=x0, x1=x1, y0=y0, y1=y1, z0=z0, z1=z1)
         self.session.add(volume_obj)
-        if commit:
-            self.session.commit()
         self.all_volumes[key] = volume_obj
+        self.all_volumes_by_volume_id[volume_obj.volume_id] = volume_obj
         return volume_obj
     
     def get_dataset_id(self):
         '''Get a dataset ID in preparation for registering a dataset'''
-        dataset_id_obj = DatasetIDObj()
-        self.session.add(dataset_id_obj)
-        self.session.commit()
-        return dataset_id_obj.dataset_id
+        dataset_id = DatasetObj.dataset_id.newid()
+        return dataset_id
             
     def register_dataset(self, dataset_id, task, dataset_name, volume):
         '''Register that a task will produce a dataset over a volume
@@ -648,7 +631,7 @@ class VolumeDB(object):
             volume=volume_obj,
             dataset_type=dataset_type_obj)
         self.session.add(dataset_obj)
-        self.session.commit()
+        self.all_datasets[dataset_id] = dataset_obj
         return dataset_obj.dataset_id
     
     def find_datasets_by_type_and_volume(self, dataset_name, volume):
@@ -699,25 +682,10 @@ class VolumeDB(object):
         plan ID of the already-existing loading plan
         '''
         key = self._get_loading_plan_key(dataset_name, volume)
-        if key in self.loading_plan_ids:
-            return self.loading_plan_ids[key]
-        result = self.session.query(LoadingPlanObj.loading_plan_id).filter(
-            sqlalchemy.and_(
-                LoadingPlanObj.volume_id == VolumeObj.volume_id,
-                VolumeObj.x0 == volume.x,
-                VolumeObj.y0 == volume.y,
-                VolumeObj.z0 == volume.z,
-                VolumeObj.x1 == volume.x1,
-                VolumeObj.y1 == volume.y1,
-                VolumeObj.z1 == volume.z1,
-                LoadingPlanObj.dataset_type_id == 
-                DatasetTypeObj.dataset_type_id,
-                DatasetTypeObj.name == dataset_name
-                )).first()
-        if result is None:
-            return result
-        self.loading_plan_ids[key] = result[0]
-        return result[0]
+        if key in self.all_loading_plans_by_type_and_volume:
+            return self.all_loading_plans_by_type_and_volume[key]\
+                       .loading_plan_id
+        return None
     
     @staticmethod
     def _get_loading_plan_key(dataset_name, volume):
@@ -728,11 +696,7 @@ class VolumeDB(object):
     def get_loading_plan_id(self):
         '''Get a loading_plan_id in preparation for requesting a dataset
         '''
-        loading_plan_id_obj = LoadingPlanIDObj()
-        self.session.add(loading_plan_id_obj)
-        self.session.commit()
-        return loading_plan_id_obj.loading_plan_id
-    
+        return LoadingPlanObj.loading_plan_id.newid()
     def register_dataset_dependent(
         self, loading_plan_id, task, dataset_name, volume, src_task = None):
         '''Register all dependencies of a task
@@ -759,9 +723,9 @@ class VolumeDB(object):
             src_task_obj = self.get_or_create_task(src_task)
             loading_plan.src_task_id = src_task_obj.task_id
         self.session.add(loading_plan)
-        self.session.commit()
         key = self._get_loading_plan_key(dataset_name, volume)
-        self.loading_plan_ids[key] = loading_plan_id
+        self.all_loading_plans_by_type_and_volume[key] = loading_plan
+        self.all_loading_plans[loading_plan_id] = loading_plan
         return loading_plan.loading_plan_id
     
     def compute_subvolumes(self):
@@ -773,6 +737,10 @@ class VolumeDB(object):
         requires 0:10, 0:10, 5:10, we shard the volume into two pieces:
         0:10, 0:10, 0:5 and 0:10, 0:10, 5:10.
         '''
+        rh_logger.logger.report_event("Computing volumes")
+        self.session.commit()
+        ddos_by_dataset_id = {}
+        t0 = time.time()
         for loading_plan in self.session.query(LoadingPlanObj):
             volume = loading_plan.volume.volume()
             for dataset_obj in self.find_datasets_by_type_and_volume(
@@ -780,31 +748,29 @@ class VolumeDB(object):
                 if loading_plan.src_task is not None and \
                    loading_plan.src_task.task_id != dataset_obj.task.task_id:
                     continue
-                ddo = DatasetDependentObj(dataset=dataset_obj,
-                                          loading_plan=loading_plan)
+                ddo = DatasetDependentObj(
+                    dataset_dependent_id=
+                    DatasetDependentObj.dataset_dependent_id.newid(),
+                    dataset=dataset_obj,
+                    loading_plan_id=loading_plan.loading_plan_id)
                 self.session.add(ddo)
+                if dataset_obj.dataset_id not in ddos_by_dataset_id:
+                    ddos_by_dataset_id[dataset_obj.dataset_id] = []
+                ddos_by_dataset_id[dataset_obj.dataset_id].append(ddo)
         self.session.commit()
-        self.cleanup()
-        
+        rh_logger.logger.report_metric("Load plan dataset mapping time (sec)",
+                                       time.time() - t0)
         #
-        # It might look stupid to download the database, but this
-        # speeds up things
+        # There are enough of these that it's worthwhile to insert
+        # them in bulk using dictionaries.
         #
-        all_volumes = {}
-        for volume in self.session.query(VolumeObj):
-            all_volumes[volume.volume_id] = volume
-        all_ddos = {}
-        for ddo in self.session.query(DatasetDependentObj):
-            if ddo.dataset_id not in all_ddos:
-                all_ddos[ddo.dataset_id] = []
-            all_ddos[ddo.dataset_id].append(ddo)
-        all_loading_plans = {}
-        for loading_plan in self.session.query(LoadingPlanObj):
-            all_loading_plans[loading_plan.loading_plan_id] = loading_plan
-            
+        dataset_subvolume_objs = []
+        subvolume_link_objs = []
+        subvolume_dependent_objs = []
+        t0 = time.time()
         for dataset_obj in self.session.query(DatasetObj):
             assert isinstance(dataset_obj, DatasetObj)
-            volume = all_volumes[dataset_obj.volume_id].volume()
+            volume = dataset_obj.volume.volume()
             x0 = volume.x
             x1 = volume.x1
             x = set([x0, x1])
@@ -817,9 +783,10 @@ class VolumeDB(object):
             #
             # Find the shard points
             #
-            for ddo in all_ddos[dataset_obj.dataset_id]:
-                loading_plan = all_loading_plans[ddo.loading_plan_id]
-                volume = all_volumes[loading_plan.volume_id].volume()
+            for ddo in ddos_by_dataset_id[dataset_obj.dataset_id]:
+                loading_plan = self.all_loading_plans[ddo.loading_plan_id]
+                volume = self.all_volumes_by_volume_id[loading_plan.volume_id] \
+                             .volume()
                 x0a = volume.x
                 x1a = volume.x1
                 y0a = volume.y
@@ -848,14 +815,19 @@ class VolumeDB(object):
                         volume = self.get_or_create_volume_obj(
                             Volume(x=x0a, y=y0a, z=z0a,
                                    width=x1a-x0a, height=y1a-y0a, 
-                                   depth=z1a-z0a), commit=False)
-                        subvolume = DatasetSubvolumeObj(
-                            dataset=dataset_obj,
-                            volume=volume)
-                        self.session.add(subvolume)
+                                   depth=z1a-z0a))
+                        subvolume_id = DatasetSubvolumeObj.subvolume_id.newid()
+                        subvolume = dict(
+                            subvolume_id=subvolume_id,
+                            dataset_id=dataset_obj.dataset_id,
+                            volume_id=volume.volume_id)
+                        dataset_subvolume_objs.append(subvolume)
                         volumes = set()
                         for ddo in dataset_obj.dependents:
-                            volumeb = ddo.loading_plan.volume.volume()
+                            loading_plan = \
+                                self.all_loading_plans[ddo.loading_plan_id]
+                            volumeb = self.all_volumes_by_volume_id[
+                                loading_plan.volume_id].volume()
                             x0b = volumeb.x
                             x1b = volumeb.x1
                             y0b = volumeb.y
@@ -867,21 +839,38 @@ class VolumeDB(object):
                                y0a >= y0b and y1a <= y1b and \
                                z0a >= z0b and z1a <= z1b:
                                 if key not in volumes:
-                                    link = SubvolumeLinkObj(
-                                        subvolume=subvolume,
+                                    link = dict(
+                                        subvolume_link_id=
+                                        SubvolumeLinkObj.subvolume_link_id.newid(),
+                                        subvolume_id=subvolume_id,
                                         loading_plan_id=ddo.loading_plan_id)
-                                    self.session.add(link)
+                                    subvolume_link_objs.append(link)
                                     volumes.add(key)
-                                self.session.add(SubvolumeDependentObj(
-                                    subvolume=subvolume,
-                                    task_id=ddo.loading_plan.task_id))
-        self.cleanup()
+                                subvolume_dependent_objs.append(dict(
+                                    subvolume_dependent_id=
+                                    SubvolumeDependentObj.subvolume_dependent_id.newid(),
+                                    subvolume_id=subvolume_id,
+                                    task_id=loading_plan.task_id))
+        self.session.bulk_insert_mappings(
+            DatasetSubvolumeObj, dataset_subvolume_objs)
+        self.session.bulk_insert_mappings(
+            SubvolumeLinkObj, subvolume_link_objs)
+        self.session.bulk_insert_mappings(
+            SubvolumeDependentObj, subvolume_dependent_objs)
+        self.session.commit()
+        rh_logger.logger.report_metric(
+            "Dataset shard plan time (sec)", time.time() - t0)
         #
         # Assign locations
         #
+        t0 = time.time()
+        subvolume_location_objs = []
+        self.locations_by_subvolume_id = {}
         for subvolume in self.session.query(DatasetSubvolumeObj):
-            persistence = subvolume.dataset.dataset_type.persistence
-            dataset_name = subvolume.dataset.dataset_type.name
+            dataset = self.all_datasets[subvolume.dataset_id]
+            dataset_type = self.dataset_types_by_id[dataset.dataset_type_id]
+            persistence = dataset_type.persistence
+            dataset_name = dataset_type.name
             if persistence == Persistence.Permanent:
                 root = self.target_dir
             else:
@@ -895,12 +884,39 @@ class VolumeDB(object):
             location = os.path.join(
                 root, str(svolume.x), str(svolume.y),
                 str(svolume.z), leaf_dir)
-            self.session.add(SubvolumeLocationObj(
-                subvolume=subvolume,
+            subvolume_location_objs.append(dict(
+                subvolume_location_id=
+                SubvolumeLocationObj.subvolume_location_id.newid(),
+                subvolume_id=subvolume.subvolume_id,
                 location=location,
                 persistence=persistence))
-        self.cleanup()
+            self.locations_by_subvolume_id[subvolume.subvolume_id] = location
+        self.session.bulk_insert_mappings(SubvolumeLocationObj,
+                                          subvolume_location_objs)
         self.session.commit()
+        rh_logger.logger.report_metric("Time to write locations to db (sec)",
+                                       time.time() - t0)
+        #
+        # Get subvolumes by loading plan and storage plan
+        #
+        self.subvolume_by_id = {}
+        self.subvolumes_by_dataset_id = {}
+        self.subvolumes_by_loading_plan_id = {}
+        t0 = time.time()
+        for subvolume in self.session.query(DatasetSubvolumeObj):
+            assert isinstance(subvolume, DatasetSubvolumeObj)
+            self.subvolume_by_id[subvolume.subvolume_id] = subvolume
+            dataset_id = subvolume.dataset_id
+            if dataset_id not in self.subvolumes_by_dataset_id:
+                self.subvolumes_by_dataset_id[dataset_id] = []
+            self.subvolumes_by_dataset_id[dataset_id].append(subvolume)
+        for loading_plan_id, subvolume_id in self.session.query(
+            SubvolumeLinkObj.loading_plan_id,
+            SubvolumeLinkObj.subvolume_id):
+            if loading_plan_id not in self.subvolumes_by_loading_plan_id:
+                self.subvolumes_by_loading_plan_id[loading_plan_id] = []
+            self.subvolumes_by_loading_plan_id[loading_plan_id].append(
+                self.subvolume_by_id[subvolume_id])
     
     def get_loading_plan_path(self, loading_plan_id):
         '''Get the canonical loading plan path from the loading plan ID
@@ -908,13 +924,15 @@ class VolumeDB(object):
         :param loading_plan_id: the loading plan ID of the loading plan
         whose path we want.
         '''
-        loading_plan = self.session.query(LoadingPlanObj).filter(
-            LoadingPlanObj.loading_plan_id == loading_plan_id).first()
+        loading_plan = self.all_loading_plans[loading_plan_id]
         assert isinstance(loading_plan, LoadingPlanObj)
+        
+        dataset_type = self.dataset_types_by_id[loading_plan.dataset_type_id]
+        volume = self.all_volumes_by_volume_id[loading_plan.volume_id].volume()
         loading_plan_path = get_loading_plan_path(
-            self.get_datatype_root(loading_plan.dataset_type.name),
-            loading_plan_id, loading_plan.volume.volume(),
-            loading_plan.dataset_type.name)
+            self.get_datatype_root(dataset_type.name),
+            loading_plan_id, volume,
+            dataset_type.name)
         return loading_plan_path
     
     def get_storage_plan_path(self, dataset_id):
@@ -923,14 +941,15 @@ class VolumeDB(object):
         :param dataset_id: the dataset ID for the dataset whose storage plan
         we are referencing.
         '''
-        dataset = self.session.query(DatasetObj).filter(
-            DatasetObj.dataset_id == dataset_id).first()
+        dataset = self.all_datasets[dataset_id]
         assert isinstance(dataset, DatasetObj)
+        dataset_type = self.dataset_types_by_id[dataset.dataset_type_id]
+        volume = self.all_volumes_by_volume_id[dataset.volume_id].volume()
         return get_storage_plan_path(
-            self.get_datatype_root(dataset.dataset_type.name),
+            self.get_datatype_root(dataset_type.name),
             dataset_id,
-            dataset.volume.volume(),
-            dataset.dataset_type.name)
+            volume,
+            dataset_type.name)
     
     def get_dependencies(self, task):
         '''Get a list of the tasks this task depends on
@@ -997,18 +1016,11 @@ class VolumeDB(object):
         :param loading_plan_id: the loading_plan_id, e.g. as returned by
         register_dataset_dependent
         '''
-        clauses = [
-            VolumeObj.volume_id == DatasetSubvolumeObj.volume_id,
-            
-            DatasetSubvolumeObj.subvolume_id == 
-            SubvolumeLinkObj.subvolume_id,
-            
-            SubvolumeLocationObj.subvolume_id == 
-            SubvolumeLinkObj.subvolume_id,
-            
-            SubvolumeLinkObj.loading_plan_id == loading_plan_id]
-        result = self._make_location_volume_result(clauses)
-        return result
+        subvolumes = self.subvolumes_by_loading_plan_id[loading_plan_id]
+        for subvolume in subvolumes:
+            location = self.locations_by_subvolume_id[subvolume.subvolume_id]
+            volume = self.all_volumes_by_volume_id[subvolume.volume_id].volume()
+            yield location, volume
 
     def _make_location_volume_result(self, clauses):
         '''Issue a query over subvolume_locations and volume
@@ -1035,18 +1047,10 @@ class VolumeDB(object):
         from the call to register_dataset()
         :returns: a list of locations and volumes
         '''
-        #
-        # Go from dataset_id to subvolume to subvolume location
-        #
-        clauses = [
-            DatasetSubvolumeObj.dataset_id == dataset_id,
-            
-            DatasetSubvolumeObj.volume_id == VolumeObj.volume_id,
-           
-            SubvolumeLocationObj.subvolume_id == 
-            DatasetSubvolumeObj.subvolume_id
-        ]
-        return self._make_location_volume_result(clauses)
+        for subvolume in self.subvolumes_by_dataset_id[dataset_id]:
+            location = self.locations_by_subvolume_id[subvolume.subvolume_id]
+            volume = self.all_volumes_by_volume_id[subvolume.volume_id].volume()
+            yield location, volume
     
     def get_loading_plan_ids(self):
         '''Return a sequence of all of the loading plan IDs
@@ -1273,10 +1277,8 @@ class VolumeDB(object):
         :returns: a ariadne_microns_pipeline.parameters.Volume describing
         the dataset's extent
         '''
-        volume = self.session.query(VolumeObj).filter(
-            sqlalchemy.and_(
-                VolumeObj.volume_id == LoadingPlanObj.volume_id,
-                LoadingPlanObj.loading_plan_id == loading_plan_id)).first()
+        loading_plan = self.all_loading_plans[loading_plan_id]
+        volume = self.all_volumes_by_volume_id[loading_plan.volume_id]
         return volume.volume()
     
     def get_loading_plan_dataset_name(self, loading_plan_id):

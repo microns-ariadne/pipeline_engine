@@ -76,7 +76,7 @@ class SegmentationStatisticsRunMixin:
         '''Run the segmentation_metrics on the test and ground truth'''
         
         test_volume = DestVolumeReader(self.test_loading_plan_path)
-        gt_volume = DestVolumeReader(self.gt_loading_plan_path)
+        gt_volume = DestVolumeReader(self.ground_truth_loading_plan_path)
         test_labels = test_volume.imread()
         self.erode_seg(test_labels)
         gt_labels = gt_volume.imread()
