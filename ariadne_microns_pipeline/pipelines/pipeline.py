@@ -1767,7 +1767,8 @@ class PipelineTaskMixin:
                           channel=self.channel)
             for storage_plan_path in self.datasets:
                 storage_plan = json.load(open(storage_plan_path))
-                if storage_plan["dataset_name"] not in result:
+                dataset_name = storage_plan["dataset_name"] 
+                if dataset_name not in result:
                     result[dataset_name] = []
                 ds = result[dataset_name]
                 for volume, image_filename_path in storage_plan["blocks"]:
