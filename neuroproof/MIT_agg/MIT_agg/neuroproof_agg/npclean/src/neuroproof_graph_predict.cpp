@@ -316,7 +316,7 @@ template <typename T> void write_storage_plan(
 	for (int x=0; x < width; ++x) {
 	    for (int y=0; y < height; ++y) {
 		for (int z=0; z < depth; ++z) {
-		    output_volume(x, y, z) = (unsigned char)(mapping[subarray(x, y, z)]);
+		    output_volume(x, y, z) = mapping[subarray(x, y, z)];
 		}
 	    }
 	}

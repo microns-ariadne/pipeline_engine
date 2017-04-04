@@ -269,9 +269,13 @@ class ConnectSynapsesRunMixin:
             edge_z, edge_y, edge_x = np.where(
                 (synapse != 0) & 
                 (grey_dilation(neuron, size=3) != grey_erosion(neuron, size=3)))
-            areas = np.bincount(synapse[edge_z, edge_y, edge_x])
-            xs, ys, zs = [np.bincount(synapse[edge_z, edge_y, edge_x], _)
-                          for _ in edge_x, edge_y, edge_z]
+            maxsynapses = np.max(synapses)+1
+            areas = np.bincount(synapse[edge_z, edge_y, edge_x], 
+                                minlength=maxsynapses)
+            xs, ys, zs = [
+                np.bincount(synapse[edge_z, edge_y, edge_x], _,
+                            minlength=maxsynapses)
+                for _ in edge_x, edge_y, edge_z]
             xc = xs[synapses] / areas[synapses]
             yc = ys[synapses] / areas[synapses]
             zc = zs[synapses] / areas[synapses]
