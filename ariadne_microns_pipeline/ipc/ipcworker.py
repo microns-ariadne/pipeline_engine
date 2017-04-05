@@ -39,6 +39,16 @@ def process_args():
         "--lifetime",
         default="3600",
         help="Lifetime of process in seconds")
+    parser.add_argument(
+        "--diagnostics",
+        default=False,
+        action="store_true",
+        help="Run nvidia-smi on startup")
+    parser.add_argument(
+        "--keras",
+        default=False,
+        action="store_true",
+        help="Import Keras in order to bind the GPU")
     result = parser.parse_args()
     
     class SWorkerArgs:
@@ -47,6 +57,8 @@ def process_args():
         heartbeat_max = float(result.heartbeat_max)
         max_tries = int(result.max_tries)
         lifetime = float(result.lifetime)
+        diagnostics = result.diagnostics
+        keras = result.keras
     return SWorkerArgs()
 
 def worker_socket(context, poller, broker):
@@ -66,6 +78,11 @@ def worker_socket(context, poller, broker):
 def main():
     rh_logger.logger.start_process("IPCWorker", "Starting")
     args = process_args()
+    if args.keras:
+        import keras
+    if args.diagnostics:
+        import subprocess
+        subprocess.check_call(["nvidia-smi"])
     t0 = time.time()
     context = zmq.Context(1)
     poller = zmq.Poller()
