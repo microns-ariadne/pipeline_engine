@@ -84,7 +84,14 @@ def write_storage_plan(volume_db, dataset_id):
              dataset_id=dataset_id)
     path_dir = os.path.dirname(path)
     if not os.path.exists(path_dir):
-        os.makedirs(path_dir)
+        try:
+            # Believe it or not, have seen a race where two tasks try
+            # to make the directory at the same time.
+            os.makedirs(path_dir)
+        except:
+            # Failures other than the race will fail upon trying to create
+            # the done file.
+            rh_logger.logger.report_exception()
     with open(path, "w") as fd:
         json.dump(d, fd)
 
