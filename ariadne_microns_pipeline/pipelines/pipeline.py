@@ -1103,6 +1103,10 @@ class PipelineTaskMixin:
             task.dont_join_orphans = self.dont_join_orphans
             task.orphan_min_overlap_ratio = self.orphan_min_overlap_ratio
             task.orphan_min_overlap_volume = self.orphan_min_overlap_volume
+        #
+        # Create loading plans for the edges
+        #
+        lps = self.generate_edge_loading_plans()
         if len(input_tasks) == 0:
             # There's only a single block, so fake doing AllConnectedComponents
             input_task = self.np_tasks[0, 0, 0]
@@ -1114,16 +1118,18 @@ class PipelineTaskMixin:
                     dataset_name=SEG_DATASET,
                     output_location=self.get_connectivity_graph_location())
             self.tasks.append(self.all_connected_components_task)
-            return
+        else:
+            #
+            # Build the all-connected-components task
+            #
+            input_locations = [task.output().path for task in input_tasks]
+            self.all_connected_components_task = \
+                self.factory.gen_all_connected_components_task(
+                    input_locations, self.get_connectivity_graph_location())
+            for task in input_tasks:
+                self.all_connected_components_task.set_requirement(task)
         #
-        # Build the all-connected-components task
-        #
-        input_locations = [task.output().path for task in input_tasks]
-        self.all_connected_components_task = \
-            self.factory.gen_all_connected_components_task(
-                input_locations, self.get_connectivity_graph_location())
-        for task in input_tasks:
-            self.all_connected_components_task.set_requirement(task)
+        # Register the edge loading plans
     
     def generate_x_connectivity_graph_tasks(self):
         '''Generate connected components tasks to link blocks in x direction
@@ -1572,6 +1578,126 @@ class PipelineTaskMixin:
                 use_mito=self.use_mito) 
         self.neuroproof_learn_task.cpu_count = self.nplearn_cpu_count
         self.tasks.append(self.neuroproof_learn_task)
+    
+    def generate_edge_loading_plans(self):
+        '''Generate loading plans for the edges of the cube
+        
+        The stitch pipeline needs loading plans for the edges of the cube.
+        We assume that the same parameters for stitching as are used interally
+        will be used by the stitching pipeline.
+        '''
+        self.edge_loading_plans = []
+        edge_loading_plan_registrars = []
+        #
+        # X plans
+        #
+        for yi in range(self.n_y):
+            for zi in range(self.n_z):
+                #
+                # Left side
+                #
+                volume = self.get_block_volume(0, yi, zi)
+                x = volume.x + self.np_x_pad / 2
+                overlap_volume = Volume(x - self.halo_size_xy,
+                                        volume.y,
+                                        volume.z,
+                                        self.halo_size_xy * 2 + 1,
+                                        volume.height,
+                                        volume.depth)
+                loading_plan, lp = self.factory.loading_plan(
+                    overlap_volume, NP_DATASET)
+                self.edge_loading_plans.append((volume, loading_plan))
+                edge_loading_plan_registrars.append(lp)
+                #
+                # Right side
+                #
+                volume = self.get_block_volume(self.n_x-1, yi, zi)
+                x = volume.x + volume.width - self.np_x_pad / 2
+                overlap_volume = Volume(x - self.halo_size_xy,
+                                        volume.y,
+                                        volume.z,
+                                        self.halo_size_xy * 2 + 1,
+                                        volume.height,
+                                        volume.depth)
+                loading_plan, lp = self.factory.loading_plan(
+                                overlap_volume, NP_DATASET)
+                self.edge_loading_plans.append((volume, loading_plan))
+                edge_loading_plan_registrars.append(lp)
+        #
+        # Y plans
+        #
+        for xi in range(self.n_x):
+            for zi in range(self.n_z):
+                #
+                # Left side
+                #
+                volume = self.get_block_volume(xi, 0, zi)
+                y = volume.y + self.np_y_pad / 2
+                overlap_volume = Volume(volume.x,
+                                        y - self.halo_size_xy,
+                                        volume.z,
+                                        volume.width,
+                                        self.halo_size_xy * 2 + 1,
+                                        volume.depth)
+                loading_plan, lp = self.factory.loading_plan(
+                    overlap_volume, NP_DATASET)
+                self.edge_loading_plans.append((volume, loading_plan))
+                edge_loading_plan_registrars.append(lp)
+                #
+                # Right side
+                #
+                volume = self.get_block_volume(xi, self.n_y-1, zi)
+                y = volume.y + volume.height - self.np_y_pad / 2
+                overlap_volume = Volume(volume.x,
+                                        y - self.halo_size_xy,
+                                        volume.z,
+                                        volume.width,
+                                        self.halo_size_xy * 2 + 1,
+                                        volume.depth)
+                loading_plan, lp = self.factory.loading_plan(
+                                overlap_volume, NP_DATASET)
+                self.edge_loading_plans.append((volume, loading_plan))
+                edge_loading_plan_registrars.append(lp)
+        #
+        # Z plans
+        #
+        for xi in range(self.n_x):
+            for yi in range(self.n_y):
+                #
+                # Left side
+                #
+                volume = self.get_block_volume(xi, yi, 0)
+                z = volume.z + self.np_z_pad / 2
+                overlap_volume = Volume(volume.x,
+                                        volume.y,
+                                        z - self.halo_size_z,
+                                        volume.width,
+                                        volume.height,
+                                        self.halo_size_z * 2 + 1)
+                loading_plan, lp = self.factory.loading_plan(
+                    overlap_volume, NP_DATASET)
+                self.edge_loading_plans.append((volume, loading_plan))
+                edge_loading_plan_registrars.append(lp)
+                #
+                # Right side
+                #
+                volume = self.get_block_volume(xi, yi, self.n_z-1)
+                z = volume.z + volume.depth - self.np_z_pad / 2
+                overlap_volume = Volume(volume.x,
+                                        volume.y,
+                                        z - self.halo_size_z,
+                                        volume.width,
+                                        volume.height,
+                                        self.halo_size_z * 2 + 1)
+                loading_plan, lp = self.factory.loading_plan(
+                                overlap_volume, NP_DATASET)
+                self.edge_loading_plans.append((volume, loading_plan))
+                edge_loading_plan_registrars.append(lp)
+        #
+        # Do the loading plan registrations with Null tasks
+        #
+        for lp in edge_loading_plan_registrars:
+            lp(None)
     
     def compute_requirements(self):
         '''Compute the requirements for this task'''

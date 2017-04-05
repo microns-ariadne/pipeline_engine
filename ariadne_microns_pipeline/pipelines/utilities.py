@@ -8,6 +8,7 @@ import matplotlib.backends.backend_pdf
 import numpy as np
 import os
 import sqlalchemy
+import datetime
 
 class PipelineRunReportMixin:
     '''This mixin adds a timing report generator to a pipeline
@@ -32,28 +33,34 @@ class PipelineRunReportMixin:
         if hasattr(self, "ariadne_run"):
             self.ariadne_run()
         matplotlib.use("Pdf")
-        d = {}
         conn_params = rh_config.config["luigid"]["db_connection"]
         rh_logger.logger.report_event("Fetching task history")
         engine = sqlalchemy.create_engine(conn_params)
-        self.get_task_history(self, d, engine)
+        d = self.get_task_history(self, engine)
         rh_logger.logger.report_event("%d events retrieved" % len(d))
         tasks = {}
-        for task_id, delta in d.items():
+        tmin = datetime.datetime.now()
+        for task_id, (delta, t0, t1) in d.items():
             if task_id.startswith("ariadne_microns_pipeline."):
                 task_id = task_id.split(".", 1)[1]
             task = task_id.split("_", 1)[0]
             if task not in tasks:
                 tasks[task] = []
             tasks[task].append(delta.total_seconds())
+            if t0 < tmin:
+                tmin = t0
         task_names = sorted(tasks.keys())
         timings = map(lambda k:tasks[k], task_names)
         self.write_pdf_report(task_names, timings)
             
         with self.output().open("w") as fd:
             writer = csv.writer(fd)
-            writer.writerow(["task_id", "run_time"])
-            writer.writerows(d.items())
+            writer.writerow(["task_id", "run_time", "start", "end"])
+            for task_id, (delta, t0, t1) in d.items():
+                writer.writerow((task_id, 
+                                 str(delta), 
+                                 str((t0 - tmin).total_seconds()), 
+                                 str((t1 - tmin).total_seconds())))
 
     def write_pdf_report(self, task_names, timings):
         pdf_path = os.path.splitext(self.pipeline_report_location)[0] + ".pdf"
@@ -105,17 +112,29 @@ class PipelineRunReportMixin:
             pdf.savefig(figure)
             rh_logger.logger.report_event("Finished plotting %s" % pdf_path)
     
-    def get_task_history(self, task, d, engine):
-        subtasks = filter(lambda _:_.task_id not in d, task.requires())
-        if len(subtasks) == 0:
-            return
+    def get_task_history(self, task, engine):
+        '''Get the run history of the task graph
+        
+        :param task: the root of the dependency graph
+        :param engine: a sqlalchemy engine for the Luigi database.
+        :returns: a dictionary of task_id to runtime in seconds, start time
+        and end time
+        '''
+        stack = [task]
+        all_tasks = set()
+        while len(stack) > 0:
+            t = stack.pop()
+            if t.task_id in all_tasks:
+                continue
+            all_tasks.add(t.task_id)
+            stack += list(t.requires())
         sql = """
         SELECT t.task_id, te.event_name, te.ts
         FROM tasks t JOIN task_events te
         ON t.id = te.task_id
         WHERE te.event_name != 'PENDING'
         AND t.task_id in ('%s') order by t.task_id, te.ts""" %\
-            "','".join(map(lambda _:_.task_id, subtasks))
+            "','".join(list(all_tasks))
         result = engine.execute(sql)
         t0 = {}
         t1 = {}
@@ -126,13 +145,12 @@ class PipelineRunReportMixin:
                     del t1[task_id]
             elif event_name == luigi.task_status.DONE and task_id not in t1:
                 t1[task_id] = dateutil.parser.parse(ts)
+        d = {}
         for task_id in t0:
             if task_id in t1:
                 delta = t1[task_id] - t0[task_id]
-                d[task_id] = delta
-        for task in subtasks:
-            self.get_task_history(task, d, engine)
-                
+                d[task_id] = (delta, t0[task_id], t1[task_id])
+        return d
         
         
         

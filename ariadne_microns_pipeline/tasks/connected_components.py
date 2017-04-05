@@ -418,6 +418,10 @@ class AllConnectedComponentsTaskMixin:
         default=0,
         description="Reject a component if it makes more than this many "
                     "connections outside of its volume.")
+    additional_loading_plans=luigi.ListParameter(
+        default=[],
+        description="Additional loading-plan files to be written into the "
+        "locations dictionary, e.g. for use by a stitching pipeline.")
     
     def input(self):
         for input_location in self.input_locations:
@@ -512,12 +516,15 @@ class AllConnectedComponentsRunMixin:
         d = {}
         d["count"] = n_components
         d["volumes"] = []
+        d["additional_locations"] = []
         for volume, m in mappings.items():
             gm = [ (int(a), int(b)) for a, b in zip(m[:, 0], labels[m[:, 1]])]
             d["volumes"].append((dict(volume), gm))
         d["locations"] = []
         for volume, loc in locations.items():
             d["locations"].append((dict(volume), loc))
+        for volume, loading_plan in self.additional_loading_plans:
+            d["additional_locations"].append((volume, loading_plan))
         d["joins"] = []
         for (k1, k2), path in joins.items():
             d["joins"].append((dict(k1), dict(k2), path))

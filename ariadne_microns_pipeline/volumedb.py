@@ -703,7 +703,8 @@ class VolumeDB(object):
         
         :loading_plan_id: the loading plan ID used to refer to the load plan
         for retrieving the volume, e.g. as retrieved from get_loading_plan_id()
-        :param task: a task that has a dataset as a requirement
+        :param task: a task that has a dataset as a requirement or None if
+                     the loading plan is not associated with a task.
         :param dataset_name: the name of the dataset, e.g. "image"
         :param volume: the required volume from the dataset
         :param src_task: the task that's the source of the dataset. By default,
@@ -711,12 +712,16 @@ class VolumeDB(object):
         for the case where there are overlapping datasets.
         :returns: the loading plan ID which can be used to fetch the subvolumes
         '''
-        task_obj = self.get_or_create_task(task)
+        if task is None:
+            task_id = None
+        else:
+            task_obj = self.get_or_create_task(task)
+            task_id = task_obj.task_id
         volume_obj = self.get_or_create_volume_obj(volume)
         dataset_type_obj = self.get_dataset_type(dataset_name)
         loading_plan = LoadingPlanObj(
             loading_plan_id = loading_plan_id,
-            task = task_obj,
+            task_id = task_id,
             volume = volume_obj,
             dataset_type = dataset_type_obj)
         if src_task is not None:
