@@ -74,7 +74,7 @@ class NeuroproofRunMixin:
     threshold = luigi.FloatParameter(
         default=0.2,
         description="Segmentation threshold for neuroproof")
-    watershed_threshold = luigi.FloatParameter(
+    watershed_threshold = luigi.IntParameter(
         default=0,
         description="Threshold used for removing small bodies as a "
                     "post-processing step")
