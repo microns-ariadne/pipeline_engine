@@ -170,6 +170,15 @@ class PipelineTaskMixin:
     block_depth = luigi.IntParameter(
         description="Number of planes in a processing block",
         default=50)
+    classifier_block_width = luigi.IntParameter(
+        default=1024,
+        description="Width of a block sent to the classifier")
+    classifier_block_height = luigi.IntParameter(
+        default=1024,
+        description="Height of a block sent to the classifier")
+    classifier_block_depth = luigi.IntParameter(
+        default=64,
+        description="Depth of a block sent to the classifier")
     np_x_pad = luigi.IntParameter(
         description="The size of the border region for the Neuroproof merge "
         "of blocks to the left and right. The value is the amount of padding"
@@ -630,15 +639,21 @@ class PipelineTaskMixin:
         #
         # Compute exact block sizes for the classifier w/o overlap
         #
-        self.ncl_x = int((self.useable_width-1) / self.block_width) + 1
-        self.ncl_y = int((self.useable_height-1) / self.block_height) + 1
-        self.ncl_z = int((self.useable_depth-1) / self.block_depth) + 1
-        self.cl_xs = self.x0 + self.block_width * np.arange(self.ncl_x)
-        self.cl_xe = self.cl_xs + self.block_width
-        self.cl_ys = self.y0 + self.block_height * np.arange(self.ncl_y)
-        self.cl_ye = self.cl_ys + self.block_width
-        self.cl_zs = self.z0 + self.block_depth * np.arange(self.ncl_z)
-        self.cl_ze = self.cl_zs + self.block_depth
+        self.ncl_x = \
+            int((self.useable_width-1) / self.classifier_block_width) + 1
+        self.ncl_y = \
+            int((self.useable_height-1) / self.classifier_block_height) + 1
+        self.ncl_z = \
+            int((self.useable_depth-1) / self.classifier_block_depth) + 1
+        self.cl_xs = \
+            self.x0 + self.classifier_block_width * np.arange(self.ncl_x)
+        self.cl_xe = self.cl_xs + self.classifier_block_width
+        self.cl_ys = \
+            self.y0 + self.classifier_block_height * np.arange(self.ncl_y)
+        self.cl_ye = self.cl_ys + self.classifier_block_height
+        self.cl_zs = \
+            self.z0 + self.classifier_block_depth * np.arange(self.ncl_z)
+        self.cl_ze = self.cl_zs + self.classifier_block_depth
         #
         # Compute # of blocks for segmentation and beyond. We need at least
         # the Neuroproof padding between n-1 blocks.
@@ -673,6 +688,24 @@ class PipelineTaskMixin:
                                  (self.zs[1:] + self.ze[:-1]) / 2,
                                  [self.z1])).astype(int)
 
+    def compute_task_priority(self, x, y, z):
+        '''Give a task a priority based on its position
+        
+        Prioritize tasks based on their closeness to the origin. The idea here
+        is to finish blocks adjacent to others so the segmentation blocks,
+        which overlap each other, will get coverage quickly.
+        
+        :param x: the x location of the block origin
+        :param y: the y-location of the block origin
+        :param z: the z-location of the block origin
+        :returns: an integer priority with higher values pushing a task
+        to be executed before lower values
+        '''
+        xscaled = float(self.volume.x1 - x) * 10 / self.block_width
+        yscaled = float(self.volume.y1 - y) * 10 / self.block_height
+        zscaled = float(self.volume.z1 - z) * 10 / self.block_depth
+        return int(xscaled * xscaled + yscaled * yscaled + zscaled * zscaled)
+    
     def generate_butterfly_tasks(self):
         '''Get volumes padded for classifier'''
         for zi in range(self.ncl_z):
@@ -694,6 +727,7 @@ class PipelineTaskMixin:
                             volume=volume,
                             dataset_name=IMG_DATASET,
                             resolution=self.resolution)
+                    task.priority = self.compute_task_priority(x0, y0, z0)
                     self.datasets[task.output().path] = task
                     self.tasks.append(task)
 
@@ -759,6 +793,7 @@ class PipelineTaskMixin:
                         output_volume=output_volume,
                         dataset_name=IMG_DATASET,
                         classifier_path=self.pixel_classifier_path)
+                    ctask.priority = self.compute_task_priority(x0, y0, z0)
                     self.tasks.append(ctask)
                     #
                     # Create shims for all channels
@@ -1125,7 +1160,9 @@ class PipelineTaskMixin:
             input_locations = [task.output().path for task in input_tasks]
             self.all_connected_components_task = \
                 self.factory.gen_all_connected_components_task(
-                    input_locations, self.get_connectivity_graph_location())
+                    input_locations=input_locations, 
+                    output_location=self.get_connectivity_graph_location(),
+                additional_loading_plans=self.edge_loading_plans)
             for task in input_tasks:
                 self.all_connected_components_task.set_requirement(task)
         #
@@ -1606,7 +1643,8 @@ class PipelineTaskMixin:
                                         volume.depth)
                 loading_plan, lp = self.factory.loading_plan(
                     overlap_volume, NP_DATASET)
-                self.edge_loading_plans.append((volume, loading_plan))
+                self.edge_loading_plans.append(
+                    (volume.to_dictionary(), loading_plan))
                 edge_loading_plan_registrars.append(lp)
                 #
                 # Right side
@@ -1621,7 +1659,8 @@ class PipelineTaskMixin:
                                         volume.depth)
                 loading_plan, lp = self.factory.loading_plan(
                                 overlap_volume, NP_DATASET)
-                self.edge_loading_plans.append((volume, loading_plan))
+                self.edge_loading_plans.append(
+                    (volume.to_dictionary(), loading_plan))
                 edge_loading_plan_registrars.append(lp)
         #
         # Y plans
@@ -1641,7 +1680,8 @@ class PipelineTaskMixin:
                                         volume.depth)
                 loading_plan, lp = self.factory.loading_plan(
                     overlap_volume, NP_DATASET)
-                self.edge_loading_plans.append((volume, loading_plan))
+                self.edge_loading_plans.append(
+                    (volume.to_dictionary(), loading_plan))
                 edge_loading_plan_registrars.append(lp)
                 #
                 # Right side
@@ -1656,7 +1696,8 @@ class PipelineTaskMixin:
                                         volume.depth)
                 loading_plan, lp = self.factory.loading_plan(
                                 overlap_volume, NP_DATASET)
-                self.edge_loading_plans.append((volume, loading_plan))
+                self.edge_loading_plans.append(
+                    (volume.to_dictionary(), loading_plan))
                 edge_loading_plan_registrars.append(lp)
         #
         # Z plans
@@ -1676,7 +1717,8 @@ class PipelineTaskMixin:
                                         self.halo_size_z * 2 + 1)
                 loading_plan, lp = self.factory.loading_plan(
                     overlap_volume, NP_DATASET)
-                self.edge_loading_plans.append((volume, loading_plan))
+                self.edge_loading_plans.append(
+                    (volume.to_dictionary(), loading_plan))
                 edge_loading_plan_registrars.append(lp)
                 #
                 # Right side
@@ -1691,7 +1733,8 @@ class PipelineTaskMixin:
                                         self.halo_size_z * 2 + 1)
                 loading_plan, lp = self.factory.loading_plan(
                                 overlap_volume, NP_DATASET)
-                self.edge_loading_plans.append((volume, loading_plan))
+                self.edge_loading_plans.append(
+                    (volume.to_dictionary(), loading_plan))
                 edge_loading_plan_registrars.append(lp)
         #
         # Do the loading plan registrations with Null tasks

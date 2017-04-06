@@ -2,12 +2,13 @@ import json
 import luigi
 import os
 
+from .pipeline import NP_DATASET
 from ..parameters import Volume
-from ..targets.factory import TargetFactory
-from ..tasks.factory import AMTaskFactory
 from ..tasks.connected_components import \
-     LogicalOperation, JoiningMethod, Direction
+     LogicalOperation, JoiningMethod, Direction, ConnectedComponentsTask, \
+     AllConnectedComponentsTask
 from ..tasks.utilities import to_hashable
+from ..targets.volume_target import DestVolumeReader
 
 class StitchPipelineTask(luigi.Task):
     task_namespace = "ariadne_microns_pipeline"
@@ -21,6 +22,8 @@ class StitchPipelineTask(luigi.Task):
     output_location = luigi.Parameter(
         description="The location of the component graph file written by "
                     "AllConnectedComponentsTask encompassing both volumes")
+    root_dir = luigi.Parameter(
+        description="Directory for storing intermediate files")
     join_direction = luigi.EnumParameter(
         enum=Direction,
         description="The plane in which to join the components")
@@ -150,7 +153,6 @@ class StitchPipelineTask(luigi.Task):
         
         The AllConnectedComponentsTasks must have been run at this point.
         '''
-        self.factory = AMTaskFactory()
         cg1 = json.load(open(self.component_graph_1, "r"))
         cg2 = json.load(open(self.component_graph_2, "r"))
         #
@@ -160,37 +162,77 @@ class StitchPipelineTask(luigi.Task):
         joins_done = cg1["joins"] + cg2["joins"]
         joins_to_do = []
         #
-        # Build a database of locations in volume # 1
+        # Get the additional loading plans in volume 1. These were put there
+        # in anticipation of us needing edge loading plans
         #
         d_locs = {}
-        for volume, location in cg1["locations"]:
-            d_locs[to_hashable(volume)] = location
+        for volume, location in cg1["additional_locations"]:
+            #
+            # The overlap volume is the actual volume of the loading plan,
+            # not that of the volume it's in. Get it from the plan itself
+            #
+            overlap_volume = DestVolumeReader(location).volume.to_dictionary()
+            d_locs[to_hashable(overlap_volume)] = (location, volume)
+        additional_locations_1 = list(cg1["additional_locations"])
+        additional_locations_2 = []
         #
         # Find overlapping volumes by comparing volume #2 against volume # 1
         #
-        for volume1, location1 in cg2["locations"]:
-            for volume2, location2 in d_locs.items():
-                if self._overlaps(volume1, volume2):
+        for volume2, location2 in cg2["additional_locations"]:
+            overlap2 = DestVolumeReader(location2).volume.to_dictionary()
+            for overlap1, (location1, volume) in d_locs.items():
+                if self._overlaps(overlap1, overlap2):
                     v1 = Volume(**volume1)
                     v2 = Volume(**volume2)
-                    l1 = DatasetLocation(**location1)
-                    l2 = DatasetLocation(**location2)
                     filename = "connected-components-%d-%d-%d_%d-%d-%d.json" % (
                         v1.x, v1.y, v1.z, v2.x, v2.y, v2.z)
-                    output_location = os.path.join(l1.roots[0], filename)
-                    overlap_volume = self._find_overlapping_volume(
-                        volume1, volume2)
-                    task = self.factory.gen_connected_components_task(
-                        v1, l1, v2, l2, overlap_volume, output_location)
+                    output_location = os.path.join(
+                        self.root_dir, filename)
+                    for vmatch, seg_location1 in cg1["locations"]:
+                        if vmatch == volume1:
+                            break
+                    else:
+                        raise Exception("No matching location for cutout")
+                    for vmatch, seg_location2 in cg2["locations"]:
+                        if vmatch == volume2:
+                            break
+                    else:
+                        raise Exception("No matching location for cutout")
+                    task = ConnectedComponentsTask(
+                        volume1=v1,
+                        cutout_loading_plan1_path=location1,
+                        segmentation_loading_plan1_path=seg_location1,
+                        volume2=v2,
+                        cutout_loading_plan2_path=location2,
+                        segmentation_loading_plan2_path=seg_location2,
+                        output_location=output_location)
                     joins_to_do.append(task)
+                    #
+                    # Remove the location from the list of additional locations.
+                    # It's inside the combined volume
+                    #
+                    idx = additional_locations_1.index(
+                        (volume1, location1))
+                    if idx >= 0:
+                        del additional_locations_1[idx]
+                    break
+            else:
+                #
+                # If the location didn't match anything, put it on the list
+                # for inclusion in the output
+                #
+                additional_locations_2.append((volume2, location2))
         #
         # Make the ultra-stupendous AllConnectedComponentsTask
         #
         all_join_files = [_[2] for _ in joins_done]
         all_join_files += [task.output().path for task in joins_to_do]
         self.all_connected_components_task = \
-            self.factory.gen_all_connected_components_task(
-                all_join_files, self.output_location)
+            AllConnectedComponentsTask(
+                input_locations=all_join_files, 
+                output_location=self.output_location,
+                additional_loading_plans = 
+                additional_locations_1 + additional_locations_2)
         for task in joins_to_do:
             self.all_connected_components_task.set_requirement(task)
 

@@ -13,6 +13,7 @@ from matplotlib.cm import ScalarMappable
 from pylab import *
 import dateutil
 import sys
+import os
 
 def draw_gantt(database_url, pdf_file, xy_scale, z_scale):
     stmt = """
@@ -20,8 +21,8 @@ def draw_gantt(database_url, pdf_file, xy_scale, z_scale):
        tp.value from tasks t 
        join task_events te1 on t.id = te1.task_id 
        join task_events te2 on t.id = te2.task_id 
-       left outer join (select task_id, value from task_parameters 
-                         where name="volume" or name="output_volume") tp
+       left outer join (select task_id, max(value) as value from task_parameters 
+                         where value like "%.plan" group by task_id) tp
                          on t.id = tp.task_id
        where te1.event_name = "RUNNING" and te2.event_name="DONE"
              and t.name != "ariadne_microns_pipeline.StitchSegmentationTask"
@@ -59,13 +60,16 @@ def draw_gantt(database_url, pdf_file, xy_scale, z_scale):
     
     if not by_time:
         for item in data:
-            volume = item['value']
-            if volume not in od and volume is not None:
-                v = json.loads(volume)
-                x = int(float(v["x"]) * xy_scale)
-                y = int(float(v["y"]) * xy_scale)
-                z = int(float(v["z"]) * z_scale)
-                od[volume] = octree_encode(x, y, z)
+            storage_plan = item['value']
+            if storage_plan not in od and storage_plan is not None:
+                spd = os.path.dirname(storage_plan)
+                spd, z = os.path.split(spd)
+                spd, y = os.path.split(spd)
+                spd, x = os.path.split(spd)
+                x = int(x) * xy_scale
+                y = int(y) * xy_scale
+                z = int(z) * z_scale
+                od[storage_plan] = octree_encode(x, y, z)
     
             def compare(a, b):
                 av = a['value']
@@ -111,7 +115,7 @@ def draw_gantt(database_url, pdf_file, xy_scale, z_scale):
             ht = float(od[volume])
         barh(ht, delta.total_seconds(), height=bar_height, 
              left=(s-s0).total_seconds(), color=colors[d['name']])
-    legend(handles=[Patch(color=color, label=name) for name, color in colors.items()], loc=4)
+    legend(handles=[Patch(color=color, label=name) for name, color in colors.items()], loc=0)
     gca().set_xlabel("Exection time (sec)")
     gca().set_yticks([])
     gcf().savefig(pdf_file)

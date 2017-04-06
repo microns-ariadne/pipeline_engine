@@ -164,7 +164,14 @@ class SrcVolumeTarget(luigi.LocalTarget):
         for subvolume, tif_path in d["blocks"]:
             tif_dir = os.path.dirname(tif_path)
             if not os.path.isdir(tif_dir):
-                os.makedirs(tif_dir)
+                try:
+                    os.makedirs(tif_dir)
+                except:
+                    #
+                    # Have seen a race between this and another task
+                    # to make the directory.
+                    #
+                    rh_logger.logger.report_exception()
     
     def finish_imwrite(self):
         '''Just copy the storage plan to the output done file destination'''
