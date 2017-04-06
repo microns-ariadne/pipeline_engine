@@ -208,7 +208,7 @@ class AMTaskFactory(object):
 
     def gen_classify_task(
         self, datasets, img_volume, output_volume, dataset_name, 
-        classifier_path):
+        classifier_path, src_task=None):
         '''Classify a volume
 
         :param datasets: a dictionary with keys of the class indexes or names
@@ -221,12 +221,13 @@ class AMTaskFactory(object):
         cropped at the borders.
         :param dataset_name: the name of the dataset type, e.g. "image"
         :param classifier_path: path to a pickled classifer
+        :param src_task: preferred source for image data
         '''
         datasets = to_hashable(datasets)
         #
         # Make the loading plan
         #
-        loading_plan, lp = self.loading_plan(img_volume, dataset_name)
+        loading_plan, lp = self.loading_plan(img_volume, dataset_name, src_task)
         #
         # Make a storage plan for each output channel
         #

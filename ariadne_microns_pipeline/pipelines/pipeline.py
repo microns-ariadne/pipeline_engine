@@ -714,6 +714,8 @@ class PipelineTaskMixin:
     
     def generate_butterfly_tasks(self):
         '''Get volumes padded for classifier'''
+        self.butterfly_tasks = np.zeros(
+            (self.ncl_z, self.ncl_y, self.ncl_x), object)
         for zi in range(self.ncl_z):
             z0 = self.cl_zs[zi] - self.nn_z_pad
             z1 = self.cl_ze[zi] + self.nn_z_pad
@@ -736,6 +738,7 @@ class PipelineTaskMixin:
                     task.priority = self.compute_task_priority(x0, y0, z0)
                     self.datasets[task.output().path] = task
                     self.tasks.append(task)
+                    self.butterfly_tasks[zi, yi, xi] = task
 
     def generate_classifier_tasks(self):
         '''Get the pixel classifier tasks
@@ -777,6 +780,7 @@ class PipelineTaskMixin:
         for zi in range(self.ncl_z):
             for yi in range(self.ncl_y):
                 for xi in range(self.ncl_x):
+                    btask = self.butterfly_tasks[zi, yi, xi]
                     x0 = self.cl_xs[xi]
                     x1 = self.cl_xe[xi]
                     y0 = self.cl_ys[yi]
@@ -798,7 +802,8 @@ class PipelineTaskMixin:
                         img_volume=input_volume,
                         output_volume=output_volume,
                         dataset_name=IMG_DATASET,
-                        classifier_path=self.pixel_classifier_path)
+                        classifier_path=self.pixel_classifier_path,
+                        src_task=btask)
                     ctask.priority = self.compute_task_priority(x0, y0, z0)
                     self.tasks.append(ctask)
                     #
