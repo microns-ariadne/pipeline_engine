@@ -105,6 +105,22 @@ ALL_CONNECTED_COMPONENTS_JSON = "connected-components.json"
 '''Signals that the channel isn't available (e.g. no ground truth)'''
 NO_CHANNEL = "no-channel"
 
+#
+# The priorities of dependents are higher than the priorities of the
+# sources of their data. This should lead to items for the same or related
+# volumes being processed soon afterward, hopefully with the disk data
+# in cache.
+#
+PRIORITY_MASK = 1
+PRIORITY_FIND_SEEDS = 2
+PRIORITY_SEGMENT = 3
+PRIORITY_NEUROPROOF = 4
+PRIORITY_Z_WATERSHED = 4
+PRIORITY_FIND_SYNAPSES = 5
+PRIORITY_CONNECT_SYNAPSES = 6
+PRIORITY_CONNECTED_COMPONENTS = 7
+PRIORITY_SKELETONIZE=8
+
 class PipelineTaskMixin:
     '''The Ariadne-Microns pipeline'''
     
@@ -840,6 +856,7 @@ class PipelineTaskMixin:
                         mask_dataset_name=MASK_DATASET,
                         threshold=self.mask_threshold)
                     self.datasets[btask.output().path] = btask
+                    btask.priority = PRIORITY_MASK                    
                     self.tasks.append(btask)
                     
     def generate_seed_tasks(self):
@@ -861,6 +878,7 @@ class PipelineTaskMixin:
                         dimensionality=self.dimensionality,
                         minimum_distance_xy=self.minimum_distance_xy,
                         minimum_distance_z=self.minimum_distance_z)
+                    stask.priority = PRIORITY_FIND_SEEDS
                     self.datasets[stask.output().path] = stask
                     self.tasks.append(stask)
                     self.seed_tasks[zi, yi, xi] = stask
@@ -888,6 +906,7 @@ class PipelineTaskMixin:
                     if self.use_distance_watershed:
                         stask.use_distance = True
                         stask.threshold = self.watershed_threshold
+                    stask.priority = PRIORITY_SEGMENT
                     self.watershed_tasks[zi, yi, xi] = stask
                     self.datasets[stask.output().path] = stask
                     self.tasks.append(stask)
@@ -926,6 +945,7 @@ class PipelineTaskMixin:
                          y_prob_dataset_name=Y_AFFINITY_DATASET,
                          z_prob_dataset_name=Z_AFFINITY_DATASET,
                          output_dataset_name=SEG_DATASET)
+                    zwtask.priority = PRIORITY_Z_WATERSHED
                     zwtask.threshold = self.z_watershed_threshold
                     self.watershed_tasks[zi, yi, xi] = zwtask
                     self.datasets[zwtask.output().path] = zwtask
@@ -967,6 +987,7 @@ class PipelineTaskMixin:
                         classifier_filename=self.neuroproof_classifier_path,
                         neuroproof_version= self.neuroproof_version,
                         input_seg_src_task=src_task)
+                    np_task.priority = PRIORITY_NEUROPROOF
                     np_task.cpu_count = self.np_cores
                     np_task.threshold=self.np_threshold
                     self.np_tasks[zi, yi, xi] = np_task
@@ -1119,6 +1140,7 @@ class PipelineTaskMixin:
                             z_nm=self.z_nm,
                             decimation_factor=self.skeleton_decimation_factor)
                         stask.cpu_count = self.skeleton_cores
+                        stask.priority = PRIORITY_SKELETONIZE
                         self.tasks.append(stask)
                         self.skeletonize_tasks[zi, yi, xi] = stask
     
@@ -1220,6 +1242,7 @@ class PipelineTaskMixin:
                         src_task2=right_task,
                         overlap_volume=overlap_volume,
                         output_location=output_location)
+                    task.priority = PRIORITY_CONNECTED_COMPONENTS
                     self.tasks.append(task)
                     self.x_connectivity_graph_tasks[zi, yi, xi] = task
                                         
@@ -1258,6 +1281,7 @@ class PipelineTaskMixin:
                         src_task2=right_task,
                         overlap_volume=overlap_volume,
                         output_location=output_location)
+                    task.priority = PRIORITY_CONNECTED_COMPONENTS
                     self.tasks.append(task)
                     self.y_connectivity_graph_tasks[zi, yi, xi] = task
                                         
@@ -1296,6 +1320,7 @@ class PipelineTaskMixin:
                         src_task2=right_task,
                         overlap_volume=overlap_volume,
                         output_location=output_location)
+                    task.priority = PRIORITY_CONNECTED_COMPONENTS
                     self.z_connectivity_graph_tasks[zi, yi, xi] = task
                     self.tasks.append(task)
                     
@@ -1327,6 +1352,7 @@ class PipelineTaskMixin:
                         max_size_2d=self.synapse_max_size_2d,
                         min_size_3d=self.min_synapse_area,
                         min_slice=self.min_synapse_depth)
+                    stask.priority = PRIORITY_FIND_SYNAPSES
                     self.tasks.append(stask)
                     self.datasets[stask.output().path] = stask
                     self.synapse_segmentation_tasks[zi, yi, xi] = stask
@@ -1356,6 +1382,7 @@ class PipelineTaskMixin:
                         max_size_2d=self.synapse_max_size_2d,
                         min_size_3d=self.min_synapse_area,
                         min_slice=self.min_synapse_depth)
+                    stask.priority = PRIORITY_FIND_SYNAPSES
                     self.tasks.append(stask)
                     self.datasets[stask.output().path] = stask
                     self.synapse_segmentation_tasks[zi, yi, xi] = stask
@@ -1396,6 +1423,7 @@ class PipelineTaskMixin:
                         min_contact=self.min_synapse_neuron_contact,
                         synapse_src_task=segtask,
                         neuron_src_task=ntask)
+                    sctask.priority = PRIORITY_CONNECT_SYNAPSES
                     self.tasks.append(sctask)
                     self.synapse_connectivity_tasks[zi, yi, xi] = sctask
         if self.synapse_connection_location != EMPTY_LOCATION:
