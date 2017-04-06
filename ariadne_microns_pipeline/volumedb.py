@@ -537,9 +537,9 @@ class VolumeDB(object):
         :param dataset_id: the dataset_id of the dataset to fetch
         :returns: the name for the dataset's dataset_type
         '''
-        return self.session.query(DatasetTypeObj.name).filter(
-            DatasetTypeObj.dataset_type_id == DatasetObj.dataset_type_id and
-            DatasetObj.dataset_id == dataset_id).first()[0]
+        dataset = self.all_datasets[dataset_id]
+        dataset_type = self.dataset_types_by_id[dataset.dataset_type_id]
+        return dataset_type.name
     
     def get_dataset_dtype_by_dataset_id(self, dataset_id):
         '''Get the Numpy dtype of a dataset via the dataset_id of the record
@@ -548,10 +548,9 @@ class VolumeDB(object):
         :returns: the name of the Numpy dtype, suitable for getattr(np, dtype)
         to fetch it, e.g. "uint8"
         '''
-        datatype = self.session.query(DatasetTypeObj.datatype).filter(
-            DatasetTypeObj.dataset_type_id == DatasetObj.dataset_type_id and
-            DatasetObj.dataset_id == dataset_id).first()[0]
-        return datatype
+        dataset = self.all_datasets[dataset_id]
+        dataset_type = self.dataset_types_by_id[dataset.dataset_type_id]
+        return dataset_type.datatype
     
     def get_or_create_task(self, task):
         '''Register a task with the database
