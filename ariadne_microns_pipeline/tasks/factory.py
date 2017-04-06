@@ -24,6 +24,7 @@ from .mask import MaskBorderTask
 from .match_neurons import MatchNeuronsTask
 from .match_synapses import MatchSynapsesTask
 from .neuroproof import NeuroproofTask
+from .neuroproof_common import NeuroproofVersion
 from .nplearn import NeuroproofLearnTask, StrategyEnum
 from .segment import \
      SegmentTask, SegmentCC2DTask, SegmentCC3DTask, UnsegmentTask, \
@@ -809,6 +810,7 @@ class AMTaskFactory(object):
         input_seg_dataset_name, 
         output_dataset_name,
         classifier_filename,
+        neuroproof_version,
         input_seg_src_task=None):
         '''Run Neuroproof on an oversegmented volume
         
@@ -823,6 +825,8 @@ class AMTaskFactory(object):
         segmentation, e.g. "neuroproof"
         :param classifier_filename: the classifier trained to assess merge/no
         merge decisions.
+        :param np_version: the version of the Neuroproof binary - one
+        of the NeuroproofVersion enums.
         :param input_seg_src_task: the source of the input segmentation in
         order to pick the output of a particular block.
         '''
@@ -845,6 +849,7 @@ class AMTaskFactory(object):
             additional_loading_plan_paths=additional_loading_plan_paths,
             input_seg_loading_plan_path=input_seg_loading_plan_path,
             storage_plan=storage_plan,
+            neuroproof_version=neuroproof_version,
             neuroproof=neuroproof,
             neuroproof_ld_library_path=ld_library_path,
             classifier_filename=classifier_filename))))
@@ -861,7 +866,8 @@ class AMTaskFactory(object):
                                   strategy=StrategyEnum.all,
                                   num_iterations=1,
                                   prune_feature=True,
-                                  use_mito=False):
+                                  use_mito=False,
+                                  neuroproof_version=NeuroproofVersion.MIT):
         '''Generate a task to learn a Neuroproof classifier
         
         :param volume: the volume for the probability, segmentation and
@@ -877,6 +883,8 @@ class AMTaskFactory(object):
         :param prune_feature: True to prune features with low predictive
                values
         :param use_mito: True to use a mitochondrial channel.
+        :param neuroproof_version: choose from among the Neuroproof binary
+        command-line formats - MIT, FLY_EM or MINIMAL
         '''
         neuroproof, ld_library_path = self.__get_neuroproof_config(
             "neuroproof_graph_learn")
@@ -894,7 +902,8 @@ class AMTaskFactory(object):
             strategy=strategy,
             num_iterations=num_iterations,
             prune_feature=prune_feature,
-            use_mito=use_mito))))
+            use_mito=use_mito,
+            neuroproof_version=neuroproof_version))))
     
     def gen_mask_border_task(
         self, volume, prob_dataset_name, mask_dataset_name, threshold=250):

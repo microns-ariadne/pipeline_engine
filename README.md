@@ -435,6 +435,15 @@ The keys of this object are the names of the channels and the values are
 lists of two-tuples of volume (see [Volume object](#volume-object)) and the
 path to the multi-plane .TIF file that contains the data for that volume.
 
+In addition, the following dictionary keys can be used to retrieve the
+image volume from Butterfly:
+
+* *experiment* - the name of the experiment in Butterfly
+* *sample* - an accession number or description of the tissue sample
+* *dataset* - a name for the dataset / volume, e.g. "sem" for electron
+              microscopy data
+* *channel* - the name of the image channel
+
 The microns-volume script [ariadne_microns_pipeline/scripts/microns_volume.py]
 has an example of how to use the index.json file to read an arbitrary
 subvolume of an arbitrary channel.

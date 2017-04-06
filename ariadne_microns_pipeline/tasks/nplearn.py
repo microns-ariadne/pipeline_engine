@@ -1,6 +1,7 @@
 import enum
 import h5py
 import luigi
+import multiprocessing
 import numpy as np
 import os
 import rh_config
@@ -9,6 +10,8 @@ import shutil
 import subprocess
 import tempfile
 
+from .neuroproof_common import NeuroproofVersion
+from .neuroproof_common import write_seg_volume, write_prob_volume
 from .utilities import RequiresMixin, RunMixin, CILKCPUMixin
 from ..targets import DestVolumeReader
 
@@ -69,6 +72,11 @@ class NeuroproofLearnRunMixin:
         description="Automatically prune useless features")
     use_mito = luigi.BoolParameter(
         description="Set delayed mito agglomeration")
+    neuroproof_version = luigi.EnumParameter(
+        enum=NeuroproofVersion,
+        default=NeuroproofVersion.MIT,
+        description="The command-line convention to be used to run the "
+        "Neuroproof binary")
     
     def ariadne_run(self):
         '''Run neuroproof_graph_learn in a subprocess'''
@@ -95,41 +103,91 @@ class NeuroproofLearnRunMixin:
             pred_path = os.path.join(tempdir, "pred.h5")
             watershed_path = os.path.join(tempdir, "watershed.h5")
             gt_path = os.path.join(tempdir, "gt.h5")
+            #
+            # Here, we use multiprocessing to launch the writes. On the surface
+            # of it, this looks like we're using multiple processes to do
+            # the writes in parallel, but more importantly
+            #
+            #            NeuroproofLearnTask
+            #                /           \
+            #       Write processes   Neuroproof
+            #
+            # the handles opened by the write processes take place in a child
+            # process which ends before Neuroproof starts and the HDF5 library
+            # should close the handles before Neuroproof starts.
+            #
+            pool = multiprocessing.Pool(3)
+            if self.neuroproof_version != NeuroproofVersion.MINIMAL:
+                #
+                # neuroproof_graph_predict has a hardcoded dataset name
+                #
+                dataset_name = "volume/predictions";
+                #
+                # neuroproof_graph_predict has the predictions in the
+                # Ilastik convention: x, y, z, c
+                #
+                transpose = True
+            else:
+                #
+                # Neuroproof_stack_learn can take any dataset name
+                #
+                dataset_name = "stack"
+                #
+                # Neuroproof_stack_learn has the predictions in the standard
+                # format: z, y, x, c
+                #
+                transpose = False
+            duplicate = self.neuroproof_version == NeuroproofVersion.MIT
+            pred_process = pool.apply_async(
+                write_prob_volume, 
+                args=[prob_target, additional_map_targets, pred_path, 
+                      dataset_name, transpose, duplicate])
+            dataset_name = "stack"
+            seg_process = pool.apply_async(
+                write_seg_volume, 
+                args=(watershed_path, seg_target, dataset_name))
+            gt_process = pool.apply_async(
+                write_seg_volume,
+                args=(gt_path, gt_target, dataset_name))
+            pool.close()
+            pool.join()
+            pred_process.get()
+            seg_process.get()
+            gt_process.get()
             
-            prob_volume = prob_target.imread().astype(np.float32) / 255.
-            prob_volume = [prob_volume, prob_volume]
-            for tgt in additional_map_targets:
-                prob_volume.append(tgt.imread().astype(np.float32) / 255.)
-            prob_volume = np.array(prob_volume)
-            prob_volume = prob_volume.transpose(3, 2, 1, 0)
-            rh_logger.logger.report_event("%s: writing pred.h5" % task_name)
-            with h5py.File(pred_path, "w") as fd:
-                fd.create_dataset("volume/predictions", data=prob_volume)
-                del prob_volume
-            with h5py.File(watershed_path, "w") as fd:
-                seg_volume = seg_target.imread().astype(np.int32)
-                fd.create_dataset("stack", data=seg_volume)
-                del seg_volume
-            gt_volume = gt_target.imread().astype(np.int32)
-            with h5py.File(gt_path, "w") as fd:
-                fd.create_dataset("stack", data=gt_volume)
-            del gt_volume
-            #
-            # Run the neuroproof_graph_learn task
-            #
-            # See neuroproof_graph_learn.cpp for parameters
-            #
-            args = [
-                self.neuroproof,
-                '--classifier-name', self.output_location,
-                '--strategy-type', str(self.strategy.value),
-                '--num-iterations', str(self.num_iterations),
-                '--prune_feature', ("1" if self.prune_feature else "0"),
-                '--use_mito', ("1" if self.use_mito else "0"),
-                '--watershed-file', watershed_path,
-                '--prediction-file', pred_path,
-                '--groundtruth-file', gt_path
-                ]
+            if self.neuroproof_version == NeuroproofVersion.MINIMAL:
+                #
+                # Run the Neuroproof_stack_learn application
+                #
+                args = [
+                    self.neuroproof,
+                    "-watershed", watershed_path, dataset_name,
+                    "-prediction", pred_path, dataset_name,
+                    "-groundtruth", gt_path, dataset_name,
+                    "-iteration", str(self.num_iterations),
+                    "-strategy", str(self.strategy.value),
+                    "-classifier", self.output_location]
+                if not self.use_mito:
+                    args.append("-nomito")
+                if self.prune_feature:
+                    args.append("-prune_feature")
+            else:
+                #
+                # Run the neuroproof_graph_learn task
+                #
+                # See neuroproof_graph_learn.cpp for parameters
+                #
+                args = [
+                    self.neuroproof,
+                    '--classifier-name', self.output_location,
+                    '--strategy-type', str(self.strategy.value),
+                    '--num-iterations', str(self.num_iterations),
+                    '--prune_feature', ("1" if self.prune_feature else "0"),
+                    '--use_mito', ("1" if self.use_mito else "0"),
+                    '--watershed-file', watershed_path,
+                    '--prediction-file', pred_path,
+                    '--groundtruth-file', gt_path
+                    ]
             #
             # Inject the custom LD_LIBRARY_PATH into the subprocess environment
             #
@@ -140,14 +198,9 @@ class NeuroproofLearnRunMixin:
             else:
                 ld_library_path = self.neuroproof_ld_library_path
             env["LD_LIBRARY_PATH"] = ld_library_path
-            #
-            # Execute. There's often some wierdness with HDF5 where
-            # file handles are inherited by the child process and sad
-            # things happen. So I experimented with isolation until I came
-            # up with the formula below.
-            #
-            args = args[0] + ' "' + '" "'.join(args[1:]) + '"'
-            subprocess.check_call(args, env=env, shell=True)
+
+            rh_logger.logger.report_event(" ".join(args))
+            subprocess.check_call(args, env=env)
 
         finally:
             try:
@@ -159,8 +212,6 @@ class NeuroproofLearnRunMixin:
                 # on disk.
                 #
                 rh_logger.logger.report_exception()
-                
-
 
 class NeuroproofLearnTask(
     NeuroproofLearnTaskMixin,

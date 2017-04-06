@@ -7,6 +7,7 @@ from ..tasks.connected_components import JoiningMethod
 from ..tasks.connected_components import FakeAllConnectedComponentsTask
 from ..tasks.find_seeds import SeedsMethodEnum, Dimensionality
 from ..tasks.match_synapses import MatchMethod
+from ..tasks.neuroproof_common import NeuroproofVersion
 from ..tasks.nplearn import StrategyEnum
 from ..targets.classifier_target import PixelClassifierTarget
 from ..targets.volume_target import write_loading_plan, write_storage_plan
@@ -244,6 +245,11 @@ class PipelineTaskMixin:
         default=[],
         description="The names of additional classifier classes "
                     "that are fed into Neuroproof as channels")
+    neuroproof_version = luigi.EnumParameter(
+        enum=NeuroproofVersion,
+        default=NeuroproofVersion.MIT,
+        description="The command-line convention to be used to run the "
+        "Neuroproof binary")
     nplearn_strategy = luigi.EnumParameter(
         enum=StrategyEnum,
         default=StrategyEnum.all,
@@ -258,10 +264,10 @@ class PipelineTaskMixin:
     nplearn_cpu_count = luigi.IntParameter(
         default=4,
         description="# of CPUS to use in the NeuroproofLearnTask")
-    close_width = luigi.IntParameter(
-        description="The width of the structuring element used for closing "
-        "when computing the border masks.",
-        default=5)
+    mask_threshold = luigi.IntParameter(
+        default=250,
+        description="All membrane probabilities above this are masked to be "
+        "extra-cellular space")
     sigma_xy = luigi.FloatParameter(
         description="The sigma in the X and Y direction of the Gaussian "
         "used for smoothing the probability map",
@@ -824,9 +830,10 @@ class PipelineTaskMixin:
                 for xi in range(self.n_x):
                     volume = self.get_block_volume(xi, yi, zi)
                     btask = self.factory.gen_mask_border_task(
-                        volume,
-                        MEMBRANE_DATASET,
-                        MASK_DATASET)
+                        volume=volume,
+                        prob_dataset_name=MEMBRANE_DATASET,
+                        mask_dataset_name=MASK_DATASET,
+                        threshold=self.mask_threshold)
                     self.datasets[btask.output().path] = btask
                     self.tasks.append(btask)
                     
@@ -953,6 +960,7 @@ class PipelineTaskMixin:
                         input_seg_dataset_name=SEG_DATASET,
                         output_dataset_name=NP_DATASET,
                         classifier_filename=self.neuroproof_classifier_path,
+                        neuroproof_version= self.neuroproof_version,
                         input_seg_src_task=src_task)
                     np_task.cpu_count = self.np_cores
                     np_task.threshold=self.np_threshold
@@ -1612,7 +1620,8 @@ class PipelineTaskMixin:
                 strategy=self.nplearn_strategy,
                 num_iterations=self.nplearn_num_iterations,
                 prune_feature=self.prune_feature,
-                use_mito=self.use_mito) 
+                use_mito=self.use_mito,
+                neuroproof_version=self.neuroproof_version) 
         self.neuroproof_learn_task.cpu_count = self.nplearn_cpu_count
         self.tasks.append(self.neuroproof_learn_task)
     
@@ -1942,6 +1951,10 @@ class PipelineTaskMixin:
                 ds = result[dataset_name]
                 for volume, image_filename_path in storage_plan["blocks"]:
                     ds.append((volume, image_filename_path))
+            result["experiment"] = self.experiment
+            result["sample"] = self.sample
+            result["dataset"] = self.dataset
+            result["channel"] = self.channel
             json.dump(result, open(self.index_file_location, "w"))
 
 class PipelineTask(PipelineTaskMixin, PipelineRunReportMixin, luigi.Task):

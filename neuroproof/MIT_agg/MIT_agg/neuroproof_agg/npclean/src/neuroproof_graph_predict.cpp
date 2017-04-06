@@ -401,8 +401,7 @@ void get_json_files(std::string path,
 		file_names)[0];
 	}
 	/*
-	 * The membrane probabilities appear as the first and second on the
-	 * list, hence the duplication of element 0 below.
+	 * The membrane probabilities appear as the first and  second element.
 	 */
 	prob_list.push_back(tmp);
 	if (i == 0) {
