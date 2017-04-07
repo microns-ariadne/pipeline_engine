@@ -849,6 +849,7 @@ class PipelineTaskMixin:
     
     def generate_border_mask_tasks(self):
         '''Create a border mask for each block'''
+        self.mask_tasks = np.zeros((self.n_z, self.n_y, self.n_x), object)
         for zi in range(self.n_z):
             for yi in range(self.n_y):
                 for xi in range(self.n_x):
@@ -859,8 +860,9 @@ class PipelineTaskMixin:
                         mask_dataset_name=MASK_DATASET,
                         threshold=self.mask_threshold)
                     self.datasets[btask.output().path] = btask
-                    btask.priority = PRIORITY_MASK                    
+                    btask.priority = PRIORITY_MASK
                     self.tasks.append(btask)
+                    self.mask_tasks[zi, yi, xi] = btask
                     
     def generate_seed_tasks(self):
         '''Find seeds for the watersheds'''
@@ -896,10 +898,12 @@ class PipelineTaskMixin:
                 for xi in range(self.n_x):
                     volume = self.get_block_volume(xi, yi, zi)
                     seeds_task = self.seed_tasks[zi, yi, xi]
+                    mask_task = self.mask_tasks[zi, yi, xi]
                     stask = self.factory.gen_segmentation_task(
                         volume=volume,
                         prob_dataset_name=MEMBRANE_DATASET,
                         mask_dataset_name=MASK_DATASET,
+                        mask_src_task=mask_task,
                         seeds_dataset_name=SEEDS_DATASET,
                         seeds_src_task=seeds_task,
                         seg_dataset_name=SEG_DATASET,
