@@ -1145,7 +1145,8 @@ class PipelineTaskMixin:
                             skeleton_location=skel_location,
                             xy_nm=self.xy_nm,
                             z_nm=self.z_nm,
-                            decimation_factor=self.skeleton_decimation_factor)
+                            decimation_factor=self.skeleton_decimation_factor,
+                            src_task=ntask)
                         stask.cpu_count = self.skeleton_cores
                         stask.priority = PRIORITY_SKELETONIZE
                         self.tasks.append(stask)

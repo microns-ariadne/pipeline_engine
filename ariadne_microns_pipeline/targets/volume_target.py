@@ -106,7 +106,7 @@ def write_simple_storage_plan(
     :param dataset_name: the name of the datatype, e.g. "image"
     :param dtype: a string representation of the Numpy dtype, e.g. "uint8"
     '''
-    blocks = [volume.to_dictionary(), dataset_path]
+    blocks = [(volume.to_dictionary(), dataset_path)]
     d = dict(dimensions=[volume.depth,
                          volume.height,
                          volume.width],
