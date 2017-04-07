@@ -4,6 +4,7 @@
 
 import collections
 import enum
+import itertools
 import luigi
 import numpy as np
 import os
@@ -770,7 +771,7 @@ class VolumeDB(object):
         #
         dataset_subvolume_objs = []
         subvolume_link_objs = []
-        subvolume_dependent_objs = []
+        subvolume_dependent_objs = {}
         t0 = time.time()
         for dataset_obj in self.session.query(DatasetObj):
             assert isinstance(dataset_obj, DatasetObj)
@@ -813,54 +814,59 @@ class VolumeDB(object):
             #
             # Create all of the sharded volumes
             #
-            for x0a, x1a in zip(x[:-1], x[1:]):
-                for y0a, y1a in zip(y[:-1], y[1:]):
-                    for z0a, z1a in zip(z[:-1], z[1:]):
-                        volume = self.get_or_create_volume_obj(
-                            Volume(x=x0a, y=y0a, z=z0a,
-                                   width=x1a-x0a, height=y1a-y0a, 
-                                   depth=z1a-z0a))
-                        subvolume_id = DatasetSubvolumeObj.subvolume_id.newid()
-                        subvolume = dict(
-                            subvolume_id=subvolume_id,
-                            dataset_id=dataset_obj.dataset_id,
-                            volume_id=volume.volume_id)
-                        dataset_subvolume_objs.append(subvolume)
-                        volumes = set()
-                        for ddo in dataset_obj.dependents:
-                            loading_plan = \
-                                self.all_loading_plans[ddo.loading_plan_id]
-                            volumeb = self.all_volumes_by_volume_id[
-                                loading_plan.volume_id].volume()
-                            x0b = volumeb.x
-                            x1b = volumeb.x1
-                            y0b = volumeb.y
-                            y1b = volumeb.y1
-                            z0b = volumeb.z
-                            z1b = volumeb.z1
-                            key = (x0b, x1b, y0b, y1b, z0b, z1b)
-                            if x0a >= x0b and x1a <= x1b and \
-                               y0a >= y0b and y1a <= y1b and \
-                               z0a >= z0b and z1a <= z1b:
-                                if key not in volumes:
-                                    link = dict(
-                                        subvolume_link_id=
-                                        SubvolumeLinkObj.subvolume_link_id.newid(),
-                                        subvolume_id=subvolume_id,
-                                        loading_plan_id=ddo.loading_plan_id)
-                                    subvolume_link_objs.append(link)
-                                    volumes.add(key)
-                                subvolume_dependent_objs.append(dict(
-                                    subvolume_dependent_id=
-                                    SubvolumeDependentObj.subvolume_dependent_id.newid(),
-                                    subvolume_id=subvolume_id,
-                                    task_id=loading_plan.task_id))
+            for (x0a, x1a), (y0a, y1a), (z0a, z1a) in itertools.product(
+                zip(x[:-1], x[1:]),
+                zip(y[:-1], y[1:]),
+                zip(z[:-1], z[1:])):
+                volume = self.get_or_create_volume_obj(
+                    Volume(x=x0a, y=y0a, z=z0a,
+                           width=x1a-x0a, height=y1a-y0a, 
+                           depth=z1a-z0a))
+                subvolume_id = DatasetSubvolumeObj.subvolume_id.newid()
+                subvolume = dict(
+                    subvolume_id=subvolume_id,
+                    dataset_id=dataset_obj.dataset_id,
+                    volume_id=volume.volume_id)
+                dataset_subvolume_objs.append(subvolume)
+                volumes = set()
+                for ddo in dataset_obj.dependents:
+                    loading_plan = \
+                        self.all_loading_plans[ddo.loading_plan_id]
+                    volumeb = self.all_volumes_by_volume_id[
+                        loading_plan.volume_id].volume()
+                    x0b = volumeb.x
+                    x1b = volumeb.x1
+                    y0b = volumeb.y
+                    y1b = volumeb.y1
+                    z0b = volumeb.z
+                    z1b = volumeb.z1
+                    key = (x0b, x1b, y0b, y1b, z0b, z1b)
+                    if x0a >= x0b and x1a <= x1b and \
+                       y0a >= y0b and y1a <= y1b and \
+                       z0a >= z0b and z1a <= z1b:
+                        if key not in volumes:
+                            link = dict(
+                                subvolume_link_id=
+                                SubvolumeLinkObj.subvolume_link_id.newid(),
+                                subvolume_id=subvolume_id,
+                                loading_plan_id=ddo.loading_plan_id)
+                            subvolume_link_objs.append(link)
+                            volumes.add(key)
+                        key = (subvolume_id, loading_plan.task_id)
+                        if loading_plan.task_id is not None and \
+                           key not in subvolume_dependent_objs:
+                            subvolume_dependent_objs[key] = dict(
+                                subvolume_dependent_id=
+                                SubvolumeDependentObj.subvolume_dependent_id\
+                                                     .newid(),
+                                subvolume_id=subvolume_id,
+                                task_id=loading_plan.task_id)
         self.session.bulk_insert_mappings(
             DatasetSubvolumeObj, dataset_subvolume_objs)
         self.session.bulk_insert_mappings(
             SubvolumeLinkObj, subvolume_link_objs)
         self.session.bulk_insert_mappings(
-            SubvolumeDependentObj, subvolume_dependent_objs)
+            SubvolumeDependentObj, subvolume_dependent_objs.values())
         self.session.commit()
         rh_logger.logger.report_metric(
             "Dataset shard plan time (sec)", time.time() - t0)

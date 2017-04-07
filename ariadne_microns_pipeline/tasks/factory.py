@@ -510,7 +510,8 @@ class AMTaskFactory(object):
         self, volume, synapse_prob_dataset_name, output_dataset_name,
         erosion_xy, erosion_z, sigma_xy, sigma_z, threshold,
         min_size_2d, max_size_2d, min_size_3d, min_slice,
-        neuron_segmentation_dataset_name=None):
+        neuron_segmentation_dataset_name=None,
+        neuron_src_task=None):
         '''Generate a task to segment synapses
         
         :param volume: the volume to segment
@@ -544,7 +545,7 @@ class AMTaskFactory(object):
             erode_with_neurons=False
         else:
             neuron_loading_plan_path, nlp = self.loading_plan(
-                volume, neuron_segmentation_dataset_name)
+                volume, neuron_segmentation_dataset_name, neuron_src_task)
             erode_with_neurons = True
         #
         # Get the storage plan
@@ -567,10 +568,11 @@ class AMTaskFactory(object):
     
     def gen_find_synapses_tr_task(
         self, volume, transmitter_dataset_name, receptor_dataset_name,
-        output_dataset_name,
+        output_dataset_name, 
         erosion_xy, erosion_z, sigma_xy, sigma_z, threshold,
         min_size_2d, max_size_2d, min_size_3d, min_slice,
-        neuron_dataset_name = None):
+        neuron_dataset_name = None,
+        neuron_src_task=None):
         '''Generate a task to segment synapses w/a transmitter and receptor map
         
         :param volume: the volume to segment
@@ -590,6 +592,7 @@ class AMTaskFactory(object):
         :param max_size_2d: discard any 2d segments with area greater than this.
         :param min_size_3d: discard any 3d segments with area less than this.
         :param min_slice: discard any 3d segments whose z-extent is lt this.
+        :param neuron_src_task: the task that produced the neuron segmentation
         '''
         #
         # Get the loading plans
@@ -604,7 +607,7 @@ class AMTaskFactory(object):
             erode_with_neurons=False
         else:
             neuron_loading_plan_path, nlp = self.loading_plan(
-                volume, neuron_dataset_name)
+                volume, neuron_dataset_name, neuron_src_task)
             erode_with_neurons = True
         #
         # Get the storage plan

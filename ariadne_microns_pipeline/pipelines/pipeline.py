@@ -358,6 +358,9 @@ class PipelineTaskMixin:
     min_synapse_area = luigi.IntParameter(
         description="Minimum area for a synapse",
         default=250)
+    synapse_erode_with_neurons = luigi.BoolParameter(
+        description="Only consider the synapse pixels within a certain "
+        "distance from a neuron edge")
     synapse_xy_erosion = luigi.IntParameter(
         default=4,
         description = "# of pixels to erode the neuron segmentation in the "
@@ -1338,10 +1341,15 @@ class PipelineTaskMixin:
             for yi in range(self.n_y):
                 for xi in range(self.n_x):
                     volume = self.get_block_volume(xi, yi, zi)
+                    if self.synapse_erode_with_neurons:
+                        ntask = self.np_tasks[zi, yi, xi]
+                        neuron_dataset = NP_DATASET
+                    else:
+                        ntask = neuron_dataset = None
                     stask = self.factory.gen_find_synapses_task(
                         volume=volume,
                         synapse_prob_dataset_name=SYNAPSE_DATASET,
-                        neuron_segmentation_dataset_name=NP_DATASET,
+                        neuron_segmentation_dataset_name=neuron_dataset,
                         output_dataset_name=SYN_SEG_DATASET,
                         threshold=self.synapse_threshold,
                         erosion_xy=self.synapse_xy_erosion,
@@ -1351,7 +1359,8 @@ class PipelineTaskMixin:
                         min_size_2d=self.synapse_min_size_2d,
                         max_size_2d=self.synapse_max_size_2d,
                         min_size_3d=self.min_synapse_area,
-                        min_slice=self.min_synapse_depth)
+                        min_slice=self.min_synapse_depth,
+                        neuron_src_task=ntask)
                     stask.priority = PRIORITY_FIND_SYNAPSES
                     self.tasks.append(stask)
                     self.datasets[stask.output().path] = stask
@@ -1367,11 +1376,16 @@ class PipelineTaskMixin:
             for yi in range(self.n_y):
                 for xi in range(self.n_x):
                     volume = self.get_block_volume(xi, yi, zi)
+                    if self.synapse_erode_with_neurons:
+                        ntask = self.np_tasks[zi, yi, xi]
+                        neuron_dataset = NP_DATASET
+                    else:
+                        ntask = neuron_dataset = None
                     stask = self.factory.gen_find_synapses_tr_task(
                         volume=volume,
                         transmitter_dataset_name=SYNAPSE_TRANSMITTER_DATASET,
                         receptor_dataset_name=SYNAPSE_RECEPTOR_DATASET,
-                        neuron_dataset_name=NP_DATASET,
+                        neuron_dataset_name=neuron_dataset,
                         output_dataset_name=SYN_SEG_DATASET,
                         threshold=self.synapse_threshold,
                         erosion_xy=self.synapse_xy_erosion,
@@ -1381,7 +1395,8 @@ class PipelineTaskMixin:
                         min_size_2d=self.synapse_min_size_2d,
                         max_size_2d=self.synapse_max_size_2d,
                         min_size_3d=self.min_synapse_area,
-                        min_slice=self.min_synapse_depth)
+                        min_slice=self.min_synapse_depth,
+                        neuron_src_task=ntask)
                     stask.priority = PRIORITY_FIND_SYNAPSES
                     self.tasks.append(stask)
                     self.datasets[stask.output().path] = stask
