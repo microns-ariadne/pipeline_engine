@@ -15,7 +15,8 @@ import zipfile
 
 from ..targets import DestVolumeReader
 from .utilities import RequiresMixin, RunMixin, CILKCPUMixin
-
+from ..parameters import EMPTY_LOCATION
+from .connected_components import ConnectivityGraph
 
 class SkeletonizeTaskMixin:
     
@@ -36,6 +37,10 @@ class SkeletonizeTaskMixin:
 
 class SkeletonizeRunMixin:
     
+    connectivity_graph=luigi.Parameter(
+        default=EMPTY_LOCATION,
+        description="The connectivity graph, translating from local to "
+        "global ids. Defaults to using local IDs.")
     xy_nm = luigi.FloatParameter(
         default=4.0,
         description="The dimension of a voxel in the x and y directions")
@@ -75,13 +80,19 @@ class SkeletonizeRunMixin:
                     "boundary (in nm) in the skeleton")
     
     def ariadne_run(self):
+        tgt = DestVolumeReader(self.segmentation_loading_plan_path)
+        seg = tgt.imread()
+        if self.connectivity_graph != EMPTY_LOCATION:
+            cg = ConnectivityGraph.load(open(self.connectivity_graph))
+            volume = tgt.volume
+            seg = cg.convert(seg, volume)
+        
         if self.use_neutu:
-            self.skeletonize_using_neutu()
+            self.skeletonize_using_neutu(seg)
         else:
-            self.skeletonize_using_microns()
+            self.skeletonize_using_microns(seg)
     
-    def skeletonize_using_microns(self):
-        seg = DestVolumeReader(self.segmentation_loading_plan_path).imread()
+    def skeletonize_using_microns(self, seg):
 
         result = skeletonize(seg, self.xy_nm, self.z_nm, self.decimation_factor,
                     self.cpu_count, too_big=self.too_big)
@@ -105,7 +116,7 @@ class SkeletonizeRunMixin:
             with self.output().open("w") as fd:
                 json.dump(paths, fd)
     
-    def skeletonize_using_neutu(self):
+    def skeletonize_using_neutu(self, seg):
         '''Skeletonize by running "skeletonize_stack" to execute NeuTu's code
         
         See https://github.com/vcg/microns_skeletonization

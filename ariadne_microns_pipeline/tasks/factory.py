@@ -480,7 +480,8 @@ class AMTaskFactory(object):
     
     def gen_skeletonize_task(
         self, volume, segmentation_dataset_name, skeleton_location,
-        xy_nm, z_nm, decimation_factor=0, src_task=None):
+        xy_nm, z_nm, decimation_factor=0, src_task=None, 
+        connectivity_graph=EMPTY_LOCATION):
         '''Generate a skeletonize task
         
         The skeletonize task takes a segmentation and produces .swc files
@@ -497,6 +498,8 @@ class AMTaskFactory(object):
             this factor of its parent's volume.
         :param src_task: the task that produced the segmentation. Default
         is don't care
+        :param connectivity_graph: the connectivity graph for making a global
+        segmentation
         '''
         segmentation_loading_plan_path, lp = self.loading_plan(
             volume, segmentation_dataset_name, src_task)
@@ -504,7 +507,8 @@ class AMTaskFactory(object):
             segmentation_loading_plan_path=segmentation_loading_plan_path,
             skeleton_location=skeleton_location,
             xy_nm=xy_nm, z_nm=z_nm, 
-            decimation_factor=decimation_factor))
+            decimation_factor=decimation_factor,
+            connectivity_graph=connectivity_graph))
     
     def gen_find_synapses_task(
         self, volume, synapse_prob_dataset_name, output_dataset_name,

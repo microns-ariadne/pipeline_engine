@@ -503,7 +503,8 @@ class PipelineTaskMixin:
             self.stitched_segmentation_location != EMPTY_LOCATION or \
             self.wants_neuron_statistics or \
             self.wants_synapse_statistics or \
-            self.wants_neuroproof_learn
+            self.wants_neuroproof_learn or \
+            self.wants_skeletonization
     
     @property
     def wants_neuron_statistics(self):
@@ -1126,9 +1127,6 @@ class PipelineTaskMixin:
         if self.wants_skeletonization:
             self.skeletonize_tasks = np.zeros((self.n_z, self.n_y, self.n_x),
                                               object)
-            #
-            # TODO - operate on the stitched segmentation
-            #
             for zi in range(self.n_z):
                 for yi in range(self.n_y):
                     for xi in range(self.n_x):
@@ -1146,9 +1144,13 @@ class PipelineTaskMixin:
                             xy_nm=self.xy_nm,
                             z_nm=self.z_nm,
                             decimation_factor=self.skeleton_decimation_factor,
-                            src_task=ntask)
+                            src_task=ntask,
+                            connectivity_graph=
+                            self.get_connectivity_graph_location())
                         stask.cpu_count = self.skeleton_cores
                         stask.priority = PRIORITY_SKELETONIZE
+                        stask.set_requirement(
+                            self.all_connected_components_task)
                         self.tasks.append(stask)
                         self.skeletonize_tasks[zi, yi, xi] = stask
     
@@ -1890,12 +1892,7 @@ class PipelineTaskMixin:
                     rh_logger.logger.report_event("Making Neuroproof tasks")
                     self.generate_neuroproof_tasks()
                     #
-                    # Step 8: Skeletonize Neuroproof
-                    #
-                    rh_logger.logger.report_event("Making skeletonize tasks")
-                    self.generate_skeletonize_tasks()
-                    #
-                    # Step 9: Segment the synapses
+                    # Step 8: Segment the synapses
                     #
                     rh_logger.logger.report_event("Segment synapses")
                     if self.wants_transmitter_receptor_synapse_maps:
@@ -1903,10 +1900,15 @@ class PipelineTaskMixin:
                     else:
                         self.generate_synapse_segmentation_tasks()
                     #
-                    # Step 10: The connectivity graph.
+                    # Step 9: The connectivity graph.
                     #
                     rh_logger.logger.report_event("Making connectivity graph")
                     self.generate_connectivity_graph_tasks()
+                    #
+                    # Step 10: Skeletonize Neuroproof
+                    #
+                    rh_logger.logger.report_event("Making skeletonize tasks")
+                    self.generate_skeletonize_tasks()
                     #
                     # Step 11: Connect synapses to neurites
                     #
