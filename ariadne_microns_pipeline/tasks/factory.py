@@ -7,6 +7,7 @@ import os
 import rh_config
 
 from .download_from_butterfly import DownloadFromButterflyTask
+from .download_from_butterfly import LocalButterflyTask
 from .classify import ClassifyTask
 from .connected_components import AllConnectedComponentsTask
 from .connected_components import ConnectedComponentsTask
@@ -204,6 +205,19 @@ class AMTaskFactory(object):
             volume=volume,
             resolution=resolution,
             storage_plan=storage_plan))
+        return task
+    
+    def gen_local_butterfly_task(self, index_file, volume, dataset_name):
+        '''Get a 3d volume using the LocalButterflyTask
+        
+        :param index_file: the index file that tells us how to get
+                           the tiles
+        :param dataset_name: the name of the target dataset
+        :param volume: the volume of the target dataset
+        '''
+        storage_plan, sp = self.storage_plan(volume, dataset_name)
+        task = sp(LocalButterflyTask(index_file=index_file,
+                                     storage_plan=storage_plan))
         return task
 
     def gen_classify_task(

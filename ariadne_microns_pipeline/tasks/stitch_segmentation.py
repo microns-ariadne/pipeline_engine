@@ -14,6 +14,7 @@ import time
 from .utilities import RunMixin, RequiresMixin, SingleThreadedMixin, to_hashable
 from ..parameters import VolumeParameter
 from ..targets import DestVolumeReader
+from ..utilities.hdf5 import hdf5open
 
 class Compression(enum.Enum):
     '''Compression types for HDF5'''
@@ -67,6 +68,9 @@ class StitchSegmentationRunMixin:
     n_workers = luigi.IntParameter(
         default=4,
         description="Number of reader worker processes")
+    hdf5_cache_size = luigi.IntParameter(
+        default=100 * 1000 * 1000,
+        description="Size of HDF5 chunk cache")
     
     def ariadne_run(self):
         output_tgt = self.output()
@@ -91,6 +95,7 @@ class StitchSegmentationRunMixin:
                         (self.output_volume.depth, 
                          self.output_volume.height, 
                          self.output_volume.width),
+                        self.hdf5_cache_size,
                         kwds, result))
                 worker.start()
                 x0 = self.output_volume.x
@@ -114,7 +119,7 @@ class StitchSegmentationRunMixin:
                 # Get input volumes from connected components
                 #
                 read_results = []
-                for volume, location in cc["locations"]:
+                for volume, location in sort_locations(cc["locations"]):
                     rr = pool.apply_async(
                         read_block, 
                         args=(location, x0, x1, y0, y1, z0, z1, volume_map, 
@@ -131,6 +136,21 @@ class StitchSegmentationRunMixin:
                 if result.value < 0:
                     raise Exception("Writer process failed. See log for details")
                 worker.join()
+
+def sort_locations(loc_list):
+    '''Sort locations by z, y and x
+    
+    This routine yields locations by increasing z then y then x. This
+    gives some cache coherency to successive HDF5 writes.
+    
+    :param loc_list: a list of volume and location to be sorted
+    
+    yileds volume and location
+    '''
+    def sort_key(element):
+        volume, location = element
+        return (volume["z"], volume["y"], volume["x"])
+    return sorted(loc_list, key=sort_key)
 
 def read_block(location, x0, x1, y0, y1, z0, z1, volume_map, queue,
                x_padding, y_padding, z_padding):
@@ -190,7 +210,8 @@ def read_block(location, x0, x1, y0, y1, z0, z1, volume_map, queue,
         x0a-x0, y0a-y0, z0a-z0))
     return (x1a - x0a, y1a-y0a, z1a-z0a)
 
-def writer(queue, hdf_file, dataset_name, shape, create_dataset_kwds, result):
+def writer(queue, hdf_file, dataset_name, shape, cache_size, 
+           create_dataset_kwds, result):
     '''The writer runs on its own thread, writing blocks from the queue.
     
     '''
@@ -204,7 +225,7 @@ def writer(queue, hdf_file, dataset_name, shape, create_dataset_kwds, result):
         rh_logger_started = False
     try:
         t0 = time.time()
-        with h5py.File(hdf_file, "w") as fd:
+        with hdf5open(hdf_file, "w", cache_size) as fd:
             rh_logger.logger.report_event(
                 "Creating dataset with shape %s" % repr(shape))
             ds = fd.create_dataset(dataset_name, shape=shape, dtype=np.uint32, 
@@ -221,6 +242,7 @@ def writer(queue, hdf_file, dataset_name, shape, create_dataset_kwds, result):
                    x:x+block.shape[2]] = block
                 rh_logger.logger.report_metric("HDF5 write time (sec)", 
                                                time.time() - t0)
+            rh_logger.logger.report_event("Finished writing blocks")
     except:
         result.value = -1
         rh_logger.logger.report_exception()

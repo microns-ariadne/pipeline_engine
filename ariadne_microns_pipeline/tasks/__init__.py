@@ -16,6 +16,7 @@ from .connected_components import \
 from .connect_synapses import ConnectSynapsesTask
 from .distance_transform import DistanceTransformTask
 from .download_from_butterfly import DownloadFromButterflyTask
+from .download_from_butterfly import LocalButterflyTask
 from .factory import AMTaskFactory
 from .find_seeds import FindSeedsTask, Dimensionality, SeedsMethodEnum
 from .mask import MaskBorderTask

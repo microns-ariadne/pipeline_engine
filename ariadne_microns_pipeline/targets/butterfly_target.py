@@ -184,4 +184,56 @@ def get_butterfly_plane_from_channel(
         url=channel_target.url,
         resolution=resolution)
 
-all=[get_butterfly_plane_from_channel, ButterflyChannelTarget, ButterflyTarget]
+class LocalButterflyChannelTarget(luigi.Target):
+    '''Represents a channel on the volume of a local Butterfly dataset'''
+    
+    def __init__(self, index_file):
+        '''Initialize the channel
+        
+        :param index_file: the index file that has the butterfly tiles
+        
+        See LocalButterflyTask for a description of this file
+        '''
+        self.index_file = index_file
+        self.__fetched = False
+    
+    def exists(self):
+        try:
+            self.__cache_channel_params()
+            return True
+        except:
+            return False
+    
+    @property
+    def x_extent(self):
+        self.__cache_channel_params()
+        return self.__x_extent
+    
+    @property
+    def y_extent(self):
+        self.__cache_channel_params()
+        return self.__y_extent
+    
+    @property
+    def z_extent(self):
+        self.__cache_channel_params()
+        return self.__z_extent
+    
+    @property
+    def data_type(self):
+        self.__cache_channel_params()
+        return getattr(np, self.__data_type)
+    
+    def __cache_channel_params(self):
+        '''extract info from the index file'''
+        if self.__fetched:
+            return
+        index = json.load(open(self.index_file))
+        self.__z_extent = len(index["sections"])
+        dimensions = index["dimensions"]
+        self.__x_extent = dimensions["n_columns"] * dimensions["width"]
+        self.__y_extent = dimensions["n_rows"] * dimensions["height"]
+        self.__fetched = True
+
+all=[get_butterfly_plane_from_channel, ButterflyChannelTarget, ButterflyTarget,
+     LocalButterflyChannelTarget]

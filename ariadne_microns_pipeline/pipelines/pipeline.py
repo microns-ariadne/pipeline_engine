@@ -12,6 +12,7 @@ from ..tasks.nplearn import StrategyEnum
 from ..targets.classifier_target import PixelClassifierTarget
 from ..targets.volume_target import write_loading_plan, write_storage_plan
 from ..targets.butterfly_target import ButterflyChannelTarget
+from ..targets.butterfly_target import LocalButterflyChannelTarget
 from ..parameters import Volume, VolumeParameter
 from ..parameters import EMPTY_LOCATION, EMPTY_DATASET_ID, is_empty_dataset_id
 from ..parameters import DEFAULT_LOCATION
@@ -119,7 +120,17 @@ PRIORITY_Z_WATERSHED = 4
 PRIORITY_FIND_SYNAPSES = 5
 PRIORITY_CONNECT_SYNAPSES = 6
 PRIORITY_CONNECTED_COMPONENTS = 7
-PRIORITY_SKELETONIZE=8
+PRIORITY_STATISTICS = 8
+#
+# Skeletonization should have less priority than connecting and finding
+# the synapses since statistics are more cruicial and timely to the run
+#
+PRIORITY_SKELETONIZE=4
+#
+# Stitching should happen as soon as possible because it's long-running
+# and determines the length of the run
+#
+PRIORITY_STITCH=100
 
 class PipelineTaskMixin:
     '''The Ariadne-Microns pipeline'''
@@ -167,6 +178,10 @@ class PipelineTaskMixin:
     # Optional parameters
     #
     #########
+    butterfly_index_file = luigi.Parameter(
+        default=EMPTY_LOCATION,
+        description="The index file giving the location of image tiles "
+        "for a local \"butterfly\".")
     datatypes_to_keep = luigi.ListParameter(
         default=[],
         description="Names of the datasets (e.g. \"neuroproof\") to store "
@@ -639,9 +654,12 @@ class PipelineTaskMixin:
                             For instance, block xi's valid region, considering
                             overlap is self.x_grid[xi] to self.x_grid[xi+1]
         '''
-        butterfly = ButterflyChannelTarget(
-            self.experiment, self.sample, self.dataset, self.channel, 
-            self.url)
+        if self.butterfly_index_file != EMPTY_LOCATION:
+            butterfly = LocalButterflyChannelTarget(self.butterfly_index_file)
+        else:
+            butterfly = ButterflyChannelTarget(
+                self.experiment, self.sample, self.dataset, self.channel, 
+                self.url)
         #
         # The useable width, height and depth are the true widths
         # minus the classifier padding
@@ -746,15 +764,21 @@ class PipelineTaskMixin:
                     x0 = self.cl_xs[xi] - self.nn_x_pad
                     x1 = self.cl_xe[xi] + self.nn_x_pad
                     volume = Volume(x0, y0, z0, x1-x0, y1-y0, z1-z0)
-                    task = self.factory.gen_get_volume_task(
-                            experiment=self.experiment,
-                            sample=self.sample,
-                            dataset=self.dataset,
-                            channel=self.channel,
-                            url=self.url,
-                            volume=volume,
-                            dataset_name=IMG_DATASET,
-                            resolution=self.resolution)
+                    if self.butterfly_index_file == EMPTY_LOCATION:
+                        task = self.factory.gen_get_volume_task(
+                                experiment=self.experiment,
+                                sample=self.sample,
+                                dataset=self.dataset,
+                                channel=self.channel,
+                                url=self.url,
+                                volume=volume,
+                                dataset_name=IMG_DATASET,
+                                resolution=self.resolution)
+                    else:
+                        task = self.factory.gen_local_butterfly_task(
+                            self.butterfly_index_file,
+                            volume,
+                            IMG_DATASET)
                     task.priority = self.compute_task_priority(x0, y0, z0)
                     self.datasets[task.output().path] = task
                     self.tasks.append(task)
@@ -1107,6 +1131,7 @@ class PipelineTaskMixin:
                 json_paths=json_paths,
                 output_path = self.statistics_csv_path,
                 excluded_keys=["per_object", "pairs"])
+            self.statistics_csv_task.priority = PRIORITY_STATISTICS
             pdf_path = os.path.splitext(self.statistics_csv_path)[0] + ".pdf"
             self.statistics_report_task = \
                 self.factory.gen_segmentation_report_task(
@@ -1464,6 +1489,8 @@ class PipelineTaskMixin:
                 sc_tasks)
             self.aggregate_synapse_connections_task.set_requirement(
                 self.all_connected_components_task)
+            self.aggregate_synapse_connections_task.priority = \
+                PRIORITY_STATISTICS
             yield self.aggregate_synapse_connections_task
             
     
@@ -1625,6 +1652,7 @@ class PipelineTaskMixin:
         self.stitched_segmentation_task.z_padding = self.np_z_pad
         self.stitched_segmentation_task.set_requirement(
             self.all_connected_components_task)
+        self.stitched_segmentation_task.priority = PRIORITY_STITCH
         self.tasks.append(self.stitched_segmentation_task)
     
     ########################################################
