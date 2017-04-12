@@ -116,6 +116,22 @@ class LocalButterflyTaskMixin(DatasetMixin):
     index_file = luigi.Parameter(
         description="The path to the index file for the dataset")
 
+    def estimate_memory_usage(self):
+        '''Return an estimate of bytes of memory required by this task'''
+        v1 = np.prod([1200, 1200, 72]) 
+        m1 = 421668 * 1000
+        v2 = np.prod([2048, 2048, 50])
+        m2 = 606544 * 1000
+        #
+        # Model is Ax + B where x is volume in voxels
+        #
+        B = (v1 * m2 - v2 * m1) / (v1 - v2)
+        A = (float(m1) - B) / v1
+        tgt = self.output()
+        v = np.prod([tgt.volume.width, tgt.volume.height, tgt.volume.depth])
+        return int(A * v + B)
+    
+
 class LocalButterflyRunMixin:
     
     def ariadne_run(self):
