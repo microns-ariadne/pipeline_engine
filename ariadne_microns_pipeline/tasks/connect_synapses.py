@@ -62,6 +62,8 @@ class ConnectSynapsesTaskMixin:
         v = np.prod([volume.width, 
                      volume.height, 
                      volume.depth])
+        if self.transmitter_probability_map_load_plan_path != EMPTY_LOCATION:
+            v *= 2
         return int(A * v + B)
 
 class ConnectSynapsesRunMixin:

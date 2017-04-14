@@ -104,6 +104,11 @@ def draw_gantt(database_url, pdf_file, xy_scale, z_scale):
         bar_height = (emax - smin).total_seconds() / 100
     else:
         bar_height = np.max(od.values()) / 100
+    bottom = []
+    width = []
+    height = bar_height
+    left = []
+    color = []
     for i, d in enumerate(data):
         s = dateutil.parser.parse(d['start_time'])
         e = dateutil.parser.parse(d['end_time'])
@@ -113,8 +118,11 @@ def draw_gantt(database_url, pdf_file, xy_scale, z_scale):
             ht = (s - smin).total_seconds()
         else:
             ht = float(od[volume])
-        barh(ht, delta.total_seconds(), height=bar_height, 
-             left=(s-s0).total_seconds(), color=colors[d['name']])
+        bottom.append(ht)
+        width.append(delta.total_seconds())
+        left.append((s-s0).total_seconds())
+        color.append(colors[d['name']])
+    barh(bottom, width, height=height, left=left, color=color)
     legend(handles=[Patch(color=color, label=name) for name, color in colors.items()], loc=0)
     gca().set_xlabel("Exection time (sec)")
     gca().set_yticks([])
