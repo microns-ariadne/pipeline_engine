@@ -152,6 +152,10 @@ class LocalButterflyRunMixin:
         row0 = volume.y / height
         row1 = int(np.ceil(float(volume.y1) / height))
         for z in range(volume.z, volume.z1):
+            if z >= len(index["sections"]):
+                # Asked for out of bounds. Fill with 1
+                result[z - volume.z] = 255
+                continue
             pattern = index["sections"][z]
             for row in range(row0, row1):
                 y0src = row * height
