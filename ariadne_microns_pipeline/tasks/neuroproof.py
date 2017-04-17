@@ -95,6 +95,8 @@ class NeuroproofRunMixin:
             self.run_standard()
         elif self.neuroproof_version == NeuroproofVersion.FLY_EM:
             self.run_optimized_with_copy()
+        elif self.neuroproof_version == NeuroproofVersion.FAST:
+            self.run_fast()
         else:
             self.run_optimized()
 
@@ -330,6 +332,56 @@ class NeuroproofRunMixin:
                 json.dump(d, fd)
         finally:
             os.remove(json_path)
+    
+    def run_fast(self):
+        '''Run using Tim Kaler's speedup + NeuroProof_plan'''
+        #
+        # Make the target directories for the .tif files
+        #
+        output_target = self.output()
+        output_target.create_directories()
+        
+        arguments = [self.neuroproof,
+                     "-watershed", self.input_seg_loading_plan_path,
+                     "-prediction", self.prob_loading_plan_path,
+                     "-classifier", self.classifier_filename,
+                     "-output", self.storage_plan,
+                     "-threshold", str(self.threshold),
+                     "-algorithm", "1",
+                     "-nomito",
+                     "-min_region_sz", str(self.watershed_threshold)]
+        #
+        # Inject the custom LD_LIBRARY_PATH into the subprocess environment
+        #
+        env = os.environ.copy()
+        if "LD_LIBRARY_PATH" in env:
+            ld_library_path = self.neuroproof_ld_library_path + os.pathsep +\
+                env["LD_LIBRARY_PATH"]
+        else:
+            ld_library_path = self.neuroproof_ld_library_path
+        env["LD_LIBRARY_PATH"] = ld_library_path
+        self.configure_env(env)
+        #
+        # Do the dirty deed...
+        #
+        subprocess.check_call(arguments, env=env)
+        #
+        # Finish the output volume
+        #
+        # We collect some summary statistics here that are added to
+        # the JSON file.
+        #
+        data = output_target.imread()
+        d = json.load(open(output_target.storage_plan_path))
+        areas = np.bincount(data.ravel())
+        areas[0] = 0
+        labels = np.where(areas > 0)[0]
+        areas = areas[labels]
+        d["areas"] = areas.tolist()
+        d["labels"] = labels.tolist()
+        with output_target.open("w") as fd:
+            json.dump(d, fd)
+        
 
 class NeuroproofTask(NeuroproofTaskMixin, NeuroproofRunMixin,
                      RequiresMixin, RunMixin, CILKCPUMixin, luigi.Task):

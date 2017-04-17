@@ -21,6 +21,10 @@ class NeuroproofVersion(enum.Enum):
     Run using the conventions of neuroproof_minimal's Neuroproof_stack
     '''
     MINIMAL = 3
+    '''
+    Run using https://github.com/timkaler/fast_neuroproof
+    '''
+    FAST = 4
 
 def write_seg_volume(watershed_path, seg_target, dataset_name):
     '''Write the watershed out to an hdf5 file for Neuroproof
