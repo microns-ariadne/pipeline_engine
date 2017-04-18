@@ -48,7 +48,8 @@ def normalize_image_rescale(img, saturation_level=0.05, offset=.5):
         sortedValues[np.int(len(sortedValues) * (saturation_level / 2))])                                                                      
     maxVal = np.float32(
         sortedValues[np.int(len(sortedValues) * (1 - saturation_level / 2))])                                                                  
-    normImg = np.float32(img - minVal) * (255 / (maxVal-minVal))                
+    normImg = np.float32(img - minVal) * \
+        (255 / (maxVal-minVal + np.finfo(np.float32).eps))                
     normImg[normImg<0] = 0                                                      
     normImg[normImg>255] = 255                                                  
     return (np.float32(normImg) / 255.0) - offset
