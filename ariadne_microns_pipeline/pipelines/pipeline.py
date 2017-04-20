@@ -1726,6 +1726,7 @@ class PipelineTaskMixin:
                 # Left side
                 #
                 volume = self.get_block_volume(0, yi, zi)
+                left_task = self.np_tasks[zi, yi, 0]
                 x = volume.x + self.np_x_pad / 2
                 overlap_volume = Volume(x - self.halo_size_xy,
                                         volume.y,
@@ -1734,7 +1735,7 @@ class PipelineTaskMixin:
                                         volume.height,
                                         volume.depth)
                 loading_plan, lp = self.factory.loading_plan(
-                    overlap_volume, NP_DATASET)
+                    overlap_volume, NP_DATASET, left_task)
                 self.edge_loading_plans.append(
                     (volume.to_dictionary(), loading_plan))
                 edge_loading_plan_registrars.append(lp)
@@ -1742,6 +1743,7 @@ class PipelineTaskMixin:
                 # Right side
                 #
                 volume = self.get_block_volume(self.n_x-1, yi, zi)
+                right_task = self.np_tasks[zi, yi, self.n_x-1]
                 x = volume.x + volume.width - self.np_x_pad / 2
                 overlap_volume = Volume(x - self.halo_size_xy,
                                         volume.y,
@@ -1750,7 +1752,7 @@ class PipelineTaskMixin:
                                         volume.height,
                                         volume.depth)
                 loading_plan, lp = self.factory.loading_plan(
-                                overlap_volume, NP_DATASET)
+                                overlap_volume, NP_DATASET, right_task)
                 self.edge_loading_plans.append(
                     (volume.to_dictionary(), loading_plan))
                 edge_loading_plan_registrars.append(lp)
@@ -1763,6 +1765,7 @@ class PipelineTaskMixin:
                 # Left side
                 #
                 volume = self.get_block_volume(xi, 0, zi)
+                left_task = self.np_tasks[zi, 0, xi]
                 y = volume.y + self.np_y_pad / 2
                 overlap_volume = Volume(volume.x,
                                         y - self.halo_size_xy,
@@ -1771,7 +1774,7 @@ class PipelineTaskMixin:
                                         self.halo_size_xy * 2 + 1,
                                         volume.depth)
                 loading_plan, lp = self.factory.loading_plan(
-                    overlap_volume, NP_DATASET)
+                    overlap_volume, NP_DATASET, left_task)
                 self.edge_loading_plans.append(
                     (volume.to_dictionary(), loading_plan))
                 edge_loading_plan_registrars.append(lp)
@@ -1779,6 +1782,7 @@ class PipelineTaskMixin:
                 # Right side
                 #
                 volume = self.get_block_volume(xi, self.n_y-1, zi)
+                right_task = self.np_tasks[zi, self.n_y-1, xi]
                 y = volume.y + volume.height - self.np_y_pad / 2
                 overlap_volume = Volume(volume.x,
                                         y - self.halo_size_xy,
@@ -1787,7 +1791,7 @@ class PipelineTaskMixin:
                                         self.halo_size_xy * 2 + 1,
                                         volume.depth)
                 loading_plan, lp = self.factory.loading_plan(
-                                overlap_volume, NP_DATASET)
+                                overlap_volume, NP_DATASET, right_task)
                 self.edge_loading_plans.append(
                     (volume.to_dictionary(), loading_plan))
                 edge_loading_plan_registrars.append(lp)
@@ -1800,6 +1804,7 @@ class PipelineTaskMixin:
                 # Left side
                 #
                 volume = self.get_block_volume(xi, yi, 0)
+                left_task = self.np_tasks[0, yi, xi]
                 z = volume.z + self.np_z_pad / 2
                 overlap_volume = Volume(volume.x,
                                         volume.y,
@@ -1808,7 +1813,7 @@ class PipelineTaskMixin:
                                         volume.height,
                                         self.halo_size_z * 2 + 1)
                 loading_plan, lp = self.factory.loading_plan(
-                    overlap_volume, NP_DATASET)
+                    overlap_volume, NP_DATASET, left_task)
                 self.edge_loading_plans.append(
                     (volume.to_dictionary(), loading_plan))
                 edge_loading_plan_registrars.append(lp)
@@ -1816,6 +1821,7 @@ class PipelineTaskMixin:
                 # Right side
                 #
                 volume = self.get_block_volume(xi, yi, self.n_z-1)
+                right_task = self.np_tasks[self.n_z-1, yi, xi]
                 z = volume.z + volume.depth - self.np_z_pad / 2
                 overlap_volume = Volume(volume.x,
                                         volume.y,
@@ -1824,7 +1830,7 @@ class PipelineTaskMixin:
                                         volume.height,
                                         self.halo_size_z * 2 + 1)
                 loading_plan, lp = self.factory.loading_plan(
-                                overlap_volume, NP_DATASET)
+                                overlap_volume, NP_DATASET, right_task)
                 self.edge_loading_plans.append(
                     (volume.to_dictionary(), loading_plan))
                 edge_loading_plan_registrars.append(lp)

@@ -180,7 +180,7 @@ class StitchPipelineTask(luigi.Task):
         #
         for volume2, location2 in cg2["additional_locations"]:
             overlap2 = DestVolumeReader(location2).volume.to_dictionary()
-            for overlap1, (location1, volume) in d_locs.items():
+            for overlap1, (location1, volume1) in d_locs.items():
                 if self._overlaps(overlap1, overlap2):
                     v1 = Volume(**volume1)
                     v2 = Volume(**volume2)
@@ -211,10 +211,11 @@ class StitchPipelineTask(luigi.Task):
                     # Remove the location from the list of additional locations.
                     # It's inside the combined volume
                     #
-                    idx = additional_locations_1.index(
-                        (volume1, location1))
-                    if idx >= 0:
-                        del additional_locations_1[idx]
+                    for i, (volume1a, location1a) \
+                        in enumerate(additional_locations_1):
+                        if volume1a == volume1 and location1a == location1:
+                            del additional_locations_1[i]
+                            break
                     break
             else:
                 #
