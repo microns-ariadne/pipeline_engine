@@ -46,7 +46,7 @@ class ClassifyTaskMixin:
             yield(tgt)
 
     def get_classifier_target(self):
-        if not hasattr(self, "__classifier_target"):
+        if not hasattr(self, "_ClassifyTaskMixin__classifier_target"):
             self.__classifier_target = \
                 PixelClassifierTarget(self.classifier_path)
         return self.__classifier_target

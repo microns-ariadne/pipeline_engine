@@ -90,6 +90,7 @@ class PixelClassifierTarget(luigi.LocalTarget):
     def __setstate__(self, path):
         self.path = path
         self.__classifier = None
+        super(PixelClassifierTarget, self).__init__(path)
         
     @property
     def classifier(self):
