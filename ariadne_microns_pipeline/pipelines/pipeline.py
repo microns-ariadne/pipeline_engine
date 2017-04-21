@@ -1,5 +1,12 @@
 import luigi
 import rh_logger
+import json
+import multiprocessing
+import numpy as np
+import os
+import sys
+import tempfile
+
 from .utilities import PipelineRunReportMixin
 from ..tasks.factory import AMTaskFactory
 from ..tasks.classify import ClassifyShimTask
@@ -18,11 +25,6 @@ from ..parameters import EMPTY_LOCATION, EMPTY_DATASET_ID, is_empty_dataset_id
 from ..parameters import DEFAULT_LOCATION
 from ..tasks.utilities import to_hashable
 from ..volumedb import VolumeDB, Persistence, UINT8, UINT16, UINT32
-import json
-import numpy as np
-import os
-import tempfile
-import sys
 
 '''The name of the segmentation dataset within the HDF5 file'''
 SEG_DATASET = "segmentation"
@@ -190,6 +192,9 @@ class PipelineTaskMixin:
         default=DEFAULT_LOCATION,
         description="The sqlalchemy URL to use to connect to the volume "
         "database")
+    compute_requirements_in_subprocess = luigi.BoolParameter(
+        description="Construct the task graph in a subprocess to "
+        "limit the footprint of the parent process")
     resolution = luigi.IntParameter(
         default=0,
         description="The MIPMAP resolution of the volume to be processed.")
@@ -1842,187 +1847,200 @@ class PipelineTaskMixin:
     
     def compute_requirements(self):
         '''Compute the requirements for this task'''
-        if not hasattr(self, "requirements"):
-            try:
-                rh_logger.logger.report_event("Assembling pipeline")
-            except:
-                rh_logger.logger.start_process("Ariadne pipeline",
-                                               "Assembling pipeline")
+        try:
+            rh_logger.logger.report_event("Assembling pipeline")
+        except:
+            rh_logger.logger.start_process("Ariadne pipeline",
+                                           "Assembling pipeline")
+            #
+            # Configuration turns off the luigi-interface logger
+            #
+        import logging
+        logging.getLogger("luigi-interface").disabled = False
+        self.requirements = []
+        self.datasets = {}
+        self.tasks = []
+        try:
+            if not os.path.isdir(self.root_dir):
+                os.makedirs(self.root_dir)
+            self.init_db()
+            self.factory = AMTaskFactory(self.volume_db_url, 
+                                         self.volume_db)
+            rh_logger.logger.report_event(
+                "Loading pixel classifier")
+            self.pixel_classifier = PixelClassifierTarget(
+                self.pixel_classifier_path)
+            rh_logger.logger.report_event(
+                "Computing blocks")
+            self.compute_extents()
+            #
+            # Step 1: get data from Butterfly
+            #
+            rh_logger.logger.report_event("Making Butterfly download tasks")
+            self.generate_butterfly_tasks()
+            rh_logger.logger.report_event("Making gt cutout tasks")
+            self.generate_gt_cutouts()
+            #
+            # Step 2: run the pixel classifier on each
+            #
+            rh_logger.logger.report_event("Making classifier tasks")
+            self.generate_classifier_tasks()
+            if not self.wants_affinity_segmentation:
                 #
-                # Configuration turns off the luigi-interface logger
+                # Step 4: make the border masks
                 #
-            import logging
-            logging.getLogger("luigi-interface").disabled = False
-            self.requirements = []
-            self.datasets = {}
-            self.tasks = []
-            try:
-                if not os.path.isdir(self.root_dir):
-                    os.makedirs(self.root_dir)
-                self.init_db()
-                self.factory = AMTaskFactory(self.volume_db_url, 
-                                             self.volume_db)
-                rh_logger.logger.report_event(
-                    "Loading pixel classifier")
-                self.pixel_classifier = PixelClassifierTarget(
-                    self.pixel_classifier_path)
-                rh_logger.logger.report_event(
-                    "Computing blocks")
-                self.compute_extents()
-                #
-                # Step 1: get data from Butterfly
-                #
-                rh_logger.logger.report_event("Making Butterfly download tasks")
-                self.generate_butterfly_tasks()
-                rh_logger.logger.report_event("Making gt cutout tasks")
-                self.generate_gt_cutouts()
-                #
-                # Step 2: run the pixel classifier on each
-                #
-                rh_logger.logger.report_event("Making classifier tasks")
-                self.generate_classifier_tasks()
-                if not self.wants_affinity_segmentation:
+                rh_logger.logger.report_event("Making border mask tasks")
+                self.generate_border_mask_tasks()
+                if self.method != SeedsMethodEnum.ConnectedComponents:
                     #
-                    # Step 4: make the border masks
-                    #
-                    rh_logger.logger.report_event("Making border mask tasks")
-                    self.generate_border_mask_tasks()
-                    if self.method != SeedsMethodEnum.ConnectedComponents:
-                        #
-                        # Step 5: find the seeds for the watershed
-                        #
-                        rh_logger.logger.report_event(
-                            "Making watershed seed tasks")
-                        self.generate_seed_tasks()
-                    #
-                    # Step 6: run watershed
-                    #
-                    rh_logger.logger.report_event("Making watershed tasks")
-                    self.generate_watershed_tasks()
-                    if self.wants_resegmentation:
-                        self.generate_resegmentation_tasks()
-                else:
-                    #
-                    # For affinity maps, run the z-watershed to produce
-                    # the oversegmentation
-                    #
-                    rh_logger.logger.report_event("Making z-watershed tasks")
-                    self.generate_z_watershed_tasks()
-                if self.wants_neuroproof_learn:
-                    #
-                    # Neuroproof Learn needs to have the segmentation relabeled
+                    # Step 5: find the seeds for the watershed
                     #
                     rh_logger.logger.report_event(
-                        "Making segmentation relabeling task")
-                    self.generate_volume_relabeling_task()
-                    rh_logger.logger.report_event(
-                        "Making neuroproof learn task")
-                    self.generate_nplearn_task()
-                    self.requirements.append(self.neuroproof_learn_task)
-                else:
-                    #
-                    # Step 7: run Neuroproof on the blocks and border blocks
-                    #
-                    rh_logger.logger.report_event("Making Neuroproof tasks")
-                    self.generate_neuroproof_tasks()
-                    #
-                    # Step 8: Segment the synapses
-                    #
-                    rh_logger.logger.report_event("Segment synapses")
-                    if self.wants_transmitter_receptor_synapse_maps:
-                        self.generate_synapse_tr_segmentation_tasks()
-                    else:
-                        self.generate_synapse_segmentation_tasks()
-                    #
-                    # Step 9: The connectivity graph.
-                    #
-                    rh_logger.logger.report_event("Making connectivity graph")
-                    self.generate_connectivity_graph_tasks()
-                    #
-                    # Step 10: Skeletonize Neuroproof
-                    #
-                    rh_logger.logger.report_event("Making skeletonize tasks")
-                    self.generate_skeletonize_tasks()
-                    #
-                    # Step 11: Connect synapses to neurites
-                    #
-                    rh_logger.logger.report_event("Connecting synapses and neurons")
-                    requirements = self.generate_synapse_connectivity_tasks()
-                    self.requirements += list(requirements)
-                    #
-                    # Step 12: find ground-truth synapses and compute statistics
-                    #
-                    rh_logger.logger.report_event("Comparing synapses to gt")
-                    self.generate_synapse_statistics_tasks()
-                    #
-                    # Step 13: write out the stitched segmentation
-                    #
-                    if self.stitched_segmentation_location != EMPTY_LOCATION:
-                        rh_logger.logger.report_event("Stitching segments")
-                        self.generate_stitched_segmentation_task()
-                        self.requirements.append(self.stitched_segmentation_task)
+                        "Making watershed seed tasks")
+                    self.generate_seed_tasks()
                 #
-                # Do the VolumeDB computation
+                # Step 6: run watershed
                 #
-                rh_logger.logger.report_event("Computing load/store plans")
-                self.volume_db.compute_subvolumes()
+                rh_logger.logger.report_event("Making watershed tasks")
+                self.generate_watershed_tasks()
+                if self.wants_resegmentation:
+                    self.generate_resegmentation_tasks()
+            else:
                 #
-                # Write the loading plans
+                # For affinity maps, run the z-watershed to produce
+                # the oversegmentation
                 #
-                rh_logger.logger.report_event("Writing loading plans")
-                for loading_plan_id in self.volume_db.get_loading_plan_ids():
-                    loading_plan_path = self.volume_db.get_loading_plan_path(
-                        loading_plan_id)
-                    directory = os.path.dirname(loading_plan_path)
-                    if not os.path.exists(directory):
-                        os.makedirs(directory)
-                    write_loading_plan(loading_plan_path, self.volume_db, 
-                                      loading_plan_id)
+                rh_logger.logger.report_event("Making z-watershed tasks")
+                self.generate_z_watershed_tasks()
+            if self.wants_neuroproof_learn:
                 #
-                # Write the storage plans
+                # Neuroproof Learn needs to have the segmentation relabeled
                 #
-                rh_logger.logger.report_event("Writing storage plans")
-                for dataset_id in self.volume_db.get_dataset_ids():
-                    write_storage_plan(self.volume_db, dataset_id)
-                #
-                # Hook up dependencies.
-                #
-                for task in self.tasks:
-                    for tgt in task.input():
-                        path = tgt.path
-                        if path in self.datasets:
-                            task.set_requirement(self.datasets[path])
-                #
-                # The requirements:
-                #
-                # The skeletonize tasks if skeletonization is done
-                #     otherwise the block neuroproof tasks
-                # The border neuroproof tasks
-                # The statistics task
-                #
-                if self.wants_skeletonization:
-                    self.requirements += \
-                        self.skeletonize_tasks.flatten().tolist()
-                else:
-                    self.requirements += self.np_tasks.flatten().tolist()
-                if self.wants_connectivity:
-                    self.requirements.append(self.all_connected_components_task)
-                if self.wants_synapse_statistics:
-                    self.requirements.append(self.synapse_statistics_task)
-                #
-                # (maybe) generate the statistics tasks
-                #
-                self.generate_statistics_tasks()
-                if self.statistics_csv_task is not None:
-                    self.requirements.append(self.statistics_report_task)
                 rh_logger.logger.report_event(
-                    "Pipeline task graph computation finished")
-            except:
-                rh_logger.logger.report_exception()
-                raise
+                    "Making segmentation relabeling task")
+                self.generate_volume_relabeling_task()
+                rh_logger.logger.report_event(
+                    "Making neuroproof learn task")
+                self.generate_nplearn_task()
+                self.requirements.append(self.neuroproof_learn_task)
+            else:
+                #
+                # Step 7: run Neuroproof on the blocks and border blocks
+                #
+                rh_logger.logger.report_event("Making Neuroproof tasks")
+                self.generate_neuroproof_tasks()
+                #
+                # Step 8: Segment the synapses
+                #
+                rh_logger.logger.report_event("Segment synapses")
+                if self.wants_transmitter_receptor_synapse_maps:
+                    self.generate_synapse_tr_segmentation_tasks()
+                else:
+                    self.generate_synapse_segmentation_tasks()
+                #
+                # Step 9: The connectivity graph.
+                #
+                rh_logger.logger.report_event("Making connectivity graph")
+                self.generate_connectivity_graph_tasks()
+                #
+                # Step 10: Skeletonize Neuroproof
+                #
+                rh_logger.logger.report_event("Making skeletonize tasks")
+                self.generate_skeletonize_tasks()
+                #
+                # Step 11: Connect synapses to neurites
+                #
+                rh_logger.logger.report_event("Connecting synapses and neurons")
+                requirements = self.generate_synapse_connectivity_tasks()
+                self.requirements += list(requirements)
+                #
+                # Step 12: find ground-truth synapses and compute statistics
+                #
+                rh_logger.logger.report_event("Comparing synapses to gt")
+                self.generate_synapse_statistics_tasks()
+                #
+                # Step 13: write out the stitched segmentation
+                #
+                if self.stitched_segmentation_location != EMPTY_LOCATION:
+                    rh_logger.logger.report_event("Stitching segments")
+                    self.generate_stitched_segmentation_task()
+                    self.requirements.append(self.stitched_segmentation_task)
+            #
+            # Do the VolumeDB computation
+            #
+            rh_logger.logger.report_event("Computing load/store plans")
+            self.volume_db.compute_subvolumes()
+            #
+            # Write the loading plans
+            #
+            rh_logger.logger.report_event("Writing loading plans")
+            for loading_plan_id in self.volume_db.get_loading_plan_ids():
+                loading_plan_path = self.volume_db.get_loading_plan_path(
+                    loading_plan_id)
+                directory = os.path.dirname(loading_plan_path)
+                if not os.path.exists(directory):
+                    os.makedirs(directory)
+                write_loading_plan(loading_plan_path, self.volume_db, 
+                                  loading_plan_id)
+            #
+            # Write the storage plans
+            #
+            rh_logger.logger.report_event("Writing storage plans")
+            for dataset_id in self.volume_db.get_dataset_ids():
+                write_storage_plan(self.volume_db, dataset_id)
+            #
+            # Hook up dependencies.
+            #
+            for task in self.tasks:
+                for tgt in task.input():
+                    path = tgt.path
+                    if path in self.datasets:
+                        task.set_requirement(self.datasets[path])
+            #
+            # The requirements:
+            #
+            # The skeletonize tasks if skeletonization is done
+            #     otherwise the block neuroproof tasks
+            # The border neuroproof tasks
+            # The statistics task
+            #
+            if self.wants_skeletonization:
+                self.requirements += \
+                    self.skeletonize_tasks.flatten().tolist()
+            else:
+                self.requirements += self.np_tasks.flatten().tolist()
+            if self.wants_connectivity:
+                self.requirements.append(self.all_connected_components_task)
+            if self.wants_synapse_statistics:
+                self.requirements.append(self.synapse_statistics_task)
+            #
+            # (maybe) generate the statistics tasks
+            #
+            self.generate_statistics_tasks()
+            if self.statistics_csv_task is not None:
+                self.requirements.append(self.statistics_report_task)
+            rh_logger.logger.report_event(
+                "Pipeline task graph computation finished")
+            
+            return self.requirements, self.datasets
+        except:
+            rh_logger.logger.report_exception()
+            raise
     
     def requires(self):
-        self.compute_requirements()
+        if not hasattr(self, "requirements"):
+            #
+            # This is done in order to have the computation take place in
+            # a subprocess so that memory bloat is confined to that process
+            #
+            if self.compute_requirements_in_subprocess:
+                pool = multiprocessing.Pool(1)
+                self.requirements, self.datasets = \
+                    pool.apply(compute_requirements, (self, ))
+                pool.close()
+                pool.join()
+            else:
+                self.requirements, self.datasets = self.compute_requirements()
         return self.requirements
         
     def ariadne_run(self):
@@ -2045,6 +2063,17 @@ class PipelineTaskMixin:
             result["dataset"] = self.dataset
             result["channel"] = self.channel
             json.dump(result, open(self.index_file_location, "w"))
+
+def compute_requirements(self):
+    '''For pickling, reflect the call to PipelineTaskMixin.compute_requirements
+    
+    compute_requirements can be run in a subprocess in order to save
+    memory. In order to do this, a function and not an instance method
+    must be passed to Pool.apply
+    
+    :param self: the instance of the PipelineTask
+    '''
+    return PipelineTaskMixin.compute_requirements(self)
 
 class PipelineTask(PipelineTaskMixin, PipelineRunReportMixin, luigi.Task):
     task_namespace = "ariadne_microns_pipeline"
