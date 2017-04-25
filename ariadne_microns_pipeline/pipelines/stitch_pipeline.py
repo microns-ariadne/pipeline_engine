@@ -79,7 +79,7 @@ class StitchPipelineTask(luigi.Task):
         yield luigi.LocalTarget(self.component_graph_2)
         
     def output(self):
-        return luigi.LocalTarget(self.output_location+".done")
+        return luigi.LocalTarget(self.output_location+".pipeline.done")
 
     def _overlaps(self, v1, v2):
         '''Return true if volume 1 overlaps volume 2'''
