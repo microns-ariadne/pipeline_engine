@@ -12,7 +12,8 @@ execution mechanism.
 
 from .classify import ClassifyTask
 from .connected_components import \
-     AllConnectedComponentsTask, ConnectedComponentsTask, VolumeRelabelingTask
+     AllConnectedComponentsTask, ConnectedComponentsTask, VolumeRelabelingTask,\
+     BossShardingTask
 from .connect_synapses import ConnectSynapsesTask
 from .distance_transform import DistanceTransformTask
 from .download_from_butterfly import DownloadFromButterflyTask
