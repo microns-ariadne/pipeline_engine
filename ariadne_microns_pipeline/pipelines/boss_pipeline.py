@@ -155,6 +155,7 @@ class BossPipelineTaskMixin:
         #
         # Make the database schema
         #
+        cursor.execute("drop table if exists tiles")
         cursor.execute("""
         create table if not exists
         tiles (
@@ -181,13 +182,13 @@ class BossPipelineTaskMixin:
                     y=[self.volume.y, self.volume.y1],
                     z=[self.volume.z, self.volume.z1],
                     t=[0, 1]
-                    )
-                ),
-            tile_size=dict(
-                x=self.tile_width,
-                y=self.tile_height,
-                z=1,
-                t=1
+                    ),
+                tile_size=dict(
+                    x=self.tile_width,
+                    y=self.tile_height,
+                    z=1,
+                    t=1
+                )
             )
         )
         #
@@ -225,6 +226,9 @@ class BossPipelineTaskMixin:
                 if len(rows) >= self.bulk_insert_size:
                     cursor.executemany(insert_stmt, rows)
                     rows = []
+        if len(rows) >= 0:
+            cursor.executemany(insert_stmt, rows)
+        connection.commit()
         cursor.close()
         connection.close()
         #
