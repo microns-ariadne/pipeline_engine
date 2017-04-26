@@ -793,7 +793,11 @@ class BossShardingRunMixin:
                 y=self.volume.y,
                 z=self.volume.z + idx)
             if not os.path.isdir(os.path.dirname(path)):
-                os.makedirs(os.path.dirname(path))
+                try:
+                    os.makedirs(os.path.dirname(path))
+                except:
+                    # Race condition
+                    pass
             tifffile.imsave(path, plane, compress=self.compression)
         rh_logger.logger.report_metric("BossShardingTask.write_time",
                                        time.time() - t0)
