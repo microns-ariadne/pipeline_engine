@@ -14,9 +14,13 @@ from .pipeline import NP_DATASET
 from ..parameters import VolumeParameter, Volume, EMPTY_LOCATION
 from ..tasks import CopyFileTask, AMTaskFactory
 from ..tasks.utilities import RunMixin, RequiresMixin, DatasetMixin
+from ..tasks import DeleteStoragePlan
 from ..volumedb import VolumeDB, Persistence
 from ..targets.volume_target import write_loading_plan, write_storage_plan
 
+PRIORITY_RELABELING_TASK = 1
+PRIORITY_SHARDING_TASK = 2
+PRIORITY_DELETE_TASK = 3
 
 class BossPipelineTaskMixin:
     
@@ -203,6 +207,7 @@ class BossPipelineTaskMixin:
                 connectivity_graph_path, 
                 volume, 
                 location)
+            task.priority = PRIORITY_RELABELING_TASK
             task.set_requirement(cc_task)
             done_file = task.output().path
             relabeling_tasks_by_storage_plan[done_file] = task
@@ -232,6 +237,7 @@ class BossPipelineTaskMixin:
                 output_dtype=self.tile_datatype,
                 pattern=pattern,
                 done_file=done_path)
+            task.priority = PRIORITY_SHARDING_TASK
             sharding_tasks.append(task)
         #
         # Do the VolumeDB computation
@@ -259,12 +265,24 @@ class BossPipelineTaskMixin:
         #
         # Hook up dependencies.
         #
+        tasks_by_storage_plan = {}
         for task in sharding_tasks:
             for tgt in task.input():
                 path = tgt.path
                 if path in relabeling_tasks_by_storage_plan:
                     task.set_requirement(relabeling_tasks_by_storage_plan[path])
+                storage_plan = tgt.storage_plan_path
+                if storage_plan not in tasks_by_storage_plan:
+                    tasks_by_storage_plan[storage_plan] = []
+                tasks_by_storage_plan[storage_plan].append(task)
             yield task
+        
+        for storage_plan in tasks_by_storage_plan:
+            delete_task = DeleteStoragePlan(storage_plan_path=storage_plan)
+            delete_task.priority = PRIORITY_DELETE_TASK
+            map(delete_task.set_requirement, 
+                tasks_by_storage_plan[storage_plan])
+            yield delete_task
     
     def run(self):
         '''At the end of it all, write the config and index files'''

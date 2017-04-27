@@ -59,6 +59,27 @@ class CopyStoragePlan(DatasetMixin,
     def ariadne_run(self):
         data = self.input().next().imread()
         self.output().imwrite(data)
+        
+class DeleteStoragePlan(RunMixin,
+                        RequiresMixin,
+                        luigi.Task):
+    '''a task to delete a storage plan's .tif files'''
+    
+    task_namespace = "ariadne_microns_pipeline"
+    
+    storage_plan_path = luigi.Parameter(
+        description="Storage plan to delete")
+    
+    def input(self):
+        yield SrcVolumeTarget(self.storage_plan_path)
+    
+    def output(self):
+        return luigi.LocalTarget(self.storage_plan_path+".deleted")
+    
+    def ariadne_run(self):
+        self.input().next().remove()
+        with self.output().open("w") as fd:
+            fd.write("So sorry.\n")
 
 class BossShardingTaskMixin:
     loading_plan_path = luigi.Parameter(

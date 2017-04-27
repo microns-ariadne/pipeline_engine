@@ -180,6 +180,22 @@ class SrcVolumeTarget(luigi.LocalTarget):
                     #
                     rh_logger.logger.report_exception()
     
+    def remove(self):
+        '''Remove the tif files and done file for a target'''
+        with open(self.storage_plan_path, "r") as fd:
+            d = json.load(fd)
+        for subvolume, tif_path in d["blocks"]:
+            try:
+                os.remove(tif_path)
+            except:
+                rh_logger.logger.report_exception(
+                    "Failed to remove " + tif_path)
+        try:
+            os.remove(self.path)
+        except:
+            rh_logger.logger.report_exception(
+                "Failed to remove " + self.path)
+        
     def finish_imwrite(self):
         '''Just copy the storage plan to the output done file destination'''
         with open(self.storage_plan_path, "r") as fd:
