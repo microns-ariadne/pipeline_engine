@@ -27,6 +27,7 @@ from .match_neurons import MatchNeuronsTask
 from .match_synapses import MatchSynapsesTask
 from .neuroproof import NeuroproofTask
 from .nplearn import NeuroproofLearnTask
+from .rebase_synapses import RebaseSynapsesTask
 from .segment import SegmentTask, SegmentCC2DTask, UnsegmentTask
 from .skeletonize import SkeletonizeTask
 from .stitch_segmentation import StitchSegmentationTask
