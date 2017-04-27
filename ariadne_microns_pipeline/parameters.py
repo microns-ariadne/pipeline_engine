@@ -57,6 +57,15 @@ class Volume(object):
                y >= self.y and y < self.y1 and\
                z >= self.z and z < self.z1
     
+    def overlaps(self, other):
+        '''Return True if the volume overlaps another volume
+        
+        :param other: other volume
+        '''
+        return self.x < other.x1 and other.x < self.x1 and\
+               self.y < other.y1 and other.y < self.y1 and\
+               self.z < other.z1 and other.z < self.z1
+    
     def __str__(self):
         return "Volume: x=%d:%d, y=%d:%d, z=%d:%d" % (
             self.x, self.x1, self.y, self.y1, self.z, self.z1)

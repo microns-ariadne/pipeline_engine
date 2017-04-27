@@ -13,7 +13,8 @@ execution mechanism.
 from .classify import ClassifyTask
 from .connected_components import \
      AllConnectedComponentsTask, ConnectedComponentsTask, VolumeRelabelingTask,\
-     BossShardingTask
+     StoragePlanRelabelingTask
+from .copy import CopyFileTask, CopyStoragePlan
 from .connect_synapses import ConnectSynapsesTask
 from .distance_transform import DistanceTransformTask
 from .download_from_butterfly import DownloadFromButterflyTask
@@ -32,11 +33,12 @@ from .synapse_statistics import SynapseStatisticsTask
 
 all = [AllConnectedComponentsTask, ClassifyTask, 
        ConnectedComponentsTask, ConnectSynapsesTask,
+       CopyFileTask, CopyStoragePlan,
        DistanceTransformTask,
        DownloadFromButterflyTask, AMTaskFactory,
        FindSeedsTask, Dimensionality, SeedsMethodEnum,
        MaskBorderTask, MatchNeuronsTask, MatchSynapsesTask,
        NeuroproofTask, NeuroproofLearnTask, 
        SegmentTask, SegmentCC2DTask, UnsegmentTask,
-       VolumeRelabelingTask, 
+       VolumeRelabelingTask, StoragePlanRelabelingTask,
        SkeletonizeTask, StitchSegmentationTask, SynapseStatisticsTask]

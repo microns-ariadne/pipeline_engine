@@ -157,6 +157,13 @@ class SrcVolumeTarget(luigi.LocalTarget):
                                        width, height, depth)
         return self.__volume
     
+    @property
+    def dataset_name(self):
+        '''The name of the storage plan dataset'''
+        with open(self.storage_plan_path, "r") as fd:
+            d = json.load(fd)
+        return d["dataset_name"]
+    
     def create_directories(self):
         '''Create the subdirectories to host the .tif files'''
         with open(self.storage_plan_path, "r") as fd:
@@ -361,6 +368,12 @@ class DestVolumeReader(object):
                 self.__volume = Volume(d["x"], d["y"], d["z"],
                                        width, height, depth)
         return self.__volume
+    
+    @property
+    def dataset_name(self):
+        with open(self.loading_plan_path, "r") as fd:
+            d = json.load(fd)
+            return d["dataset_name"]
     
     def get_source_targets(self):
         '''Return the SrcVolumeTargets required to read this volume'''

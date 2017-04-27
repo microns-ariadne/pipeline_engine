@@ -13,8 +13,10 @@ from .connected_components import AllConnectedComponentsTask
 from .connected_components import ConnectedComponentsTask
 from .connected_components import FakeAllConnectedComponentsTask
 from .connected_components import VolumeRelabelingTask
+from .connected_components import StoragePlanRelabelingTask
 from .connect_synapses import ConnectSynapsesTask
 from .connect_synapses import AggregateSynapseConnectionsTask
+from .copy import BossShardingTask
 from .distance_transform import DistanceTransformInputType
 from .distance_transform import DistanceTransformTask
 from .filter import FilterSegmentationTask
@@ -38,6 +40,7 @@ from .synapse_statistics import SynapseStatisticsTask
 from .utilities import to_hashable
 from ..parameters import EMPTY_LOCATION
 from ..volumedb import VolumeDB, get_storage_plan_path, get_loading_plan_path
+from ..targets import SrcVolumeTarget, DestVolumeReader
 
 class AMTaskFactory(object):
     '''Factory for creating Ariadne/Microns tasks
@@ -1047,6 +1050,57 @@ class AMTaskFactory(object):
             lp(task)
         return task
     
+    def gen_storage_plan_relabeling_task(
+        self, connectivity_graph_path, volume, src_loading_plan):
+        '''Generate a storage plan relabeling task
+        
+        This task takes a loading plan from a previous pipeline and
+        generates a task that relabels the data and then stores it
+        in a new storage plan.
+        
+        :param connectivity_graph_path: path to connectivity graph for
+        relabeling
+        :param volume: volume for storage plan
+        :param src_loading_plan: loading plan from other pipeline
+        '''
+        loading_plan = DestVolumeReader(src_loading_plan)
+        dataset_name = loading_plan.dataset_name
+        new_storage_plan, sp = self.storage_plan(volume, dataset_name)
+        task = sp(StoragePlanRelabelingTask(
+            connectivity_graph_path=connectivity_graph_path,
+            storage_plan=new_storage_plan,
+            src_loading_plan_path=src_loading_plan))
+        return task
+    
+    def gen_boss_sharding_task(self,
+                               volume,
+                               dataset_name,
+                               output_dtype,
+                               pattern,
+                               done_file,
+                               compression=3,
+                               src_task=None):
+        '''Generate a Boss sharding task for the given volume
+        
+        :param volume: Shard this volume into planes
+        :param dataset_name: the name of the dataset to be sharded
+        :param output_dtype: the Numpy dtype of the planes
+        :param pattern: the file naming pattern, suitable for use in
+            pattern.format(x=x, y=y, z=z)
+        :param done_file: the done file that marks the task being finished
+        :param compression: 0-9, the compression factor to use
+        :param src_task: the source of the  data
+        '''
+        loading_plan_path, lp = self.loading_plan(
+            volume, dataset_name, src_task)
+        task = BossShardingTask(
+            loading_plan_path=loading_plan_path,
+            pattern=pattern,
+            done_file=done_file,
+            output_dtype=output_dtype,
+            compression=compression)
+        return lp(task)
+                               
     #########################
     #
     # Helper tasks
