@@ -56,6 +56,10 @@ class RebaseSynapsesTask(
         # The strategy is to map blocks in the global graph with ones
         # in the local graph in order to get the mapping.
         #
+        try:
+            rh_logger.logger.start_process("RebaseSynapses", "starting", [])
+        except:
+            pass
         neuron_1 = []
         neuron_2 = []
         x = []
