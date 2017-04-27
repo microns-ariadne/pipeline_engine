@@ -127,6 +127,10 @@ class BossPipelineTaskMixin:
     
     def compute_requirements(self):
         '''Return the tasks needed to make the shards'''
+        try:
+            rh_logger.logger.start_process("Boss pipeline", "starting", [])
+        except:
+            pass
         if not os.path.isdir(self.done_file_folder):
             os.makedirs(self.done_file_folder)
         #
