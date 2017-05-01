@@ -16,7 +16,7 @@ from .connected_components import VolumeRelabelingTask
 from .connected_components import StoragePlanRelabelingTask
 from .connect_synapses import ConnectSynapsesTask
 from .connect_synapses import AggregateSynapseConnectionsTask
-from .copy import BossShardingTask
+from .copytasks import BossShardingTask
 from .distance_transform import DistanceTransformInputType
 from .distance_transform import DistanceTransformTask
 from .filter import FilterSegmentationTask
