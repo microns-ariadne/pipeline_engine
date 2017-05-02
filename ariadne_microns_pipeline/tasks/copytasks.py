@@ -67,14 +67,23 @@ class DeleteStoragePlan(RunMixin,
     
     task_namespace = "ariadne_microns_pipeline"
     
+    dependency_outputs = luigi.ListParameter(
+        default=[],
+        description="The outputs of this task's dependencies. The task "
+        "requests these as inputs so that all of them must be present "
+        "before the storage plan is deleted.")
     storage_plan_path = luigi.Parameter(
         description="Storage plan to delete")
     
     def input(self):
         yield SrcVolumeTarget(self.storage_plan_path)
+        for dependency_output in self.dependency_outputs:
+            yield luigi.LocalTarget(dependency_output)
     
     def output(self):
-        return luigi.LocalTarget(self.storage_plan_path+".deleted")
+        return luigi.LocalTarget(
+            SrcVolumeTarget.storage_plan_path_to_deleted_file(
+                self.storage_plan_path))
     
     def ariadne_run(self):
         self.input().next().remove()

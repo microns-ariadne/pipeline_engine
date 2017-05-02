@@ -143,9 +143,48 @@ class SrcVolumeTarget(luigi.LocalTarget):
     
     def __setstate__(self, state):
         self.storage_plan_path = state
-        done_file = os.path.splitext(storage_plan_path)[0] + ".done"
+        done_file = SrcVolumeTarget.storage_plan_path_to_done_file(
+            self.storage_plan_path)
         super(VolumeTarget, self).__init__(done_file)
     
+    @staticmethod
+    def storage_plan_path_to_done_file(storage_plan_path):
+        '''Convert a storage plan path to the path of its done file
+        
+        :param storage_plan_path: the file location of the storage plan
+        :returns: the path to the done file marking the storage plan as
+                  written.
+        '''
+        return os.path.splitext(storage_plan_path)[0] + ".done"
+    
+    @staticmethod
+    def done_file_to_deleted_file(done_file):
+        '''Convert the path to a done file to that of a deleted file
+        
+        The "deleted" file marks the storage plan as deleted. This routine
+        returns the name of the "deleted" file, given the "done" file.
+        
+        :param done_file: the path to the file written when the storage plan
+        has been written
+        :returns: the name of the file that marks the deletion of the
+        storage plan.
+        '''
+        return os.path.splitext(done_file)[0] + ".deleted"
+    
+    @staticmethod
+    def storage_plan_path_to_deleted_file(storage_plan_path):
+        '''Convert the path to a storage plan to that of a deleted file
+        
+        The "deleted" file marks the storage plan as deleted. This routine
+        returns the name of the "deleted" file, given the storage plan file.
+        
+        :param storage_plan_path: the path to the storage plan
+        :returns: the name of the file that marks the deletion of the
+        storage plan.
+        '''
+        return SrcVolumeTarget.done_file_to_deleted_file(
+            SrcVolumeTarget.storage_plan_path_to_done_file(storage_plan_path))
+
     @property
     def volume(self):
         '''The global volume covered by this target'''
@@ -181,7 +220,7 @@ class SrcVolumeTarget(luigi.LocalTarget):
                     rh_logger.logger.report_exception()
     
     def remove(self):
-        '''Remove the tif files and done file for a target'''
+        '''Remove the tif files for a target'''
         with open(self.storage_plan_path, "r") as fd:
             d = json.load(fd)
         for subvolume, tif_path in d["blocks"]:
@@ -190,11 +229,6 @@ class SrcVolumeTarget(luigi.LocalTarget):
             except:
                 rh_logger.logger.report_exception(
                     "Failed to remove " + tif_path)
-        try:
-            os.remove(self.path)
-        except:
-            rh_logger.logger.report_exception(
-                "Failed to remove " + self.path)
         
     def finish_imwrite(self):
         '''Just copy the storage plan to the output done file destination'''

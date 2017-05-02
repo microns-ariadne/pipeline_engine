@@ -12,12 +12,14 @@ from ..tasks.factory import AMTaskFactory
 from ..tasks.classify import ClassifyShimTask
 from ..tasks.connected_components import JoiningMethod
 from ..tasks.connected_components import FakeAllConnectedComponentsTask
+from ..tasks.copytasks import DeleteStoragePlan
 from ..tasks.find_seeds import SeedsMethodEnum, Dimensionality
 from ..tasks.match_synapses import MatchMethod
 from ..tasks.neuroproof_common import NeuroproofVersion
 from ..tasks.nplearn import StrategyEnum
 from ..targets.classifier_target import PixelClassifierTarget
 from ..targets.volume_target import write_loading_plan, write_storage_plan
+from ..targets.volume_target import SrcVolumeTarget
 from ..targets.butterfly_target import ButterflyChannelTarget
 from ..targets.butterfly_target import LocalButterflyChannelTarget
 from ..parameters import Volume, VolumeParameter
@@ -123,6 +125,7 @@ PRIORITY_FIND_SYNAPSES = 5
 PRIORITY_CONNECT_SYNAPSES = 6
 PRIORITY_CONNECTED_COMPONENTS = 7
 PRIORITY_STATISTICS = 8
+PRIORITY_DELETE = 9
 #
 # Skeletonization should have less priority than connecting and finding
 # the synapses since statistics are more cruicial and timely to the run
@@ -188,6 +191,8 @@ class PipelineTaskMixin:
         default=[],
         description="Names of the datasets (e.g. \"neuroproof\") to store "
         "under the root directory.")
+    delete_tempfiles = luigi.BoolParameter(
+        description="Delete intermediate files after last use")
     volume_db_url = luigi.Parameter(
         default=DEFAULT_LOCATION,
         description="The sqlalchemy URL to use to connect to the volume "
@@ -1991,11 +1996,31 @@ class PipelineTaskMixin:
             #
             # Hook up dependencies.
             #
+            dependentd = dict([(_, [] ) for _ in self.datasets])
             for task in self.tasks:
                 for tgt in task.input():
                     path = tgt.path
                     if path in self.datasets:
                         task.set_requirement(self.datasets[path])
+                        dependentd[path].append(task)
+            #
+            # Create DeleteStoragePlan tasks for every storage plan
+            #
+            if self.delete_tempfiles:
+                for storage_done in dependentd:
+                    tgt = self.datasets[storage_done].output()
+                    storage_plan = tgt.storage_plan_path
+                    if tgt.dataset_name in self.datatypes_to_keep:
+                        continue
+                    dependent_tasks = dependentd[storage_done]
+                    dtask_inputs = [
+                        _.output().path for _ in dependent_tasks]
+                    dtask = DeleteStoragePlan(
+                        dependency_outputs=dtask_inputs,
+                        storage_plan_path=storage_plan)
+                    dtask.priority = PRIORITY_DELETE
+                    map(dtask.set_requirement, dependent_tasks)
+                    self.requirements.append(dtask)
             #
             # The requirements:
             #
