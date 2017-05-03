@@ -278,10 +278,13 @@ class BossPipelineTaskMixin:
             yield task
         
         for storage_plan in tasks_by_storage_plan:
-            delete_task = DeleteStoragePlan(storage_plan_path=storage_plan)
+            dependent_tasks = tasks_by_storage_plan[storage_plan]
+            dependent_outputs = [_.output().path for _ in dependent_tasks]
+            delete_task = DeleteStoragePlan(
+                dependency_outputs=dependent_outputs,
+                storage_plan_path=storage_plan)
             delete_task.priority = PRIORITY_DELETE_TASK
-            map(delete_task.set_requirement, 
-                tasks_by_storage_plan[storage_plan])
+            map(delete_task.set_requirement, dependent_tasks)
             yield delete_task
     
     def run(self):
@@ -392,16 +395,21 @@ class BossPipelineTaskMixin:
                   "protocol": "https"
                   },
                 "path_processor": {
-                    "class": "ingest.plugins.pipeline_tiles.PipelineTilePathProcessor",
+                    "class": "ingestclient.plugins.pipeline_tiles.PipelineTilePathProcessor",
                   "params": {
                       "database": self.tile_database_path
                   }
                   },
                 "tile_processor": {
-                    "class": "ingest.plugins.pipeline_tiles.PipelineTileProcessor",
+                    "class": "ingestclient.plugins.pipeline_tiles.PipelineTileProcessor",
                   "params": {
                       "datatype": self.tile_datatype,
-                    "filetype": "tif"
+                      "filetype": "tif",
+                      "width": self.volume.width,
+                      "height": self.volume.height,
+                      "depth": self.volume.depth,
+                      "tile_width": self.tile_width,
+                      "tile_height": self.tile_height
                   }
                 }
               }
