@@ -106,12 +106,12 @@ class SegmentationStatisticsRunMixin:
                  F_info_merge=F_Info["merge"],
                  per_object = d["per_object"],
                  pairs=pairs,
-                 x=self.volume.x,
-                 y=self.volume.y,
-                 z=self.volume.z,
-                 width=self.volume.width,
-                 height=self.volume.height,
-                 depth=self.volume.depth)
+                 x=test_volume.volume.x,
+                 y=test_volume.volume.y,
+                 z=test_volume.volume.z,
+                 width=test_volume.volume.width,
+                 height=test_volume.volume.height,
+                 depth=test_volume.volume.depth)
         with self.output().open("w") as fd:
             json.dump(d, fd)
 
