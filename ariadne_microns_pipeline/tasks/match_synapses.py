@@ -96,12 +96,12 @@ class MatchSynapsesRunMixin:
         else:
             matching_d, matching_gt = match_synapses_by_distance(
                 gt, d, self.xy_nm, self.z_nm, self.max_distance)
-        volume = dict(x=self.volume.x,
-                      y=self.volume.y,
-                      z=self.volume.z,
-                      width=self.volume.width,
-                      height=self.volume.height,
-                      depth = self.volume.depth)
+        volume = dict(x=d_tgt.volume.x,
+                      y=d_tgt.volume.y,
+                      z=d_tgt.volume.z,
+                      width=d_tgt.volume.width,
+                      height=d_tgt.volume.height,
+                      depth = d_tgt.volume.depth)
         with self.output().open("w") as fd:
             json.dump(dict(
                 volume=volume,

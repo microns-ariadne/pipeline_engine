@@ -410,9 +410,6 @@ class PipelineTaskMixin:
         default=10000,
         description = "Remove large patches of mislabeled synapse in a plane "
         "that have an area greater than this")
-    synapse_min_size_3d = luigi.IntParameter(
-        default=500,
-        description = "Minimum size in voxels of a synapse")
     min_synapse_depth = luigi.IntParameter(
         default=3,
         description="Minimum acceptable size of a synapse in the Z direction")
