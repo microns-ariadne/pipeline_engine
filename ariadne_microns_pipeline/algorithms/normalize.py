@@ -15,7 +15,9 @@ class NormalizeMethod(enum.Enum):
     '''Rescale 0-255 to 0-1 and otherwise do no normalization'''
     NONE=3,
     '''Match histogram of tile against that of whole image'''
-    MATCH=4
+    MATCH=4,
+    '''Match histogram of tile against representative ECS images'''
+    MATCH_ECS=5
 
 def normalize_image_adapthist(img, offset=.5):
     '''Normalize image using a locally adaptive histogram
@@ -117,13 +119,72 @@ uim_low = 0
 '''the 99.9% percentile bin'''
 uim_high = 249
 
+ecs_quantiles = np.array([
+    0.004030, 0.004309, 0.004309, 0.004605, 0.004605,
+    0.004923, 0.004923, 0.004923, 0.005270, 0.005270,
+    0.005644, 0.005644, 0.006047, 0.006047, 0.006485,
+    0.006485, 0.006956, 0.006956, 0.007463, 0.007463,
+    0.008009, 0.008009, 0.008598, 0.008598, 0.009239,
+    0.009239, 0.009924, 0.009924, 0.010667, 0.010667,
+    0.010667, 0.011471, 0.011471, 0.012340, 0.012340,
+    0.013279, 0.013279, 0.014285, 0.014285, 0.015369,
+    0.015369, 0.016543, 0.016543, 0.017801, 0.017801,
+    0.019158, 0.019158, 0.020619, 0.020619, 0.022194,
+    0.022194, 0.023889, 0.023889, 0.023889, 0.025706,
+    0.025706, 0.027659, 0.027659, 0.029761, 0.029761,
+    0.032015, 0.032015, 0.034427, 0.034427, 0.037004,
+    0.037004, 0.039768, 0.039768, 0.042723, 0.042723,
+    0.045882, 0.045882, 0.049252, 0.049252, 0.052842,
+    0.052842, 0.052842, 0.056661, 0.056661, 0.060722,
+    0.060722, 0.065026, 0.065026, 0.069602, 0.069602,
+    0.074441, 0.074441, 0.079554, 0.079554, 0.084955,
+    0.084955, 0.090656, 0.090656, 0.096653, 0.096653,
+    0.102939, 0.102939, 0.109549, 0.109549, 0.109549,
+    0.116488, 0.116488, 0.123721, 0.123721, 0.131275,
+    0.131275, 0.139132, 0.139132, 0.147320, 0.147320,
+    0.155815, 0.155815, 0.164625, 0.164625, 0.173728,
+    0.173728, 0.183116, 0.183116, 0.192793, 0.192793,
+    0.202747, 0.202747, 0.202747, 0.212931, 0.212931,
+    0.223386, 0.223386, 0.234081, 0.234081, 0.244985,
+    0.244985, 0.256082, 0.256082, 0.267387, 0.267387,
+    0.278854, 0.278854, 0.290503, 0.290503, 0.302296,
+    0.302296, 0.314243, 0.314243, 0.314243, 0.326305,
+    0.326305, 0.338492, 0.338492, 0.350782, 0.350782,
+    0.363186, 0.363186, 0.375712, 0.375712, 0.388344,
+    0.388344, 0.401090, 0.401090, 0.413957, 0.413957,
+    0.426965, 0.426965, 0.440107, 0.440107, 0.453369,
+    0.453369, 0.453369, 0.466788, 0.466788, 0.480387,
+    0.480387, 0.494181, 0.494181, 0.508167, 0.508167,
+    0.522370, 0.522370, 0.536776, 0.536776, 0.551446,
+    0.551446, 0.566340, 0.566340, 0.581491, 0.581491,
+    0.596888, 0.596888, 0.612548, 0.612548, 0.612548,
+    0.628444, 0.628444, 0.644582, 0.644582, 0.660933,
+    0.660933, 0.677469, 0.677469, 0.694168, 0.694168,
+    0.711000, 0.711000, 0.727927, 0.727927, 0.744874,
+    0.744874, 0.761796, 0.761796, 0.778615, 0.778615,
+    0.795256, 0.795256, 0.795256, 0.811664, 0.811664,
+    0.827760, 0.827760, 0.843449, 0.843449, 0.858660,
+    0.858660, 0.873288, 0.873288, 0.887257, 0.887257,
+    0.900504, 0.900504, 0.912960, 0.912960, 0.924559,
+    0.924559, 0.935264, 0.935264, 0.945047, 0.945047,
+    0.945047, 0.953855, 0.953855, 0.961721, 0.961721,
+    0.968647, 0.968647, 0.974633, 0.974633, 0.979747,
+    0.979747, 0.984050, 0.984050, 0.987624, 0.987624,
+    0.990527, 0.990527, 0.992853, 0.992853, 0.994691,
+    1.0])
+
+# The bins at 0.4 %
+ecs_low = 57.15
+ecs_high = 179.07
+
 def normalize_image_match(img, offset=0):
     '''Match individual planes histograms against that of the global dist'''
     result = []
     for plane in img:
         plane = plane.copy()
-        plane[plane < uim_low] = uim_low
-        plane[plane > uim_high] = uim_high
+        plane[plane < int(uim_low)] = int(uim_low)
+        plane[plane > int(uim_high)] = int(uim_high)
+        plane = ((plane.astype(np.float32) - uim_low) / (uim_high - uim_low)).astype(np.uint8)
         p_bincount = np.bincount(plane.flatten(), minlength=256)
         p_quantiles = \
             np.cumsum(p_bincount).astype(np.float32) / np.prod(plane.shape)
@@ -132,6 +193,35 @@ def normalize_image_match(img, offset=0):
         result.append(tbl[plane])
     
     return np.array(result)
+
+def ecs_stretch(a):
+    '''Stretch an array to 0 - 255 with clipping
+    
+    :param a: an array or matrix
+    :returns: the array, clipped to ecs_low and ecs_high, then stretched
+              to the range, 0 - 255
+    '''
+    a = a.copy().astype(np.float64)
+    a[a < ecs_low] = ecs_low
+    a[a > ecs_high] = ecs_high
+    a = 255. * (a - ecs_low) / (ecs_high - ecs_low)
+    return a.astype(np.uint8)
+
+def normalize_image_match_ecs(img, offset=0):
+    '''Match individual planes against the ECS distribution'''
+    result = []
+
+    for plane in img:
+        plane = ecs_stretch(plane)
+        p_bincount = np.bincount(plane.flatten(), minlength=256)
+        p_quantiles = \
+            np.cumsum(p_bincount).astype(np.float32) / np.prod(plane.shape)
+        tbl = np.interp(p_quantiles, ecs_quantiles, 
+                        np.linspace(-offset, 1-offset, 256).astype(np.float32))
+        result.append(tbl[plane])
+    
+    return np.array(result)
+    
 
 def normalize_image(img, normalize_method, 
                     saturation_level=0.05,
@@ -151,6 +241,8 @@ def normalize_image(img, normalize_method,
             normalize_image_rescale(_, saturation_level, offset) for _ in img])
     elif normalize_method == NormalizeMethod.MATCH:
         return normalize_image_match(img)
+    elif normalize_method == NormalizeMethod.MATCH_ECS:
+        return normalize_image_match_ecs(img)
     else:
         return img.astype(float) / 255.0
 

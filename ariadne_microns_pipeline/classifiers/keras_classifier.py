@@ -37,7 +37,8 @@ class KerasClassifier(AbstractPixelClassifier):
                  classes = ["membrane"],
                  mirrored=False,
                  stretch_output=False,
-                 invert=False):
+                 invert=False,
+                 split_positive_negative=False):
         '''Initialize from a model and weights
         
         :param model_path: path to JSON model file suitable for 
@@ -62,6 +63,9 @@ class KerasClassifier(AbstractPixelClassifier):
         :param stretch_output: if True, stretch the output intensity range
         to between 0 and 255.
         :param invert: If True, invert the probability map outputs
+        :param split_positive_negative: if True, create two channels by
+        clipping the output at 0, 1 for the first channel and by clipping
+        and inverting the output at 0, -1 for the second channel
         '''
         self.xypad_size = xypad_size
         self.zpad_size = zpad_size
@@ -77,6 +81,7 @@ class KerasClassifier(AbstractPixelClassifier):
         self.mirrored = mirrored
         self.stretch_output=stretch_output
         self.invert = invert
+        self.split_positive_negative = split_positive_negative
 
     @staticmethod
     def __keras_backend():
@@ -197,7 +202,8 @@ class KerasClassifier(AbstractPixelClassifier):
                     classes=self.classes,
                     mirrored=self.mirrored,
                     stretch_output=self.stretch_output,
-                    invert=self.invert)
+                    invert=self.invert,
+                    split_positive_negative = self.split_positive_negative)
     
     def __setstate__(self, state):
         '''Restore the state from the pickle'''
@@ -239,6 +245,10 @@ class KerasClassifier(AbstractPixelClassifier):
             self.invert = state["invert"]
         else:
             self.invert = False
+        if "split_positive_negative" in state:
+            self.split_positive_negative = state["split_positive_negative"]
+        else:
+            self.split_positive_negative = False
     
     def get_class_names(self):
         return self.classes
@@ -525,8 +535,10 @@ class KerasClassifier(AbstractPixelClassifier):
                     (x0b, x1b, y0b, y1b, z0b, z1b, delta))
                 logger.report_metric("keras_block_classification_time",
                                      delta)
+                n_classes = 1 if self.split_positive_negative \
+                    else len(self.classes)
                 pred.shape = (
-                    len(self.classes),
+                    n_classes,
                     z1b - z0b + 2 * self.z_trim_size, 
                     y1b - y0b + 2 * self.xy_trim_size,
                     x1b - x0b + 2 * self.xy_trim_size)
@@ -550,6 +562,9 @@ class KerasClassifier(AbstractPixelClassifier):
                     y1b = self.out_image.shape[2]
                     pred = pred[:, :, :y1b - y0b, :]
                     logger.report_event("Fixing Y padding): " + str(pred.shape))
+                if self.split_positive_negative:
+                    assert pred.shape[0] == 1
+                    pred = np.array([pred[0], -pred[0]])
                 if self.stretch_output:
                     for z in range(pred.shape[0]):
                         pred_min = pred[z].min()
@@ -561,6 +576,7 @@ class KerasClassifier(AbstractPixelClassifier):
                 if self.invert:
                     logger.report_event("Inverting output")
                     pred = 1 - pred
+                    
                 self.out_image[:, z0b:z1b, y0b:y1b, x0b:x1b] = \
                     (pred * 255).astype(np.uint8)
         except:
