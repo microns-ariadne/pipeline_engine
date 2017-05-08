@@ -185,7 +185,7 @@ class BossPipelineTaskMixin:
             if volume.x1 == max_x:
                 x1 = max_x
             else:
-                x1 = volume.x1 - self.x_pad
+                x1 = volume.x1 - self.x_pad + 1
             if volume.y == min_y:
                 y0 = min_y
             else:
@@ -193,7 +193,7 @@ class BossPipelineTaskMixin:
             if volume.y1 == max_y:
                 y1 = max_y
             else:
-                y1 = volume.y1 - self.y_pad
+                y1 = volume.y1 - self.y_pad + 1
             if volume.z == min_z:
                 z0 = min_z
             else:
@@ -201,7 +201,7 @@ class BossPipelineTaskMixin:
             if volume.z1 == max_z:
                 z1 = max_z
             else:
-                z1 = volume.z1 - self.z_pad
+                z1 = volume.z1 - self.z_pad + 1
             volume = Volume(x0, y0, z0, x1-x0, y1-y0, z1-z0)
             task = factory.gen_storage_plan_relabeling_task(
                 connectivity_graph_path, 
