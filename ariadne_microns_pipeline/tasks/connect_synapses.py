@@ -118,36 +118,13 @@ class ConnectSynapsesRunMixin:
         if self.transmitter_probability_map_load_plan_path == EMPTY_LOCATION:
             transmitter_target = None
             receptor_target = None
-            synapse = synapse_target.imread()
         else:
             transmitter_target = DestVolumeReader(
                 self.transmitter_probability_map_load_plan_path)
             receptor_target = DestVolumeReader(
                 self.receptor_probability_map_load_plan_path)
-            synapse = (transmitter_target.imread().astype(np.uint16) +
-                       receptor_target.imread().astype(np.uint16))
-        #
-        # get the centers of the synapses for reference
-        #
+        synapse = synapse_target.imread()
         n_synapses = np.max(synapse) + 1
-        if n_synapses == 1:
-            # There are none, return an empty result
-            self.report_empty_result()
-            return
-            
-        synapse_centers = np.array(
-            center_of_mass(np.ones(synapse.shape, np.uint8),
-                           synapse, np.arange(1, n_synapses)),
-            np.uint32)
-        #
-        # There is/may be a bug here if there is only a single synapse in
-        # the volume. The result is transposed.
-        #
-        if synapse_centers.shape[0] != 3:
-            synapse_centers=synapse_centers.transpose()
-        synapse_centers[0] += neuron_target.volume.z
-        synapse_centers[1] += neuron_target.volume.y
-        synapse_centers[2] += neuron_target.volume.x
         #
         # Use a rectangular structuring element for speed.
         #
