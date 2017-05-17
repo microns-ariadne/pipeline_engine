@@ -1051,7 +1051,8 @@ class AMTaskFactory(object):
         return task
     
     def gen_storage_plan_relabeling_task(
-        self, connectivity_graph_path, volume, src_loading_plan):
+        self, connectivity_graph_path, volume, src_loading_plan,
+        dataset_name=None):
         '''Generate a storage plan relabeling task
         
         This task takes a loading plan from a previous pipeline and
@@ -1062,9 +1063,12 @@ class AMTaskFactory(object):
         relabeling
         :param volume: volume for storage plan
         :param src_loading_plan: loading plan from other pipeline
+        :param dataset_name: dataset name for the storage plan. Default is
+        the same as that of the loading plan
         '''
-        loading_plan = DestVolumeReader(src_loading_plan)
-        dataset_name = loading_plan.dataset_name
+        if dataset_name is None:
+            loading_plan = DestVolumeReader(src_loading_plan)
+            dataset_name = loading_plan.dataset_name
         new_storage_plan, sp = self.storage_plan(volume, dataset_name)
         task = sp(StoragePlanRelabelingTask(
             connectivity_graph_path=connectivity_graph_path,

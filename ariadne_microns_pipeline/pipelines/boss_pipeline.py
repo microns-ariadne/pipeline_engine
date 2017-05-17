@@ -10,7 +10,7 @@ import os
 import rh_logger
 import sqlite3
 
-from .pipeline import NP_DATASET
+from .pipeline import NP_DATASET, SYN_SEG_DATASET
 from ..parameters import VolumeParameter, Volume, EMPTY_LOCATION
 from ..tasks import CopyFileTask, AMTaskFactory
 from ..tasks.utilities import RunMixin, RequiresMixin, DatasetMixin
@@ -64,7 +64,7 @@ class BossPipelineTaskMixin:
         description="A folder for holding the done files of the sharding "
         "tasks.")
     tile_datatype = luigi.Parameter(
-        default="uint32",
+        default="uint64",
         description="Datatype for segmentation voxels")
     
     ############################
@@ -146,6 +146,9 @@ class BossPipelineTaskMixin:
         volume_db.register_dataset_type(NP_DATASET, 
                                         Persistence.Temporary,
                                         self.tile_datatype)
+        volume_db.register_dataset_type(SYN_SEG_DATASET,
+                                        Persistence.Temporary,
+                                        self.tile_datatype)
         #
         # Set up to copy the connectivity graph to local storage
         #
@@ -203,10 +206,14 @@ class BossPipelineTaskMixin:
             else:
                 z1 = volume.z1 - self.z_pad + 1
             volume = Volume(x0, y0, z0, x1-x0, y1-y0, z1-z0)
+            if not volume.overlaps(self.volume):
+                # Padding disqualified it
+                continue
             task = factory.gen_storage_plan_relabeling_task(
                 connectivity_graph_path, 
                 volume, 
-                location)
+                location,
+                dataset_name=NP_DATASET)
             task.priority = PRIORITY_RELABELING_TASK
             task.set_requirement(cc_task)
             done_file = task.output().path
@@ -440,128 +447,4 @@ class BossPipelineTask(BossPipelineTaskMixin,
     '''
     
     task_namespace="ariadne_microns_pipeline"
-
-class BossShardingTaskMixin:
-    connectivity_graph_path = luigi.Parameter(
-        description="Path to the connectivity graph describing the volume "
-        "to be uploaded to the Boss")
-    volume = VolumeParameter(
-         description="Volume to be output")
-    pattern = luigi.Parameter(
-         description="Naming pattern for .png files. The path will be "
-         "generated using pattern.format(x=x, y=y, z=z) where x, y and z "
-         "are the origins of the tiles.")
-    done_file = luigi.Parameter(
-         description="Marker file written after task is done")
-    
-    def input(self):
-        yield luigi.LocalTarget(self.connectivity_graph_path)
-    
-    def output(self):
-        return luigi.LocalTarget(self.done_file)
-
-class BossShardingRunMixin:
-    x_pad = luigi.IntParameter(
-         description="Amount of padding to be cut from each segmentation "
-         "in the X direction")
-    y_pad = luigi.IntParameter(
-        description="Amount of padding to be cut from each segmentation "
-         "in the Y direction")
-    z_pad = luigi.IntParameter(
-        description="Amount of padding to be cut from each segmentation "
-         "in the Z direction")
-    output_dtype = luigi.Parameter(
-        default="uint32",
-        description="The Numpy dtype of the output png files, e.g. \"uint32\"")
-    compression = luigi.IntParameter(
-        default=3,
-        description="Amount of compression (0-10) to use on .tif files")
-    
-    def ariadne_run(self):
-        '''Write the volume to .tif tiles'''
-        #
-        # Game plan is:
-        #
-        # Allocate memory to hold all of the tiles
-        # Scan through the connectivity graph, picking out overlapping volumes
-        # Read entire volumes (sry)
-        # Write overlapping portions to memory
-        # Write the planes.
-        # 
-        memory = np.zeros(
-            (self.volume.depth, self.volume.height, self.volume.width),
-            getattr(np, self.output_dtype))
-        t0 = time.time()
-        cg = ConnectivityGraph.load(open(self.connectivity_graph_path))
-        rh_logger.logger.report_metric(
-            "BossShardingTask.connectivity_graph_load_time", time.time()-t0)
-        t0 = time.time()
-        min_x = self.volume.x + self.x_pad
-        max_x = self.volume.x1 - self.x_pad
-        min_y = self.volume.y + self.y_pad
-        max_y = self.volume.y1 - self.y_pad
-        min_z = self.volume.z + self.z_pad
-        max_z = self.volume.z1 - self.z_pad
-        
-        volumes_to_read = []
-        for volume in cg.volumes:
-            v = Volume(**volume)
-            if v.x >= max_x or v.x1 <= min_x or \
-               v.y >= max_y or v.y1 <= min_y or \
-               v.z >= max_z or v.z1 <= min_z:
-                continue
-            volumes_to_read.append((volume, v))
-        rh_logger.logger.report_metric(
-            "BossShardingTask.volume_scan_time", time.time() - t0)
-        for volume_dict, volume in volumes_to_read:
-            loading_plan = DestVolumeReader(cg.locations[volume_dict])
-            x0 = max(self.volume.x, volume.x + self.x_pad)
-            x1 = min(self.volume.x1, volume.x1 - self.x_pad)
-            y0 = max(self.volume.y, volume.y + self.y_pad)
-            y1 = min(self.volume.y1, volume.y1 - self.y_pad)
-            z0 = max(self.volume.z, volume.z + self.z_pad)
-            z1 = min(self.volume.z1, volume.z1 - self.z_pad)
-            seg = cg.convert(loading_plan.imread(), volume)\
-                [z0 - volume.z:z1 - volume.z,
-                 y0 - volume.y:y1 - volume.y,
-                 x0 - volume.x: x1 - volume.x]
-            memory[z0 - self.volume.z:z1 - self.volume.z,
-                   y0 - self.volume.y:y1 - self.volume.y,
-                   x0 - self.volume.x:x1 - self.volume.x] = seg
-        #
-        # Write the planes
-        #
-        t0 = time.time()
-        for idx, plane in enumerate(memory):
-            path = self.pattern.format(
-                x=self.volume.x,
-                y=self.volume.y,
-                z=self.volume.z + idx)
-            if not os.path.isdir(os.path.dirname(path)):
-                try:
-                    os.makedirs(os.path.dirname(path))
-                except:
-                    # Race condition
-                    pass
-            tifffile.imsave(path, plane, compress=self.compression)
-        rh_logger.logger.report_metric("BossShardingTask.write_time",
-                                       time.time() - t0)
-        with self.output().open("w") as fd:
-            fd.write("done")
-
-class BossShardingTask(
-    BossShardingTaskMixin,
-    BossShardingRunMixin,
-    RunMixin,
-    luigi.Task):
-    '''A task to shard a segmentation for the BOSS
-    
-    The BOSS takes fixed-size, single plane tiles as input. This task
-    takes a connectivity graph and prepares a stack of tiles.
-    
-    The input volume for this task should have the width and height of the
-    tiles. The padding for the volume should be 1/2 of the padding used
-    to make the segmentation volumes.
-    '''
-    task_namespace = "ariadne_microns_pipeline"
 

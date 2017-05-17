@@ -203,11 +203,20 @@ def read_block(location, x0, x1, y0, y1, z0, z1, volume_map, queue,
         z1a -= z_padding / 2 - 1
     if x1a < x0a or y1a < y0a or z1a < z0a:
         return
-    queue.put((
-        seg[z0a-tgt.volume.z:z1a-tgt.volume.z,
-            y0a-tgt.volume.y:y1a-tgt.volume.y,
-            x0a-tgt.volume.x:x1a-tgt.volume.x],
-        x0a-x0, y0a-y0, z0a-z0))
+    #
+    # have to chop volume into smaller pieces for xfer
+    #
+    size = (z1a - z0a) * (y1a - y0a) * (x1a - x0a)
+    max_size = 1 << 28
+    n_z = 1 + size / max_size
+    zstep = (z1a - z0a) / n_z
+    for z0b in range(z0a, z1a, zstep):
+        z1b = min(z0b+zstep, z1a)
+        queue.put((
+            seg[z0b-tgt.volume.z:z1b-tgt.volume.z,
+                y0a-tgt.volume.y:y1a-tgt.volume.y,
+                x0a-tgt.volume.x:x1a-tgt.volume.x],
+            x0a-x0, y0a-y0, z0b-z0))
     return (x1a - x0a, y1a-y0a, z1a-z0a)
 
 def writer(queue, hdf_file, dataset_name, shape, cache_size, 
