@@ -715,10 +715,12 @@ class StoragePlanRelabelingTask(
     
     def ariadne_run(self):
         src_target = DestVolumeReader(self.src_loading_plan_path)
+        dest_tgt = self.output()
         cg = ConnectivityGraph.load(open(self.connectivity_graph_path))
         src_volume = src_target.volume
-        data = cg.convert(src_target.imread(), src_volume)
-        dest_tgt = self.output()
+        
+        data = cg.convert(src_target.imread().astype(dest_tgt.dtype),
+                          src_volume)
     
         dest_volume = dest_tgt.volume
         assert dest_volume.x >= src_volume.x

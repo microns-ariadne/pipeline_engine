@@ -203,6 +203,12 @@ class SrcVolumeTarget(luigi.LocalTarget):
             d = json.load(fd)
         return d["dataset_name"]
     
+    @property
+    def dtype(self):
+        with open(self.storage_plan_path, "r") as fd:
+            d = json.load(fd)
+        return getattr(np, d["datatype"])
+    
     def create_directories(self):
         '''Create the subdirectories to host the .tif files'''
         with open(self.storage_plan_path, "r") as fd:
