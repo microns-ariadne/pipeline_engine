@@ -2,6 +2,7 @@
 
 '''
 
+import glob
 import itertools
 import json
 import luigi
@@ -10,7 +11,7 @@ import os
 import rh_logger
 import sqlite3
 
-from .pipeline import NP_DATASET, SYN_SEG_DATASET
+from .pipeline import NP_DATASET, SYN_SEG_DATASET, FINAL_SEGMENTATION
 from ..parameters import VolumeParameter, Volume, EMPTY_LOCATION
 from ..tasks import CopyFileTask, AMTaskFactory
 from ..tasks.utilities import RunMixin, RequiresMixin, DatasetMixin
@@ -33,6 +34,10 @@ class BossPipelineTaskMixin:
     connectivity_graph_path = luigi.Parameter(
         description="Path to the connectivity graph describing the global "
         "segmentation")
+    dataset_name = luigi.Parameter(
+        default=FINAL_SEGMENTATION,
+         description="The name of the dataset to copy. Default is to do "
+         "the global segmentation")
     temp_dir = luigi.Parameter(
         description="Path to temporary storage")
     pattern = luigi.Parameter(
@@ -143,21 +148,20 @@ class BossPipelineTaskMixin:
         volume_db = VolumeDB(self.volume_db_url, "w")
         factory = AMTaskFactory(self.volume_db_url, volume_db)
         volume_db.set_temp_dir(self.temp_dir)
-        volume_db.register_dataset_type(NP_DATASET, 
+        volume_db.register_dataset_type(self.dataset_name,
                                         Persistence.Temporary,
                                         self.tile_datatype)
-        volume_db.register_dataset_type(SYN_SEG_DATASET,
-                                        Persistence.Temporary,
-                                        self.tile_datatype)
-        #
-        # Set up to copy the connectivity graph to local storage
-        #
+        do_remap = self.dataset_name == FINAL_SEGMENTATION
         connectivity_graph_path = os.path.join(self.temp_dir, 
-                                                   "connectivity-graph.json")
+                                                       "connectivity-graph.json")
         cg = json.load(open(self.connectivity_graph_path))
-        cc_task = CopyFileTask(
-            src_path = self.connectivity_graph_path,
-            dest_path=connectivity_graph_path)
+        if do_remap:
+            #
+            # Set up to copy the connectivity graph to local storage
+            #
+            cc_task = CopyFileTask(
+                src_path = self.connectivity_graph_path,
+                dest_path=connectivity_graph_path)
         #
         # Generate the source plan copy tasks
         #
@@ -209,13 +213,34 @@ class BossPipelineTaskMixin:
             if not volume.overlaps(self.volume):
                 # Padding disqualified it
                 continue
-            task = factory.gen_storage_plan_relabeling_task(
-                connectivity_graph_path, 
-                volume, 
-                location,
-                dataset_name=NP_DATASET)
+            if do_remap:
+                task = factory.gen_storage_plan_relabeling_task(
+                    connectivity_graph_path, 
+                    volume, 
+                    location,
+                    dataset_name=FINAL_SEGMENTATION)
+                task.set_requirement(cc_task)
+            elif self.dataset_name != NP_DATASET:
+                #
+                # Map from the storage plan name to a loading plan
+                #
+                directory = os.path.dirname(location)
+                paths = glob.glob(
+                    os.path.join(directory, 
+                                 "%s_*.loading.plan" % self.dataset_name))
+                if len(paths) == 0:
+                    raise ValueError("Missing matching loading plan for %s" %
+                                     location)
+                elif len(paths) > 1:
+                    raise ValueError(
+                        "Ambiguous loading plan: \"%s\"" % 
+                        ('","'.join(paths)))
+                task = factory.gen_copy_loading_plan_task(
+                    paths[0], volume, self.dataset_name)
+            else:
+                task = factory.gen_copy_loading_plan_task(
+                    location, volume, dataset_name=self.dataset_name)
             task.priority = PRIORITY_RELABELING_TASK
-            task.set_requirement(cc_task)
             done_file = task.output().path
             relabeling_tasks_by_storage_plan[done_file] = task
         
@@ -240,7 +265,7 @@ class BossPipelineTaskMixin:
             done_path = os.path.join(self.done_file_folder, done_file)
             task = factory.gen_boss_sharding_task(
                 volume=volume, 
-                dataset_name=NP_DATASET,
+                dataset_name=self.dataset_name,
                 output_dtype=self.tile_datatype,
                 pattern=pattern,
                 done_file=done_path)

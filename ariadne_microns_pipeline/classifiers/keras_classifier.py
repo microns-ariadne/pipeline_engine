@@ -173,7 +173,7 @@ class KerasClassifier(AbstractPixelClassifier):
         model.load_weights(self.weights_path)
         sgd = SGD(lr=0.01, decay=0, momentum=0.0, nesterov=False)
         logger.report_event("Compiling model")
-        model.compile(loss='categorical_crossentropy', optimizer=sgd)
+        model.compile(loss='mse', optimizer=sgd)
         if KerasClassifier.__keras_backend() == "theano":
             self.function = theano.function(
                 model.inputs,
@@ -352,7 +352,7 @@ class KerasClassifier(AbstractPixelClassifier):
         else:
             image_out = []
             for plane in image:
-                plane = zoom(plane, 1.0 / self.downsample_factor)
+                plane = zoom(plane, 1.0 / self.downsample_factor, order=1)
                 if plane.shape[0] < self.block_size[1] or \
                    plane.shape[1] < self.block_size[2]:
                     xs = max(plane.shape[1], self.block_size[2])

@@ -14,7 +14,8 @@ from .classify import ClassifyTask
 from .connected_components import \
      AllConnectedComponentsTask, ConnectedComponentsTask, VolumeRelabelingTask,\
      StoragePlanRelabelingTask
-from .copytasks import CopyFileTask, CopyStoragePlan, DeleteStoragePlan
+from .copytasks import CopyFileTask, CopyStoragePlanTask, CopyLoadingPlanTask
+from .copytasks import DeleteStoragePlan
 from .copytasks import BossShardingTask
 from .connect_synapses import ConnectSynapsesTask
 from .distance_transform import DistanceTransformTask
@@ -35,8 +36,8 @@ from .synapse_statistics import SynapseStatisticsTask
 
 all = [AllConnectedComponentsTask, BossShardingTask, ClassifyTask, 
        ConnectedComponentsTask, ConnectSynapsesTask,
-       CopyFileTask, CopyStoragePlan, DeleteStoragePlan,
-       DistanceTransformTask,
+       CopyFileTask, CopyStoragePlanTask, CopyLoadingPlanTask, 
+       DeleteStoragePlan, DistanceTransformTask,
        DownloadFromButterflyTask, AMTaskFactory,
        FindSeedsTask, Dimensionality, SeedsMethodEnum,
        MaskBorderTask, MatchNeuronsTask, MatchSynapsesTask,

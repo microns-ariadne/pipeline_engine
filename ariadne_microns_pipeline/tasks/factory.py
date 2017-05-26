@@ -16,7 +16,8 @@ from .connected_components import VolumeRelabelingTask
 from .connected_components import StoragePlanRelabelingTask
 from .connect_synapses import ConnectSynapsesTask
 from .connect_synapses import AggregateSynapseConnectionsTask
-from .copytasks import BossShardingTask
+from .copytasks import BossShardingTask, CopyStoragePlanTask,\
+     CopyLoadingPlanTask
 from .distance_transform import DistanceTransformInputType
 from .distance_transform import DistanceTransformTask
 from .filter import FilterSegmentationTask
@@ -1050,6 +1051,34 @@ class AMTaskFactory(object):
             lp(task)
         return task
     
+    def gen_copy_storage_plan_task(
+        self, storage_plan_path, volume, dataset_name):
+        '''Copy a storage plan from some other pipeline
+        
+        :param storage_plan_path: original storage plan
+        :param volume: the volume of the target storage plan
+        :param dataset_name: the name of the dataset.
+        '''
+        new_storage_plan_path, sp = self.storage_plan(volume, dataset_name)
+        task = sp(CopyStoragePlanTask(
+            storage_plan=new_storage_plan_path,
+            src_storage_plan=storage_plan_path))
+        return task
+        
+    def gen_copy_loading_plan_task(
+        self, loading_plan_path, volume, dataset_name):
+        '''Copy a loading plan from some other pipeline
+        
+        :param loading_plan_path: original storage plan
+        :param volume: the volume of the target storage plan
+        :param dataset_name: the name of the dataset.
+        '''
+        new_storage_plan_path, sp = self.storage_plan(volume, dataset_name)
+        task = sp(CopyLoadingPlanTask(
+            storage_plan=new_storage_plan_path,
+            src_loading_plan=loading_plan_path))
+        return task
+        
     def gen_storage_plan_relabeling_task(
         self, connectivity_graph_path, volume, src_loading_plan,
         dataset_name=None):

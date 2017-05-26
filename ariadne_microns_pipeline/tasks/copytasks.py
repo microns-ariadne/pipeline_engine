@@ -43,7 +43,7 @@ class CopyFileTask(
                         break
                     fd_out.write(buf)
 
-class CopyStoragePlan(DatasetMixin,
+class CopyStoragePlanTask(DatasetMixin,
                       RunMixin,
                       RequiresMixin,
                       luigi.Task):
@@ -60,6 +60,24 @@ class CopyStoragePlan(DatasetMixin,
         data = self.input().next().imread()
         self.output().imwrite(data)
         
+class CopyLoadingPlanTask(DatasetMixin,
+                          RunMixin,
+                      RequiresMixin,
+                      luigi.Task):
+    '''A task to copy a loading plan to a storage plan'''
+
+    task_namespace = "ariadne_microns_pipeline"
+    src_loading_plan = luigi.Parameter(
+        description="The source loading plan to be copied")
+
+    def input(self):
+        for tgt in DestVolumeReader(self.src_loading_plan).get_source_targets():
+            yield tgt
+
+    def ariadne_run(self):
+        data = self.input().next().imread()
+        self.output().imwrite(data)
+
 class DeleteStoragePlan(RunMixin,
                         RequiresMixin,
                         luigi.Task):
