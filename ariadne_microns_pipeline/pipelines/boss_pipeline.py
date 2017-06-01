@@ -172,19 +172,23 @@ class BossPipelineTaskMixin:
         max_y = self.volume.y
         max_z = self.volume.z
         volumes = []
-        for volume, location in cg["locations"]:
-            volume = Volume(**volume)
+        for volumed, location in cg["locations"]:
+            volume = Volume(**volumed)
             if volume.overlaps(self.volume):
-                volumes.append((volume, location))
+                volumes.append((volume, volumed, location))
                 min_x = min(min_x, volume.x)
                 max_x = max(max_x, volume.x1)
                 min_y = min(min_y, volume.y)
                 max_y = max(max_y, volume.y1)
                 min_z = min(min_z, volume.z)
                 max_z = max(max_z, volume.z1)
+        volume_mapping = {}
+        for volume, mapping in cg["volumes"]:
+            volume_mapping[volume["x"], volume["y"], volume["z"]] = mapping
         rh_logger.logger.report_event("Generating relabeling tasks")
         relabeling_tasks_by_storage_plan = {}
-        for volume, location in volumes:
+        offset = 0
+        for volume, volumed, location in volumes:
             if volume.x == min_x:
                 x0 = min_x
             else:
@@ -239,7 +243,12 @@ class BossPipelineTaskMixin:
                     paths[0], volume, self.dataset_name)
             else:
                 task = factory.gen_copy_loading_plan_task(
-                    location, volume, dataset_name=self.dataset_name)
+                    location, volume, 
+                    dataset_name=self.dataset_name,
+                    offset=offset)
+                mapping = np.array(
+                    volume_mapping[volumed["x"], volumed["y"], volumed["z"]])
+                offset += np.max(mapping[:, 0])
             task.priority = PRIORITY_RELABELING_TASK
             done_file = task.output().path
             relabeling_tasks_by_storage_plan[done_file] = task

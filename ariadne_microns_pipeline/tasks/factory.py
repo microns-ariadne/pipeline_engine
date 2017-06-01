@@ -1066,17 +1066,19 @@ class AMTaskFactory(object):
         return task
         
     def gen_copy_loading_plan_task(
-        self, loading_plan_path, volume, dataset_name):
+        self, loading_plan_path, volume, dataset_name, offset = 0):
         '''Copy a loading plan from some other pipeline
         
         :param loading_plan_path: original storage plan
         :param volume: the volume of the target storage plan
         :param dataset_name: the name of the dataset.
+        :param offset: the offset to add to each nonzero voxel value
         '''
         new_storage_plan_path, sp = self.storage_plan(volume, dataset_name)
         task = sp(CopyLoadingPlanTask(
             storage_plan=new_storage_plan_path,
-            src_loading_plan=loading_plan_path))
+            src_loading_plan=loading_plan_path,
+            offset=offset))
         return task
         
     def gen_storage_plan_relabeling_task(

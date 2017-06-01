@@ -69,13 +69,28 @@ class CopyLoadingPlanTask(DatasetMixin,
     task_namespace = "ariadne_microns_pipeline"
     src_loading_plan = luigi.Parameter(
         description="The source loading plan to be copied")
+    offset = luigi.IntParameter(
+        default=0,
+        description="An offset to be added to every voxel value, e.g. "
+            "to make segmentations unique across blocks")
 
     def input(self):
         for tgt in DestVolumeReader(self.src_loading_plan).get_source_targets():
             yield tgt
 
     def ariadne_run(self):
-        data = self.input().next().imread()
+        src_tgt = self.input().next()
+        dest_tgt = self.output()
+        data = src_tgt.imread()
+        x0 = dest_tgt.volume.x - src_tgt.volume.x
+        x1 = dest_tgt.volume.x1 - src_tgt.volume.x
+        y0 = dest_tgt.volume.y - src_tgt.volume.y
+        y1 = dest_tgt.volume.y1 - src_tgt.volume.y
+        z0 = dest_tgt.volume.z - src_tgt.volume.z
+        z1 = dest_tgt.volume.z1 - src_tgt.volume.z
+        data = data[z0:z1, y0:y1, x0:x1]
+        if self.offset != 0:
+            data[data != 0] += data.dtype.type(self.offset)
         self.output().imwrite(data)
 
 class DeleteStoragePlan(RunMixin,
