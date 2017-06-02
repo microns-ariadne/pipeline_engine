@@ -79,7 +79,7 @@ class CopyLoadingPlanTask(DatasetMixin,
             yield tgt
 
     def ariadne_run(self):
-        src_tgt = self.input().next()
+        src_tgt = DestVolumeReader(self.src_loading_plan)
         dest_tgt = self.output()
         data = src_tgt.imread()
         x0 = dest_tgt.volume.x - src_tgt.volume.x
