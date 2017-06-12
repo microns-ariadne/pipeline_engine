@@ -4,6 +4,7 @@
 *~
 ariadne_microns_pipeline.egg-info
 ariadne_microns_pipeline/algorithms/*.cpp
+ariadne_microns_pipeline/pipelines/scratchpipeline.py
 build
 archived/fc_dnn/src/run_dnn
 archived/skeletonization/graph_extraction/main
