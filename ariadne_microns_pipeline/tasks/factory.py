@@ -17,7 +17,7 @@ from .connected_components import StoragePlanRelabelingTask
 from .connect_synapses import ConnectSynapsesTask
 from .connect_synapses import AggregateSynapseConnectionsTask
 from .copytasks import BossShardingTask, CopyStoragePlanTask,\
-     CopyLoadingPlanTask
+     CopyLoadingPlanTask, ChimericSegmentationTask
 from .distance_transform import DistanceTransformInputType
 from .distance_transform import DistanceTransformTask
 from .filter import FilterSegmentationTask
@@ -984,6 +984,54 @@ class AMTaskFactory(object):
             segmentation_loading_plan2_path=full2,
             output_location=output_location)))))
     
+    def gen_abutting_connected_components_task(
+        self, dataset_name, 
+        volume1, src_task1, sliver_volume1,
+        volume2, src_task2, sliver_volume2, 
+        overlap_volume, neuroproof_task, 
+        neuroproof_dataset_name, output_location):
+        '''Create a connected components task using the abutting method
+        
+        :param dataset_name: the name of the segmentation dataset, 
+        e.g. "neuroproof"
+        :param volume1: the volume of the first segmentation
+        :param src_task1: the task that produced the first volume
+        :param sliver_volume1: the volume to take out of the first task's
+        segmentation when comparing
+        :param volume2: the volume of the second segmentation
+        :param src_task2: the task that produced the second volume
+        :param sliver_volume2: the volume to take out of the second task's
+        segmentation when comparing
+        :param overlap_volume: the volume to be scanned for connected components
+        :param neuroproof_task: the task that performed the neuroproofing of
+        the chimera segmentation of the two blocks
+        :param neuroproof_dataset_name: the name of the dataset used in
+        the chimeric neuroproofing
+        :param output_location: where to write the data file
+        '''
+        #
+        # Lots of loading plans here: a cutout and complete one for each
+        # segmentation.
+        #
+        cutout1, c1lp = self.loading_plan(
+            sliver_volume1, dataset_name, src_task1)
+        full1, f1lp = self.loading_plan(volume1, dataset_name, src_task1)
+        cutout2, c2lp = self.loading_plan(
+            sliver_volume2, dataset_name, src_task2)
+        full2, f2lp = self.loading_plan(volume2, dataset_name, src_task2)
+        neuroproof_loading_plan, nplp = self.loading_plan(
+            overlap_volume, neuroproof_dataset_name, neuroproof_task)
+        
+        return nplp(c1lp( f1lp( c2lp( f2lp( ConnectedComponentsTask(
+            volume1=volume1,
+            cutout_loading_plan1_path=cutout1,
+            segmentation_loading_plan1_path=full1,
+            volume2=volume2,
+            cutout_loading_plan2_path=cutout2,
+            segmentation_loading_plan2_path=full2,
+            neuroproof_segmentation = neuroproof_loading_plan,
+            output_location=output_location))))))
+
     def gen_all_connected_components_task(
         self, input_locations, output_location, additional_loading_plans = []):
         '''Construct the global mapping for local segmentations
@@ -1106,6 +1154,34 @@ class AMTaskFactory(object):
             storage_plan=new_storage_plan,
             src_loading_plan_path=src_loading_plan))
         return task
+    
+    def gen_chimeric_segmentation_task(
+        self, volume1, task1, volume2, task2, 
+        input_dataset_name, output_dataset_name):
+        '''Generate a task to take two abutting segmentations and combine.
+        
+        This creates a chimeric segmentation, half one segmentation, half
+        the other. This can then be fed to Neuroproof which will knit the two
+        together.
+        
+        :param volume1: the volume encompassing the first segmentation
+        :param task1: the task that generated the segmentation
+        :param volume2: the volume encompassing the second segmentation
+        :param task2: the task that generated the segmentation
+        :param input_dataset_name: the name of the dataset for the input volumes
+        :param output_dataset_name: the name of the output dataset
+        '''
+        loading_plan_1, lp1 = self.loading_plan(
+             volume1, input_dataset_name, task1)
+        loading_plan_2, lp2 = self.loading_plan(
+             volume2, input_dataset_name, task2)
+        volume = volume1.get_union_region(volume2)
+        storage_plan, sp = self.storage_plan(volume, output_dataset_name)
+        task = ChimericSegmentationTask(
+            loading_plan1_path=loading_plan_1,
+            loading_plan2_path=loading_plan_2,
+            storage_plan=storage_plan)
+        return sp(lp1(lp2(task)))
     
     def gen_boss_sharding_task(self,
                                volume,

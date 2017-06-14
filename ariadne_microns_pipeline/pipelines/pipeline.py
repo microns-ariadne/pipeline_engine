@@ -1,3 +1,4 @@
+import itertools
 import luigi
 import rh_logger
 import json
@@ -73,6 +74,12 @@ SYNAPSE_RECEPTOR_DATASET = "receptor"
 '''The name of the neuroproofed segmentation datasets'''
 NP_DATASET = "neuroproof"
 
+'''The name of the chimeric segmentation that is input into Neuroproof'''
+CHIMERA_INPUT_DATASET = "chimera-input"
+
+'''The name of the chimeric segmentation that is output from Neuroproof'''
+CHIMERA_OUTPUT_DATASET = "chimera-output"
+
 '''The name of the ground-truth dataset for statistics computation'''
 GT_DATASET = "gt"
 
@@ -123,9 +130,11 @@ PRIORITY_NEUROPROOF = 4
 PRIORITY_Z_WATERSHED = 4
 PRIORITY_FIND_SYNAPSES = 5
 PRIORITY_CONNECT_SYNAPSES = 6
-PRIORITY_CONNECTED_COMPONENTS = 7
-PRIORITY_STATISTICS = 8
-PRIORITY_DELETE = 9
+PRIORITY_CHIMERA_COPY = 7
+PRIORITY_CHIMERA_NEUROPROOF = 8
+PRIORITY_CONNECTED_COMPONENTS = 9
+PRIORITY_STATISTICS = 10
+PRIORITY_DELETE = 11
 #
 # Skeletonization should have less priority than connecting and finding
 # the synapses since statistics are more cruicial and timely to the run
@@ -608,6 +617,12 @@ class PipelineTaskMixin:
                                "postsynaptic partner of a synapse")
         self.register_datatype(NP_DATASET, UINT32,
                                "The neuroproofed segmentation")
+        self.register_datatype(
+            CHIMERA_INPUT_DATASET, UINT32,
+            "The chimeric segmentation input into Neuroproof to join blocks")
+        self.register_datatype(
+            CHIMERA_OUTPUT_DATASET, UINT32,
+            "The neuroproof of the chimeric segmentation")
         self.register_datatype(GT_DATASET, UINT32,
                                "The ground-truth segmentation")
         self.register_datatype(SYN_GT_DATASET, UINT8, 
@@ -715,14 +730,14 @@ class PipelineTaskMixin:
                        (self.block_height - self.np_y_pad)) + 2
         self.n_z = int((self.useable_depth - self.block_depth - 1) /
                        (self.block_depth - self.np_z_pad)) + 2
-        self.xs = np.linspace(self.x0, self.x1, self.n_x, endpoint = False)\
-            .astype(int)
+        self.xs = np.linspace(self.x0, self.x1 - self.np_x_pad, self.n_x, 
+                              endpoint = False).astype(int)
         self.xe = np.minimum(self.xs + self.block_width, self.x1)
-        self.ys = np.linspace(self.y0, self.y1, self.n_y, endpoint = False)\
-            .astype(int)
+        self.ys = np.linspace(self.y0, self.y1 - self.np_y_pad, self.n_y, 
+                              endpoint = False).astype(int)
         self.ye = np.minimum(self.ys + self.block_height, self.y1)
-        self.zs = np.linspace(self.z0, self.z1, self.n_z, endpoint=False)\
-            .astype(int)
+        self.zs = np.linspace(self.z0, self.z1 - self.np_z_pad, self.n_z, 
+                              endpoint=False).astype(int)
         self.ze = np.minimum(self.zs + self.block_depth, self.z1)
         #
         # The first and last valid blocks start and end at the extents.
@@ -1251,81 +1266,160 @@ class PipelineTaskMixin:
         '''
         self.x_connectivity_graph_tasks = np.zeros(
             (self.n_z, self.n_y, self.n_x-1), object)
-        for zi in range(self.n_z):
-            for yi in range(self.n_y):
-                for xi in range(self.n_x-1):
-                    left_task = self.np_tasks[zi, yi, xi]
-                    left_tgt = left_task.output()
-                    left_tgt_volume = self.get_block_volume(xi, yi, zi)
-                    right_task = self.np_tasks[zi, yi, xi+1]
-                    right_tgt_volume = self.get_block_volume(xi+1, yi, zi)
-                    right_tgt = right_task.output()
-                    #
-                    # The overlap is at the average of the x end of the
-                    # left block and the x start of the right block
-                    #
-                    x = self.x_grid[xi+1]
-                    overlap_volume = Volume(
-                        x-self.halo_size_xy,
-                        left_tgt_volume.y,
-                        left_tgt_volume.z,
-                        self.halo_size_xy * 2 + 1, 
-                        left_tgt_volume.height,
-                        left_tgt_volume.depth)
-                    filename = CONNECTED_COMPONENTS_PATTERN.format(
-                        direction="x")
-                    output_location = os.path.join(
-                            os.path.dirname(left_tgt.path), filename)
-                    task = self.factory.gen_connected_components_task(
-                        dataset_name=NP_DATASET,
-                        volume1=left_tgt_volume,
-                        src_task1=left_task,
-                        volume2=right_tgt_volume,
-                        src_task2=right_task,
-                        overlap_volume=overlap_volume,
-                        output_location=output_location)
-                    task.priority = PRIORITY_CONNECTED_COMPONENTS
-                    self.tasks.append(task)
-                    self.x_connectivity_graph_tasks[zi, yi, xi] = task
-                                        
+        for zi, yi, xi in itertools.product(range(self.n_z),
+                                            range(self.n_y),
+                                            range(self.n_x-1)):
+            left_task = self.np_tasks[zi, yi, xi]
+            left_tgt = left_task.output()
+            left_tgt_volume = self.get_block_volume(xi, yi, zi)
+            right_task = self.np_tasks[zi, yi, xi+1]
+            right_tgt_volume = self.get_block_volume(xi+1, yi, zi)
+            right_tgt = right_task.output()
+            filename = CONNECTED_COMPONENTS_PATTERN.format(
+                direction="x")
+            output_location = os.path.join(
+                    os.path.dirname(left_tgt.path), filename)
+            
+            if self.joining_method == JoiningMethod.ABUT:
+                overlap_volume = left_tgt_volume.get_overlapping_region(
+                    right_tgt_volume)
+                left_volume = Volume(overlap_volume.x,
+                                     overlap_volume.y,
+                                     overlap_volume.z,
+                                     overlap_volume.width / 2,
+                                     overlap_volume.height,
+                                     overlap_volume.depth)
+                right_volume = Volume(left_volume.x1,
+                                      overlap_volume.y,
+                                      overlap_volume.z,
+                                      overlap_volume.x1 - left_volume.x1,
+                                      overlap_volume.height,
+                                      overlap_volume.depth)
+                #
+                # Make thin (one voxel) slivers on the borders for the
+                # connected components task
+                #
+                sliver1 = Volume(left_volume.x1-1,
+                                 left_volume.y,
+                                 left_volume.z,
+                                 1,
+                                 left_volume.height,
+                                 left_volume.depth)
+                sliver2 = Volume(right_volume.x,
+                                 right_volume.y,
+                                 right_volume.z,
+                                 1,
+                                 right_volume.height,
+                                 right_volume.depth)
+                task = self.generate_abut_connectivity_graph_task(
+                    left_task, left_volume, 
+                    right_task, right_volume, 
+                    overlap_volume, 
+                    sliver1, sliver2, left_tgt_volume, right_tgt_volume, 
+                    output_location)
+                
+            else:
+                #
+                # The overlap is at the average of the x end of the
+                # left block and the x start of the right block
+                #
+                x = self.x_grid[xi+1]
+                overlap_volume = Volume(
+                    x-self.halo_size_xy,
+                    left_tgt_volume.y,
+                    left_tgt_volume.z,
+                    self.halo_size_xy * 2 + 1, 
+                    left_tgt_volume.height,
+                    left_tgt_volume.depth)
+                task = self.factory.gen_connected_components_task(
+                    dataset_name=NP_DATASET,
+                    volume1=left_tgt_volume,
+                    src_task1=left_task,
+                    volume2=right_tgt_volume,
+                    src_task2=right_task,
+                    overlap_volume=overlap_volume,
+                    output_location=output_location)
+            task.priority = PRIORITY_CONNECTED_COMPONENTS
+            self.tasks.append(task)
+            self.x_connectivity_graph_tasks[zi, yi, xi] = task
+
     def generate_y_connectivity_graph_tasks(self):
         '''Generate connected components tasks to link blocks in y direction
         
         '''
         self.y_connectivity_graph_tasks = np.zeros(
             (self.n_z, self.n_y-1, self.n_x), object)
-        for zi in range(self.n_z):
-            for yi in range(self.n_y - 1):
-                for xi in range(self.n_x):
-                    left_task = self.np_tasks[zi, yi, xi]
-                    left_tgt = left_task.output()
-                    left_tgt_volume = self.get_block_volume(xi, yi, zi)
-                    right_task = self.np_tasks[zi, yi+1, xi]
-                    right_tgt = right_task.output()
-                    right_tgt_volume = self.get_block_volume(xi, yi+1, zi)
-                    y = self.y_grid[yi+1]
-                    overlap_volume = Volume(
-                        left_tgt_volume.x,
-                        y - self.halo_size_xy,
-                        left_tgt_volume.z,
-                        left_tgt_volume.width, 
-                        self.halo_size_xy * 2 + 1, 
-                        left_tgt_volume.depth)
-                    filename = CONNECTED_COMPONENTS_PATTERN.format(
+        for zi, yi, xi in itertools.product(range(self.n_z),
+                                            range(self.n_y - 1),
+                                            range(self.n_x)):
+            left_task = self.np_tasks[zi, yi, xi]
+            left_tgt = left_task.output()
+            left_tgt_volume = self.get_block_volume(xi, yi, zi)
+            right_task = self.np_tasks[zi, yi+1, xi]
+            right_tgt = right_task.output()
+            right_tgt_volume = self.get_block_volume(xi, yi+1, zi)
+            filename = CONNECTED_COMPONENTS_PATTERN.format(
                             direction="y")
-                    output_location = os.path.join(
-                        os.path.dirname(left_tgt.path), filename)
-                    task = self.factory.gen_connected_components_task(
-                        dataset_name=NP_DATASET,
-                        volume1=left_tgt_volume,
-                        src_task1=left_task,
-                        volume2=right_tgt_volume,
-                        src_task2=right_task,
-                        overlap_volume=overlap_volume,
-                        output_location=output_location)
-                    task.priority = PRIORITY_CONNECTED_COMPONENTS
-                    self.tasks.append(task)
-                    self.y_connectivity_graph_tasks[zi, yi, xi] = task
+            output_location = os.path.join(
+                            os.path.dirname(left_tgt.path), filename)
+            if self.joining_method == JoiningMethod.ABUT:
+                overlap_volume = left_tgt_volume.get_overlapping_region(
+                    right_tgt_volume)
+                left_volume = Volume(overlap_volume.x,
+                                     overlap_volume.y,
+                                     overlap_volume.z,
+                                     overlap_volume.width,
+                                     overlap_volume.height / 2,
+                                     overlap_volume.depth)
+                right_volume = Volume(overlap_volume.x,
+                                      left_volume.y1,
+                                      overlap_volume.z,
+                                      overlap_volume.width,
+                                      overlap_volume.y1 - left_volume.y1,
+                                      overlap_volume.depth)
+                #
+                # Make thin (one voxel) slivers on the borders for the
+                # connected components task
+                #
+                sliver1 = Volume(left_volume.x,
+                                 left_volume.y1-1,
+                                 left_volume.z,
+                                 left_volume.width,
+                                 1,
+                                 left_volume.depth)
+                sliver2 = Volume(right_volume.x,
+                                 right_volume.y,
+                                 right_volume.z,
+                                 right_volume.width,
+                                 1,
+                                 right_volume.depth)
+                task = self.generate_abut_connectivity_graph_task(
+                    left_task, left_volume, 
+                    right_task, right_volume, 
+                    overlap_volume, 
+                    sliver1, sliver2, left_tgt_volume, right_tgt_volume, 
+                    output_location)
+                
+            else:
+                y = self.y_grid[yi+1]
+                overlap_volume = Volume(
+                    left_tgt_volume.x,
+                    y - self.halo_size_xy,
+                    left_tgt_volume.z,
+                    left_tgt_volume.width, 
+                    self.halo_size_xy * 2 + 1, 
+                    left_tgt_volume.depth)
+                task = self.factory.gen_connected_components_task(
+                    dataset_name=NP_DATASET,
+                    volume1=left_tgt_volume,
+                    src_task1=left_task,
+                    volume2=right_tgt_volume,
+                    src_task2=right_task,
+                    overlap_volume=overlap_volume,
+                    output_location=output_location)
+            task.priority = PRIORITY_CONNECTED_COMPONENTS
+            self.tasks.append(task)
+            self.y_connectivity_graph_tasks[zi, yi, xi] = task
                                         
     def generate_z_connectivity_graph_tasks(self):
         '''Generate connected components tasks to link blocks in z direction
@@ -1333,39 +1427,146 @@ class PipelineTaskMixin:
         '''
         self.z_connectivity_graph_tasks = np.zeros(
             (self.n_z-1, self.n_y, self.n_x), object)
-        for zi in range(self.n_z-1):
-            for yi in range(self.n_y):
-                for xi in range(self.n_x):
-                    left_task = self.np_tasks[zi, yi, xi]
-                    left_tgt = left_task.output()
-                    left_tgt_volume = self.get_block_volume(xi, yi, zi)
-                    right_task = self.np_tasks[zi+1, yi, xi]
-                    right_tgt = right_task.output()
-                    right_tgt_volume = self.get_block_volume(xi, yi, zi+1)
-                    z = self.z_grid[zi+1]
-                    overlap_volume = Volume(
-                        left_tgt_volume.x,
-                        left_tgt_volume.y,
-                        z - self.halo_size_z,
-                        left_tgt_volume.width, 
-                        left_tgt_volume.height, 
-                        self.halo_size_z * 2 + 1)
-                    filename = CONNECTED_COMPONENTS_PATTERN.format(
+        for zi, yi, xi in itertools.product(range(self.n_z-1),
+                                            range(self.n_y),
+                                            range(self.n_x)):
+            left_task = self.np_tasks[zi, yi, xi]
+            left_tgt = left_task.output()
+            left_tgt_volume = self.get_block_volume(xi, yi, zi)
+            right_task = self.np_tasks[zi+1, yi, xi]
+            right_tgt = right_task.output()
+            right_tgt_volume = self.get_block_volume(xi, yi, zi+1)
+            filename = CONNECTED_COMPONENTS_PATTERN.format(
                             direction="z")
-                    output_location = os.path.join(
-                        os.path.dirname(left_tgt.path), filename)
-                    task = self.factory.gen_connected_components_task(
-                        dataset_name=NP_DATASET,
-                        volume1=left_tgt_volume,
-                        src_task1=left_task,
-                        volume2=right_tgt_volume,
-                        src_task2=right_task,
-                        overlap_volume=overlap_volume,
-                        output_location=output_location)
-                    task.priority = PRIORITY_CONNECTED_COMPONENTS
-                    self.z_connectivity_graph_tasks[zi, yi, xi] = task
-                    self.tasks.append(task)
-                    
+            output_location = os.path.join(
+                            os.path.dirname(left_tgt.path), filename)
+            if self.joining_method == JoiningMethod.ABUT:
+                overlap_volume = left_tgt_volume.get_overlapping_region(
+                    right_tgt_volume)
+                left_volume = Volume(overlap_volume.x,
+                                     overlap_volume.y,
+                                     overlap_volume.z,
+                                     overlap_volume.width,
+                                     overlap_volume.height,
+                                     overlap_volume.depth / 2)
+                right_volume = Volume(overlap_volume.x,
+                                      overlap_volume.y,
+                                      left_volume.z1,
+                                      overlap_volume.width,
+                                      overlap_volume.height,
+                                      overlap_volume.z1 - left_volume.z1)
+                #
+                # Make thin (one voxel) slivers on the borders for the
+                # connected components task
+                #
+                sliver1 = Volume(left_volume.x,
+                                 left_volume.y,
+                                 left_volume.z1-1,
+                                 left_volume.width,
+                                 left_volume.height,
+                                 1)
+                sliver2 = Volume(right_volume.x,
+                                 right_volume.y,
+                                 right_volume.z,
+                                 right_volume.width,
+                                 right_volume.height,
+                                 1)
+                task = self.generate_abut_connectivity_graph_task(
+                    left_task, left_volume, 
+                    right_task, right_volume, 
+                    overlap_volume, 
+                    sliver1, sliver2, left_tgt_volume, right_tgt_volume, 
+                    output_location)
+            else:
+                z = self.z_grid[zi+1]
+                overlap_volume = Volume(
+                    left_tgt_volume.x,
+                    left_tgt_volume.y,
+                    z - self.halo_size_z,
+                    left_tgt_volume.width, 
+                    left_tgt_volume.height, 
+                    self.halo_size_z * 2 + 1)
+                task = self.factory.gen_connected_components_task(
+                    dataset_name=NP_DATASET,
+                    volume1=left_tgt_volume,
+                    src_task1=left_task,
+                    volume2=right_tgt_volume,
+                    src_task2=right_task,
+                    overlap_volume=overlap_volume,
+                    output_location=output_location)
+            task.priority = PRIORITY_CONNECTED_COMPONENTS
+            self.z_connectivity_graph_tasks[zi, yi, xi] = task
+            self.tasks.append(task)
+
+    def generate_abut_connectivity_graph_task(
+        self, 
+        left_task, left_volume, 
+        right_task, right_volume, overlap_volume, 
+        sliver1, sliver2, left_tgt_volume, right_tgt_volume,
+        output_location):
+        '''Generate a connectivity graph task using the abutting method
+        
+        '''
+        #
+        # A mini-pipeline:
+        #    make a chimeric segmentation of left and right
+        #    neuroproof it
+        #    run it through connected components
+        #
+            
+        # The chimeric copy task
+
+        chimera_task = self.factory.gen_chimeric_segmentation_task(
+            left_volume, left_task, right_volume, right_task,
+            NP_DATASET, CHIMERA_INPUT_DATASET)
+        chimera_task.priority = PRIORITY_CHIMERA_COPY
+        chimera_task.set_requirement(left_task)
+        chimera_task.set_requirement(right_task)
+        self.datasets[chimera_task.output().path] = chimera_task
+        self.tasks.append(chimera_task)
+        #
+        # The Neuroproof task
+        #
+        if not self.wants_affinity_segmentation:
+            prob_dataset_name = MEMBRANE_DATASET
+            additional_dataset_names = []
+        else:
+            prob_dataset_name = X_AFFINITY_DATASET
+            additional_dataset_names = [
+                Y_AFFINITY_DATASET, Z_AFFINITY_DATASET]
+        additional_dataset_names += self.additional_neuroproof_channels
+        
+        np_task = self.factory.gen_neuroproof_task(
+            overlap_volume, prob_dataset_name, additional_dataset_names,
+            CHIMERA_INPUT_DATASET, CHIMERA_OUTPUT_DATASET,
+            self.neuroproof_classifier_path,
+            self.neuroproof_version, chimera_task)
+        np_task.priority = PRIORITY_CHIMERA_NEUROPROOF
+        np_task.cpu_count = self.np_cores
+        np_task.threshold=self.np_threshold
+        np_task.set_requirement(chimera_task)
+        self.datasets[np_task.output().path] = np_task
+        self.tasks.append(np_task)
+        #
+        # The connected components task
+        #
+        overlap_volume = sliver1.get_union_region(sliver2)
+        task = self.factory.gen_abutting_connected_components_task(
+            dataset_name=NP_DATASET,
+            volume1=left_tgt_volume,
+            src_task1=left_task,
+            sliver_volume1=sliver1,
+            volume2=right_tgt_volume,
+            src_task2=right_task,
+            sliver_volume2=sliver2,
+            overlap_volume=overlap_volume,
+            neuroproof_task = np_task,
+            neuroproof_dataset_name=CHIMERA_OUTPUT_DATASET,
+            output_location=output_location)
+        task.set_requirement(np_task)
+        self.tasks.append(task)
+        return task
+                                        
     def generate_synapse_segmentation_tasks(self):
         '''Generate connected-components and filter tasks for synapses
         

@@ -66,6 +66,34 @@ class Volume(object):
                self.y < other.y1 and other.y < self.y1 and\
                self.z < other.z1 and other.z < self.z1
     
+    def get_overlapping_region(self, other):
+        '''Return a volume representing the overlap between two volumes
+        
+        :param other: the other volume to be matched
+        :returns: a volume whose coordinates are the volume that overlaps
+        '''
+        x0 = max(self.x, other.x)
+        y0 = max(self.y, other.y)
+        z0 = max(self.z, other.z)
+        x1 = min(self.x1, other.x1)
+        y1 = min(self.y1, other.y1)
+        z1 = min(self.z1, other.z1)
+        return Volume(x0, y0, z0, x1-x0, y1-y0, z1-z0)
+    
+    def get_union_region(self, other):
+        '''Compose a volume that is the extrema of two volumes
+        
+        :param other: another volume
+        :returns: a volume that encompasses both volumes
+        '''
+        x0 = min(self.x, other.x)
+        y0 = min(self.y, other.y)
+        z0 = min(self.z, other.z)
+        x1 = max(self.x1, other.x1)
+        y1 = max(self.y1, other.y1)
+        z1 = max(self.z1, other.z1)
+        return Volume(x0, y0, z0, x1-x0, y1-y0, z1-z0)
+    
     def __str__(self):
         return "Volume: x=%d:%d, y=%d:%d, z=%d:%d" % (
             self.x, self.x1, self.y, self.y1, self.z, self.z1)

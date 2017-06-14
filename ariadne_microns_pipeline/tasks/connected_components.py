@@ -20,6 +20,7 @@ from .utilities import RequiresMixin, RunMixin, SingleThreadedMixin, \
 from ..targets import DestVolumeReader, SrcVolumeTarget
 from ..parameters import Volume
 from ..parameters import VolumeParameter
+from ..parameters import EMPTY_LOCATION
 from .utilities import to_hashable
 
 class LogicalOperation(enum.Enum):
@@ -37,6 +38,8 @@ class JoiningMethod(enum.Enum):
     SIMPLE_OVERLAP = 1
     '''Join blocks using the pairwise multimatch marriage algorithm'''
     PAIRWISE_MULTIMATCH = 2
+    '''Join two abutting blocks using Neuroproof'''
+    ABUT=3
 
 class ConnectedComponentsTaskMixin:
 
@@ -52,6 +55,10 @@ class ConnectedComponentsTaskMixin:
         description="The file path to the loading plan for cutout #2")
     segmentation_loading_plan2_path = luigi.Parameter(
         description="The file path for the entire segmentation #2")
+    neuroproof_segmentation = luigi.Parameter(
+        default=EMPTY_LOCATION,
+        description="For the abutting method, the neuroproof of the two "
+        "abutting segmentations")
     output_location = luigi.Parameter(
         description=
         "The location for the JSON file containing the concordances")
@@ -126,8 +133,15 @@ class ConnectedComponentsRunMixin:
         cutout1_tgt = DestVolumeReader(self.cutout_loading_plan1_path)
         cutout2_tgt = DestVolumeReader(self.cutout_loading_plan2_path)
         cutout1, cutout2 = [_.imread() for _ in cutout1_tgt, cutout2_tgt]
-        
-        if self.joining_method == JoiningMethod.PAIRWISE_MULTIMATCH:
+        if self.joining_method == JoiningMethod.ABUT:
+            
+            connections = self.abut_match(cutout1, cutout1_tgt, 
+                                           cutout2, cutout2_tgt)
+            #
+            # There's no count since there are no overlaps
+            #
+            counts = [0] * len(connections)
+        elif self.joining_method == JoiningMethod.PAIRWISE_MULTIMATCH:
             connections, counts = self.pairwise_multimatch(cutout1, cutout2)
         else:
             connections, counts = self.overlap_match(cutout1, cutout2)
@@ -385,7 +399,72 @@ class ConnectedComponentsRunMixin:
         to_merge = [(int(a), int(b)) for a, b in to_merge]
         to_merge_overlap_areas = map(int, to_merge_overlap_areas)
         return to_merge, to_merge_overlap_areas
+    
+    def abut_match(self, cutout1, cutout1_tgt, cutout2, cutout2_tgt):
+        '''Match by examining the neuroproof of abutting segmentations
         
+        :param cutout1: the neuron_id volume of the first cutout
+        :param cutout1_tgt: the DestVolumeReader for the first volume
+        :param cutout2: the neuron_id volume of the second cutout
+        :param cutout2_tgt: the DestVolumeReader for the second volume
+        :returns: an Nx2 array matching neuron IDs in the first volume to
+        those in the second.
+        '''
+        nproof_tgt = DestVolumeReader(self.neuroproof_segmentation)
+        nproof = nproof_tgt.imread()
+        c1 = self.get_abut_nproof_match(cutout1, cutout1_tgt.volume,
+                                        nproof, nproof_tgt.volume)
+        c2 = self.get_abut_nproof_match(cutout2, cutout2_tgt.volume,
+                                        nproof, nproof_tgt.volume)
+        #
+        # Go through the matches, finding groups of each neuroproof ID.
+        # Then link the first from 1 to all from 2 with same neuroproof ID
+        # and do same with 2 and 1 to get a linking graph between the two.
+        #
+        idx1 = 0
+        idx2 = 0
+        pairs = []
+        while idx1 < len(c1) and idx2 < len(c2):
+            if c1[idx1, 1] < c2[idx2, 1]:
+                idx1 += 1
+            elif c1[idx1, 1] > c2[idx2, 1]:
+                idx2 += 1
+            else:
+                idx1a = idx1+1
+                idx2a = idx2+1
+                nid = c1[idx1, 1]
+                while idx1a < len(c1) and c1[idx1a, 1] == nid:
+                    idx1a += 1
+                while idx2a < len(c2) and c2[idx2a, 1] == nid:
+                    idx2a += 1
+                for idx2b in range(idx2, idx2a):
+                    pairs.append((int(c1[idx1, 0]), int(c2[idx2b, 0])))
+                for idx1b in range(idx1+1, idx1a):
+                    pairs.append((int(c1[idx1b, 0]), int(c2[idx2, 0])))
+                idx1 = idx1a
+                idx2 = idx2a
+        return pairs
+
+    @staticmethod
+    def get_abut_nproof_match(cutout, cvolume, nproof, nvolume):
+        '''Get the correspondence between neuron IDs in the cutout and nproof'''
+        v = cvolume.get_overlapping_region(nvolume)
+        cutout = cutout[v.z - cvolume.z:v.z1 - cvolume.z,
+                        v.y - cvolume.y:v.y1 - cvolume.y,
+                        v.x - cvolume.x:v.x1 - cvolume.x].flatten()
+        nproof = nproof[v.z - nvolume.z:v.z1 - nvolume.z,
+                        v.y - nvolume.y:v.y1 - nvolume.y,
+                        v.x - nvolume.x:v.x1 - nvolume.x].flatten()
+        mask = (cutout != 0) & (nproof != 0)
+        cutout, nproof = cutout[mask], nproof[mask]
+        m = coo_matrix((np.ones(len(cutout), int),
+                        (cutout, nproof)))
+        m.sum_duplicates()
+        cid, nid = m.nonzero()
+        order = np.lexsort((cid, nid))
+        cid, nid = cid[order], nid[order]
+        return np.column_stack((cid, nid))
+
 class ConnectedComponentsTask(ConnectedComponentsTaskMixin,
                               ConnectedComponentsRunMixin,
                               RequiresMixin, RunMixin,

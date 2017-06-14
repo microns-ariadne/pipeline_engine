@@ -5,6 +5,7 @@ CopyFile copies one file to another
 '''
 
 import luigi
+import numpy as np
 import os
 import rh_logger
 import tifffile
@@ -191,3 +192,48 @@ class BossShardingTask(
     '''
     task_namespace = "ariadne_microns_pipeline"
 
+class ChimericSegmentationTask(DatasetMixin,
+                               RunMixin,
+                               RequiresMixin,
+                               luigi.Task):
+    '''A task to take two abutting segmentations and join them to form a third
+    
+    The third segmentation is numbered somewhat arbitrarily - the second
+    half's IDs are offset by the maximum ID in the first.
+    '''
+    task_namespace = "ariadne_microns_pipeline"
+    
+    loading_plan1_path = luigi.Parameter(
+        description="The path to the first loading plan")
+    loading_plan2_path = luigi.Parameter(
+        description="The path to the second loading plan")
+    
+    def input(self):
+        for tgt in DestVolumeReader(self.loading_plan1_path)\
+            .get_source_targets():
+            yield tgt
+        for tgt in DestVolumeReader(self.loading_plan2_path)\
+            .get_source_targets():
+            yield tgt
+    
+    def ariadne_run(self):
+        tgt = self.output()
+        result = np.zeros(
+            (tgt.volume.depth, tgt.volume.height, tgt.volume.width),
+            tgt.dtype)
+        seg1_tgt = DestVolumeReader(self.loading_plan1_path)
+        seg1_volume = seg1_tgt.volume
+        seg1 = seg1_tgt.imread()
+        result[seg1_volume.z - tgt.volume.z:seg1_volume.z1 - tgt.volume.z,
+               seg1_volume.y - tgt.volume.y:seg1_volume.y1 - tgt.volume.y,
+               seg1_volume.x - tgt.volume.x:seg1_volume.x1 - tgt.volume.x] = seg1
+        seg2_tgt = DestVolumeReader(self.loading_plan2_path)
+        seg2_volume = seg2_tgt.volume
+        seg2 = seg2_tgt.imread()
+        seg2[seg2 != 0] += np.max(seg1)
+        result[seg2_volume.z - tgt.volume.z:seg2_volume.z1 - tgt.volume.z,
+               seg2_volume.y - tgt.volume.y:seg2_volume.y1 - tgt.volume.y,
+               seg2_volume.x - tgt.volume.x:seg2_volume.x1 - tgt.volume.x] = seg2
+        tgt.imwrite(result)
+        
+        
