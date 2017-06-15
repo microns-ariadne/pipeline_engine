@@ -13,6 +13,8 @@ from ..tasks.factory import AMTaskFactory
 from ..tasks.classify import ClassifyShimTask
 from ..tasks.connected_components import JoiningMethod
 from ..tasks.connected_components import FakeAllConnectedComponentsTask
+from ..tasks.connected_components import AdditionalLocationDirection
+from ..tasks.connected_components import AdditionalLocationType
 from ..tasks.copytasks import DeleteStoragePlan
 from ..tasks.find_seeds import SeedsMethodEnum, Dimensionality
 from ..tasks.match_synapses import MatchMethod
@@ -234,17 +236,17 @@ class PipelineTaskMixin:
         description="The size of the border region for the Neuroproof merge "
         "of blocks to the left and right. The value is the amount of padding"
         " on each of the blocks.",
-        default=30)
+        default=100)
     np_y_pad = luigi.IntParameter(
         description="The size of the border region for the Neuroproof merge "
         "of blocks above and below. The value is the amount of padding"
         " on each of the blocks.",
-        default=30)
+        default=100)
     np_z_pad = luigi.IntParameter(
         description="The size of the border region for the Neuroproof merge "
         "of z-stacks. The value is the amount of padding"
         " on each of the blocks.",
-        default=5)
+        default=10)
     np_threshold = luigi.FloatParameter(
         default=.2,
         description="The probability threshold for merging in Neuroproof "
@@ -1928,6 +1930,14 @@ class PipelineTaskMixin:
         #
         # X plans
         #
+        if self.joining_method == JoiningMethod.ABUT:
+            halo_size_xy = 0
+            halo_size_z = 0
+            location_type = AdditionalLocationType.MATCHING.name
+        else:
+            halo_size_xy = self.halo_size_xy
+            halo_size_z = self.halo_size_z
+            location_type = AdditionalLocationType.OVERLAPPING.name
         for yi in range(self.n_y):
             for zi in range(self.n_z):
                 #
@@ -1936,34 +1946,88 @@ class PipelineTaskMixin:
                 volume = self.get_block_volume(0, yi, zi)
                 left_task = self.np_tasks[zi, yi, 0]
                 x = volume.x + self.np_x_pad / 2
-                overlap_volume = Volume(x - self.halo_size_xy,
+                overlap_volume = Volume(x - halo_size_xy,
                                         volume.y,
                                         volume.z,
-                                        self.halo_size_xy * 2 + 1,
+                                        halo_size_xy * 2 + 1,
                                         volume.height,
                                         volume.depth)
                 loading_plan, lp = self.factory.loading_plan(
                     overlap_volume, NP_DATASET, left_task)
+                
                 self.edge_loading_plans.append(
-                    (volume.to_dictionary(), loading_plan))
+                    dict(volume=volume.to_dictionary(),
+                         extent=overlap_volume.to_dictionary(),
+                         loading_plan=loading_plan,
+                         direction=AdditionalLocationDirection.X0.name,
+                         location_type=location_type))
+                
                 edge_loading_plan_registrars.append(lp)
+                if self.joining_method == JoiningMethod.ABUT:
+                    #
+                    # The abutting volume for the chimera to be
+                    # neuroproofed.
+                    #
+                    chimera_volume = Volume(volume.x + self.np_x_pad,
+                                            volume.y,
+                                            volume.z,
+                                            self.np_x_pad / 2,
+                                            volume.height,
+                                            volume.depth)
+                    loading_plan, lp = self.factory.loading_plan(
+                        chimera_volume, NP_DATASET, left_task)
+                
+                    self.edge_loading_plans.append(dict(
+                        volume=volume.to_dictionary(),
+                        extent=chimera_volume.to_dictionary(),
+                        loading_plan=loading_plan,
+                        direction=AdditionalLocationDirection.X0.name,
+                        location_type=AdditionalLocationType.ABUTTING.name))
+                
+                    edge_loading_plan_registrars.append(lp)
                 #
                 # Right side
                 #
                 volume = self.get_block_volume(self.n_x-1, yi, zi)
                 right_task = self.np_tasks[zi, yi, self.n_x-1]
                 x = volume.x + volume.width - self.np_x_pad / 2
-                overlap_volume = Volume(x - self.halo_size_xy,
+                overlap_volume = Volume(x - halo_size_xy,
                                         volume.y,
                                         volume.z,
-                                        self.halo_size_xy * 2 + 1,
+                                        halo_size_xy * 2 + 1,
                                         volume.height,
                                         volume.depth)
                 loading_plan, lp = self.factory.loading_plan(
                                 overlap_volume, NP_DATASET, right_task)
-                self.edge_loading_plans.append(
-                    (volume.to_dictionary(), loading_plan))
+                
+                self.edge_loading_plans.append(dict(
+                    volume=volume.to_dictionary(), 
+                    extent=overlap_volume.to_dictionary(),
+                    loading_plan=loading_plan,
+                    direction=AdditionalLocationDirection.X1.name,
+                    location_type=location_type))
+                
                 edge_loading_plan_registrars.append(lp)
+                if self.joining_method != JoiningMethod.ABUT:
+                    #
+                    # The abutting volume for the chimera to be
+                    # neuroproofed.
+                    #
+                    chimera_volume = Volume(volume.x1 - self.np_x_pad,
+                                            volume.y,
+                                            volume.z,
+                                            self.np_x_pad / 2,
+                                            volume.height,
+                                            volume.depth)
+                    loading_plan, lp = self.factory.loading_plan(
+                        chimera_volume, NP_DATASET, right_task)
+                    self.edge_loading_plans.append(dict(
+                        volume=volume.to_dictionary(),
+                        extent=chimera_volume.to_dictionary(),
+                        loading_plan=loading_plan,
+                        direction=AdditionalLocationDirection.X1.name,
+                        location_type=AdditionalLocationType.ABUTTING.name))
+                    edge_loading_plan_registrars.append(lp)
         #
         # Y plans
         #
@@ -1983,9 +2047,33 @@ class PipelineTaskMixin:
                                         volume.depth)
                 loading_plan, lp = self.factory.loading_plan(
                     overlap_volume, NP_DATASET, left_task)
-                self.edge_loading_plans.append(
-                    (volume.to_dictionary(), loading_plan))
+                self.edge_loading_plans.append(dict(
+                    volume=volume.to_dictionary(),
+                    extent=overlap_volume.to_dictionary(),
+                    loading_plan=loading_plan,
+                    direction=AdditionalLocationDirection.Y0.name,
+                    location_type=location_type))
                 edge_loading_plan_registrars.append(lp)
+                if self.joining_method == JoiningMethod.ABUT:
+                    #
+                    # The abutting volume for the chimera to be
+                    # neuroproofed.
+                    #
+                    chimera_volume = Volume(volume.x,
+                                            volume.y + self.np_y_pad,
+                                            volume.z,
+                                            volume.width,
+                                            self.np_y_pad / 2,
+                                            volume.depth)
+                    loading_plan, lp = self.factory.loading_plan(
+                        chimera_volume, NP_DATASET, left_task)
+                    self.edge_loading_plans.append(dict(
+                        volume=volume.to_dictionary(),
+                        extent=chimera_volume.to_dictionary(),
+                        loading_plan=loading_plan,
+                        direction=AdditionalLocationDirection.Y0.name,
+                        location_type=AdditionalLocationType.ABUTTING.name))
+                    edge_loading_plan_registrars.append(lp)
                 #
                 # Right side
                 #
@@ -2000,9 +2088,35 @@ class PipelineTaskMixin:
                                         volume.depth)
                 loading_plan, lp = self.factory.loading_plan(
                                 overlap_volume, NP_DATASET, right_task)
-                self.edge_loading_plans.append(
-                    (volume.to_dictionary(), loading_plan))
+                self.edge_loading_plans.append(dict(
+                    volume=volume.to_dictionary(),
+                    extent=overlap_volume.to_dictionary(),
+                    loading_plan=loading_plan,
+                    direction=AdditionalLocationDirection.Y1.name,
+                    location_type=location_type))
+                
                 edge_loading_plan_registrars.append(lp)
+                if self.joining_method != JoiningMethod.ABUT:
+                    #
+                    # The abutting volume for the chimera to be
+                    # neuroproofed.
+                    #
+                    chimera_volume = Volume(volume.x,
+                                            volume.y1 - self.np_y_pad,
+                                            volume.z,
+                                            volume.width,
+                                            self.np_y_pad / 2,
+                                            volume.depth)
+                    loading_plan, lp = self.factory.loading_plan(
+                        chimera_volume, NP_DATASET, right_task)
+                    self.edge_loading_plans.append(dict(
+                        volume=volume.to_dictionary(),
+                        extent=chimera_volume.to_dictionary(),
+                        loading_plan=loading_plan,
+                        direction=AdditionalLocationDirection.Y1.name,
+                        location_type=AdditionalLocationType.ABUTTING.name))
+                    edge_loading_plan_registrars.append(lp)
+                
         #
         # Z plans
         #
@@ -2022,9 +2136,33 @@ class PipelineTaskMixin:
                                         self.halo_size_z * 2 + 1)
                 loading_plan, lp = self.factory.loading_plan(
                     overlap_volume, NP_DATASET, left_task)
-                self.edge_loading_plans.append(
-                    (volume.to_dictionary(), loading_plan))
+                self.edge_loading_plans.append(dict(
+                    volume=volume.to_dictionary(),
+                    extent=overlap_volume.to_dictionary(),
+                    loading_plan=loading_plan,
+                    direction=AdditionalLocationDirection.Z0.name,
+                    location_type=location_type))
                 edge_loading_plan_registrars.append(lp)
+                if self.joining_method == JoiningMethod.ABUT:
+                    #
+                    # The abutting volume for the chimera to be
+                    # neuroproofed.
+                    #
+                    chimera_volume = Volume(volume.x,
+                                            volume.y,
+                                            volume.z + self.np_z_pad,
+                                            volume.width,
+                                            volume.height,
+                                            self.np_z_pad / 2)
+                    loading_plan, lp = self.factory.loading_plan(
+                        chimera_volume, NP_DATASET, left_task)
+                    self.edge_loading_plans.append(dict(
+                        volume=volume.to_dictionary(), 
+                        extent=chimera_volume.to_dictionary(),
+                        loading_plan=loading_plan,
+                        direction=AdditionalLocationDirection.Z0.name,
+                        location_type=AdditionalLocationType.ABUTTING.name))
+                    edge_loading_plan_registrars.append(lp)
                 #
                 # Right side
                 #
@@ -2039,9 +2177,34 @@ class PipelineTaskMixin:
                                         self.halo_size_z * 2 + 1)
                 loading_plan, lp = self.factory.loading_plan(
                                 overlap_volume, NP_DATASET, right_task)
-                self.edge_loading_plans.append(
-                    (volume.to_dictionary(), loading_plan))
+                self.edge_loading_plans.append(dict(
+                    volume=volume.to_dictionary(), 
+                    extent=overlap_volume.to_dictionary(),
+                    loading_plan=loading_plan,
+                    direction=AdditionalLocationDirection.Z1.name,
+                    location_type=location_type))
                 edge_loading_plan_registrars.append(lp)
+                if self.joining_method != JoiningMethod.ABUT:
+                    #
+                    # The abutting volume for the chimera to be
+                    # neuroproofed.
+                    #
+                    chimera_volume = Volume(volume.x,
+                                            volume.y,
+                                            volume.z1 - self.np_z_pad,
+                                            volume.width,
+                                            volume.height,
+                                            self.np_z_pad / 2)
+                    loading_plan, lp = self.factory.loading_plan(
+                        chimera_volume, NP_DATASET, right_task)
+                    self.edge_loading_plans.append(dict(
+                        volume=volume.to_dictionary(), 
+                        extent=chimera_volume.to_dictionary(),
+                        loading_plan=loading_plan,
+                        direction=AdditionalLocationDirection.Z1.name,
+                        location_type=AdditionalLocationType.ABUTTING.name))
+                    edge_loading_plan_registrars.append(lp)
+                
         #
         # Do the loading plan registrations with Null tasks
         #

@@ -41,6 +41,34 @@ class JoiningMethod(enum.Enum):
     '''Join two abutting blocks using Neuroproof'''
     ABUT=3
 
+class AdditionalLocationDirection(enum.Enum):
+    '''The joining direction of an additional location for stitching'''
+    
+    '''At the leading edge in the X direction'''
+    X0 = 1
+    '''At the trailing (far) edge in the X direction'''
+    X1 = 2
+    '''At the leading edge in the Y direction'''
+    Y0 = 3
+    '''At the trailing (far) edge in the Y direction'''
+    Y1 = 4
+    '''At the leading edge in the Z direction'''
+    Z0 = 5
+    '''At the trailing (far) edge in the Z direction'''
+    Z1 = 6
+
+class AdditionalLocationType(enum.Enum):
+    '''The purpose of the additional location'''
+    
+    '''To join by one of the overlapping methodologies'''
+    OVERLAPPING = 1
+    
+    '''To abut with another to form a chimera to be neuroproofed'''
+    ABUTTING = 2
+    
+    '''A thin region to be matched against the neuroproofed chimera'''
+    MATCHING = 3
+
 class ConnectedComponentsTaskMixin:
 
     volume1 = VolumeParameter(
@@ -597,15 +625,13 @@ class AllConnectedComponentsRunMixin:
         d = {}
         d["count"] = n_components
         d["volumes"] = []
-        d["additional_locations"] = []
+        d["additional_locations"] = self.additional_loading_plans
         for volume, m in mappings.items():
             gm = [ (int(a), int(b)) for a, b in zip(m[:, 0], labels[m[:, 1]])]
             d["volumes"].append((dict(volume), gm))
         d["locations"] = []
         for volume, loc in locations.items():
             d["locations"].append((dict(volume), loc))
-        for volume, loading_plan in self.additional_loading_plans:
-            d["additional_locations"].append((volume, loading_plan))
         d["joins"] = []
         for (k1, k2), path in joins.items():
             d["joins"].append((dict(k1), dict(k2), path))

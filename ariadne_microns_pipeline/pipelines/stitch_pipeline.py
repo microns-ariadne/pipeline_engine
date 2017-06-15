@@ -6,9 +6,13 @@ from .pipeline import NP_DATASET
 from ..parameters import Volume
 from ..tasks.connected_components import \
      LogicalOperation, JoiningMethod, Direction, ConnectedComponentsTask, \
-     AllConnectedComponentsTask
+     AllConnectedComponentsTask, AdditionalLocationDirection, \
+     AdditionalLocationType
+from ..tasks.copytasks import ChimericSegmentationTask
 from ..tasks.utilities import to_hashable
-from ..targets.volume_target import DestVolumeReader
+from ..targets.volume_target import DestVolumeReader, \
+     write_simple_loading_plan, write_loading_plan, write_simple_storage_plan, \
+     write_storage_plan
 
 class StitchPipelineTask(luigi.Task):
     task_namespace = "ariadne_microns_pipeline"
@@ -72,7 +76,15 @@ class StitchPipelineTask(luigi.Task):
         description="The number of pixels on either side of the origin to "
                     "use as context when extracting the slice to be joined, "
                     "joining slices in the z direction")
-
+    np_x_pad = luigi.IntParameter(
+        default=100,
+        description="The X padding per block from the volumes to be joined")
+    np_y_pad = luigi.IntParameter(
+        default=100,
+        description="The Y padding per block from the volumes to be joined")
+    np_z_pad = luigi.IntParameter(
+        default=100,
+        description="The Z padding per block from the volumes to be joined")
     
     def inputs(self):
         yield luigi.LocalTarget(self.component_graph_1)
@@ -162,50 +174,130 @@ class StitchPipelineTask(luigi.Task):
         joins_done = cg1["joins"] + cg2["joins"]
         joins_to_do = []
         #
-        # Get the additional loading plans in volume 1. These were put there
-        # in anticipation of us needing edge loading plans
+        # Sort the additional locations by their direction. X0 matches with X1,
+        # Y0 with Y1 and Z0 with Z1.
         #
-        d_locs = {}
-        for volume, location in cg1["additional_locations"]:
-            #
-            # The overlap volume is the actual volume of the loading plan,
-            # not that of the volume it's in. Get it from the plan itself
-            #
-            overlap_volume = DestVolumeReader(location).volume.to_dictionary()
-            d_locs[to_hashable(overlap_volume)] = (location, volume)
-        additional_locations_1 = list(cg1["additional_locations"])
-        additional_locations_2 = []
+        # The dictionary keys are the direction and location type enums
+        # and the values are dictionaries that are the x, y and z of the
+        # extents of their loading plans.
         #
-        # Find overlapping volumes by comparing volume #2 against volume # 1
         #
-        for volume2, location2 in cg2["additional_locations"]:
-            overlap2 = DestVolumeReader(location2).volume.to_dictionary()
-            for overlap1, (location1, volume1) in d_locs.items():
-                if self._overlaps(overlap1, overlap2):
-                    v1 = Volume(**volume1)
-                    v2 = Volume(**volume2)
+        # For abutting, use the ABUTTING location type, otherwise use the
+        # OVERLAPPING type for matching. 
+        #
+        if self.joining_method == JoiningMethod.ABUT:
+            tgt_location_type = AdditionalLocationType.ABUTTING
+        else:
+            tgt_location_type = AdditionalLocationType.OVERLAPPING
+        al1_by_direction = {}
+        al2_by_direction = {}
+        for d, cg in ((al1_by_direction, cg1), 
+                      (al2_by_direction, cg2)):
+            for al in cg["additional_locations"]:
+                direction = AdditionalLocationDirection[al["direction"]]
+                location_type = AdditionalLocationType[al["location_type"]]
+                if location_type != tgt_location_type:
+                    continue
+                dlkey = direction
+                if dlkey not in d:
+                    d[dlkey] = {}
+                extent = Volume(**al["extent"])
+                if self.joining_method == JoiningMethod.ABUT:
+                    if direction == AdditionalLocationDirection.X1:
+                        xyzkey = (extent.x1, extent.y, extent.z)
+                    elif direction == AdditionalLocationDirection.Y1:
+                        xyzkey = (extent.x, extent.y1, extent.z)
+                    elif direction == AdditionalLocationDirection.Z1:
+                        xyzkey = (extent.x, extent.y, extent.z1)
+                    else:
+                        xyzkey = (extent.x, extent.y, extent.z)
+                else:
+                    xyzkey = (extent.x, extent.y, extent.z)
+                d[dlkey][xyzkey] = al
+        #
+        # Make a dictionary of direction and volume to the MATCHING
+        # loading plan if using the abutting method. Key is the direction +
+        # x, y, z of the parent volume.
+        #
+        if self.joining_method == JoiningMethod.ABUT:
+            al1_by_volume = {}
+            al2_by_volume = {}
+            for d, cg in ((al1_by_volume, cg1),
+                          (al2_by_volume, cg2)):
+                for al in cg["additional_locations"]:
+                    direction = AdditionalLocationDirection[al["direction"]]
+                    location_type = AdditionalLocationType[al["location_type"]]
+                    if location_type != AdditionalLocationType.MATCHING:
+                        continue
+                    volume = Volume(**al["volume"])
+                    key = (direction, volume.x, volume.y, volume.z)
+                    d[key] = al
+        #
+        # Make a dictionary of the parent segmentations
+        # The key is the x, y, z of the block
+        #
+        seg_loading_plans1 = {}
+        seg_loading_plans2 = {}
+        for seg_loading_plans, cg in ((seg_loading_plans1, cg1),
+                                      (seg_loading_plans2, cg2)):
+            for volume, loading_plan in cg["locations"]:
+                volume = Volume(**volume)
+                seg_loading_plans[volume.x, volume.y, volume.z] = loading_plan
+
+        unused_additional_locations = []            
+        #
+        # Find matching volumes between datasets
+        #
+        for d1, d2 in ((AdditionalLocationDirection.X0,
+                        AdditionalLocationDirection.X1),
+                       (AdditionalLocationDirection.X1,
+                        AdditionalLocationDirection.X0),
+                       (AdditionalLocationDirection.Y0,
+                        AdditionalLocationDirection.Y1),
+                       (AdditionalLocationDirection.Y1,
+                        AdditionalLocationDirection.Y0),
+                       (AdditionalLocationDirection.Z0,
+                        AdditionalLocationDirection.Z1),
+                       (AdditionalLocationDirection.Z1,
+                        AdditionalLocationDirection.Z0)):
+            ald1 = al1_by_direction[d1]
+            ald2 = al2_by_direction[d2]
+            for xyzkey, al1 in ald1.items():
+                if xyzkey not in ald2:
+                    unused_additional_locations.append(al1)
+                else:
+                    al2 = ald2[xyzkey]
+                    v1 = Volume(**al1["volume"])
+                    v2 = Volume(**al2["volume"])
+                    cutout_loading_plan1_path = al1["loading_plan"]
+                    cutout_loading_plan2_path = al2["loading_plan"]
+                    segmentation_loading_plan1_path = \
+                        seg_loading_plans1[v1.x, v1.y, v1.z]
+                    segmentation_loading_plan2_path = \
+                        seg_loading_plans2[v2.x, v2.y, v2.z]
                     filename = "connected-components-%d-%d-%d_%d-%d-%d.json" % (
                         v1.x, v1.y, v1.z, v2.x, v2.y, v2.z)
                     output_location = os.path.join(
                         self.root_dir, filename)
-                    for vmatch, seg_location1 in cg1["locations"]:
-                        if vmatch == volume1:
-                            break
+                    if self.joining_method != JoiningMethod.ABUT:
+                        task = ConnectedComponentsTask(
+                            volume1=v1,
+                            cutout_loading_plan1_path=location1,
+                            segmentation_loading_plan1_path=seg_location1,
+                            volume2=v2,
+                            cutout_loading_plan2_path=location2,
+                            segmentation_loading_plan2_path=seg_location2,
+                            output_location=output_location)
                     else:
-                        raise Exception("No matching location for cutout")
-                    for vmatch, seg_location2 in cg2["locations"]:
-                        if vmatch == volume2:
-                            break
-                    else:
-                        raise Exception("No matching location for cutout")
-                    task = ConnectedComponentsTask(
-                        volume1=v1,
-                        cutout_loading_plan1_path=location1,
-                        segmentation_loading_plan1_path=seg_location1,
-                        volume2=v2,
-                        cutout_loading_plan2_path=location2,
-                        segmentation_loading_plan2_path=seg_location2,
-                        output_location=output_location)
+                        #
+                        # Pipeline is:
+                        #
+                        # Create the chimeric segmentation
+                        # Neuroproof it
+                        # Run connected components using the abut method
+                        #
+                        ctask = ChimericSegmentationTask(
+                        )
                     joins_to_do.append(task)
                     #
                     # Remove the location from the list of additional locations.
@@ -236,6 +328,47 @@ class StitchPipelineTask(luigi.Task):
                 additional_locations_1 + additional_locations_2)
         for task in joins_to_do:
             self.all_connected_components_task.set_requirement(task)
+    
+    def abuts(self, a, b):
+        '''Return the abutting direction if volume A abuts volume B, else None
+        
+        '''
+        x_same = a.x == b.x and a.x1 == b.x1
+        y_same = a.y == b.y and a.y1 == b.y1
+        z_same = a.z == b.z and a.z1 == b.z1
+        if (a.x1 == b.x or a.x == b.x1) and y_same and z_same:
+            return Direction.X
+        if (a.y1 == b.y or a.y == b.y1) and x_same and z_same:
+            return Direction.Y
+        if (a.z1 == b.z or a.z == b.z1) and x_same and y_same:
+            return Direction.Z
+        
+    def compute_requirements_abut(self):
+        '''Compute requirements for the abutting method'''
+        cg1 = json.load(open(self.component_graph_1, "r"))
+        cg2 = json.load(open(self.component_graph_2, "r"))
+        #
+        # These are the block joins done by the individual pipelines. They
+        # are re-fed into AllConnectedComponents for the next round.
+        #
+        joins_done = cg1["joins"] + cg2["joins"]
+        joins_to_do = []
+        #
+        # Get the additional loading plans in volume 1. These were put there
+        # in anticipation of us needing edge loading plans
+        #
+        d_locs = {}
+        for volume, location in cg1["additional_locations"]:
+            #
+            # The overlap volume is the actual volume of the loading plan,
+            # not that of the volume it's in. Get it from the plan itself
+            #
+            overlap_volume = DestVolumeReader(location).volume.to_dictionary()
+            d_locs[to_hashable(overlap_volume)] = (location, volume)
+        additional_locations_1 = list(cg1["additional_locations"])
+        additional_locations_2 = []
+        #
+        # A location abuts another if 
 
     def requires(self):
         if not hasattr(self, "all_connected_components_task"):
