@@ -120,6 +120,33 @@ def write_simple_storage_plan(
     with open(storage_plan_path, "w") as fd:
         json.dump(d, fd)
 
+def write_compound_storage_plan(
+    storage_plan_path, dataset_paths, dataset_volumes, volume,
+    dataset_name, dtype):
+    '''Write a storage plan for multiple loading plans
+    
+    :param storage_plan_path: write the storage plan to here
+    :param dataset_paths: a sequence of names of the TIF files to write
+    :param dataset_volumes: the volumes to write to each of the TIF files
+         in dataset_paths
+    :param dataset_name: the name of the dataset, e.g. "neuroproof"
+    :param dtype: the string Numpy datatype, e.g. uint32
+    '''
+    blocks = [(v.to_dictionary(), path)
+              for v, path in zip(dataset_volumes, dataset_paths)]
+    d = dict(dimensions=[volume.depth,
+                         volume.height,
+                         volume.width],
+             x=volume.x,
+             y=volume.y,
+             z=volume.z,
+             blocks=blocks,
+             datatype=dtype,
+             dataset_name=dataset_name,
+             dataset_id=EMPTY_DATASET_ID)
+    with open(storage_plan_path, "w") as fd:
+        json.dump(d, fd)
+
 class SrcVolumeTarget(luigi.LocalTarget):
     '''A volume target that can be used to write a volume
     
@@ -402,7 +429,7 @@ def write_simple_loading_plan(
     )
     with open(loading_plan_path, "w") as fd:
         json.dump(d, fd)
-        
+
 class DestVolumeReader(object):
     '''A class for reading a volume using a loading plan
     

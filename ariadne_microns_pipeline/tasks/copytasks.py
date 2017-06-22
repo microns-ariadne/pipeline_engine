@@ -13,6 +13,7 @@ import time
 
 from .utilities import RunMixin, RequiresMixin, DatasetMixin
 from ..targets import SrcVolumeTarget, DestVolumeReader
+from ..parameters import Volume
 
 class CopyFileTask(
     RunMixin,
@@ -92,6 +93,51 @@ class CopyLoadingPlanTask(DatasetMixin,
         data = data[z0:z1, y0:y1, x0:x1]
         if self.offset != 0:
             data[data != 0] += data.dtype.type(self.offset)
+        self.output().imwrite(data)
+
+class CopyLoadingPlansTask(DatasetMixin,
+                          RunMixin,
+                          RequiresMixin,
+                      luigi.Task):
+    '''A task to copy from multiple loading plans to a storage plan'''
+
+    task_namespace = "ariadne_microns_pipeline"
+    src_loading_plans = luigi.ListParameter(
+        description="The source loading plans to be copied")
+
+    def input(self):
+        for src_loading_plan in self.src_loading_plans:
+            for tgt in DestVolumeReader(src_loading_plan).get_source_targets():
+                yield tgt
+
+    def ariadne_run(self):
+        dest_tgt = self.output()
+        assert isinstance(dest_tgt, SrcVolumeTarget)
+        dest_volume = dest_tgt.volume
+        data = np.zeros((dest_tgt.volume.depth,
+                         dest_tgt.volume.height,
+                         dest_tgt.volume.width),
+                        dest_tgt.dtype)
+        for src_loading_plan in self.src_loading_plans:
+            src_tgt = DestVolumeReader(src_loading_plan)
+            src_volume = src_tgt.volume
+            assert isinstance(src_volume, Volume)
+            if not src_volume.is_overlapping(dest_volume):
+                continue
+            overlap_volume = src_volume.get_overlapping_region(dest_volume)
+            idata = src_tgt.imread()
+            data[overlap_volume.z - dest_volume.z:
+                 overlap_volume.z1 - dest_volume.z,
+                 overlap_volume.y - dest_volume.y:
+                 overlap_volume.y1 - dest_volume.y,
+                 overlap_volume.x - dest_volume.x:
+                 overlap_volume.x1 - dest_volume.x] = idata[
+                     overlap_volume.z - src_volume.z:
+                     overlap_volume.z1 - src_volume.z,
+                     overlap_volume.y - src_volume.y:
+                     overlap_volume.y1 - src_volume.y,
+                     overlap_volume.x - src_volume.x:
+                     overlap_volume.x1 - src_volume_x1]
         self.output().imwrite(data)
 
 class DeleteStoragePlan(RunMixin,

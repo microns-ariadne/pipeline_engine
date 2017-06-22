@@ -1,18 +1,21 @@
 import json
 import luigi
 import os
+import rh_config
 
-from .pipeline import NP_DATASET
-from ..parameters import Volume
+from .pipeline import NP_DATASET, CHIMERA_INPUT_DATASET, CHIMERA_OUTPUT_DATASET
+from .pipeline import MEMBRANE_DATASET
+from ..parameters import Volume, EMPTY_LOCATION
 from ..tasks.connected_components import \
      LogicalOperation, JoiningMethod, Direction, ConnectedComponentsTask, \
      AllConnectedComponentsTask, AdditionalLocationDirection, \
      AdditionalLocationType
-from ..tasks.copytasks import ChimericSegmentationTask
+from ..tasks.copytasks import ChimericSegmentationTask, CopyLoadingPlansTask
+from ..tasks.neuroproof import NeuroproofTask, NeuroproofVersion
 from ..tasks.utilities import to_hashable
 from ..targets.volume_target import DestVolumeReader, \
-     write_simple_loading_plan, write_loading_plan, write_simple_storage_plan, \
-     write_storage_plan
+     write_simple_loading_plan, write_simple_storage_plan, \
+     write_compound_storage_plan
 
 class StitchPipelineTask(luigi.Task):
     task_namespace = "ariadne_microns_pipeline"
@@ -28,14 +31,9 @@ class StitchPipelineTask(luigi.Task):
                     "AllConnectedComponentsTask encompassing both volumes")
     root_dir = luigi.Parameter(
         description="Directory for storing intermediate files")
-    join_direction = luigi.EnumParameter(
-        enum=Direction,
-        description="The plane in which to join the components")
-    min_block_overlap_area = luigi.IntParameter(
-        description="Minimum overlap in the joining plane for blocks to be "
-                    "considered.")
-    min_block_overlap = luigi.IntParameter(
-        description="Minimum overlap in the joining direction for blocks")
+    direction1 = luigi.EnumParameter(
+        enum=AdditionalLocationDirection,
+        description="The side of volume #1 to join, e.g. X1 for the left.")
     #
     # Parameters for the connected components task
     #
@@ -85,6 +83,34 @@ class StitchPipelineTask(luigi.Task):
     np_z_pad = luigi.IntParameter(
         default=100,
         description="The Z padding per block from the volumes to be joined")
+    neuroproof_classifier = luigi.Parameter(
+        default=EMPTY_LOCATION,
+        description="The classifier to use for neuroproofing in the ABUT "
+        "join method.")
+    membrane_neuroproof_channel = luigi.Parameter(
+        default=MEMBRANE_DATASET,
+        description="The name of the primary neuroproof probability "
+        "channel")
+    additional_neuroproof_channels = luigi.ListParameter(
+        default=[],
+        description="The names of additional classifier classes "
+                    "that are fed into Neuroproof as channels")
+    neuroproof_version = luigi.EnumParameter(
+        enum=NeuroproofVersion,
+        default=NeuroproofVersion.FAST,
+        description="The command-line convention to be used to run the "
+        "Neuroproof binary")
+    np_threshold = luigi.FloatParameter(
+        default=.2,
+        description="The probability threshold for merging in Neuroproof "
+        "(range = 0-1).")
+    np_cores = luigi.IntParameter(
+        description="The number of cores used by a Neuroproof process",
+        default=1)
+    prune_feature = luigi.BoolParameter(
+        description="Automatically prune useless features")
+    use_mito = luigi.BoolParameter(
+        description="Set delayed mito agglomeration")
     
     def inputs(self):
         yield luigi.LocalTarget(self.component_graph_1)
@@ -93,78 +119,12 @@ class StitchPipelineTask(luigi.Task):
     def output(self):
         return luigi.LocalTarget(self.output_location+".pipeline.done")
 
-    def _overlaps(self, v1, v2):
-        '''Return true if volume 1 overlaps volume 2'''
-        overlap = 1
-        for origin_key, size_key, enum_key in (
-            ("x", "width", Direction.X),
-            ("y", "height", Direction.Y),
-            ("z", "depth", Direction.Z)):
-            v1_0 = v1[origin_key]
-            v1_1 = v1_0 + v1[size_key]
-            v2_0 = v2[origin_key]
-            v2_1 = v2_0 + v2[size_key]
-            if v1_0 >= v2_1 or v2_0 >= v1_1:
-                return False
-            if enum_key != self.join_direction:
-                overlap *= min(v1_1, v2_1) - max(v1_0, v2_0)
-            elif min(v1_1, v2_1) - max(v1_0, v2_0) < self.min_block_overlap:
-                return False
-        return overlap >= self.min_block_overlap_area
-    
-    def _find_overlapping_volume(self, v1, v2):
-        '''Figure out how to configure our overlap plane
-        
-        The assumption here is that the dimension with the lowest percent
-        overlap defines the overlap plane.
-        '''
-        min_overlap_score = 2
-        for origin_key, size_key in (("x", "width"),
-                                     ("y", "height"),
-                                     ("z", "depth")):
-            v1_0 = v1[origin_key]
-            v1_1 = v1_0 + v1[size_key]
-            v2_0 = v2[origin_key]
-            v2_1 = v2_0 + v2[size_key]
-            #
-            # compute the overlap / maximum extent
-            overlap_score = \
-                float(min(v1_1, v2_1) - max(v1_0, v2_0)) / \
-                float(max(v1_1, v2_1) - min(v1_0, v2_0))
-            if overlap_score < min_overlap_score:
-                overlap_identity = origin_key
-                min_overlap_score = overlap_score
-        #
-        # For each dimension other than the overlap_identity, take the
-        # total overlapping extent. For the overlapping identity dimension
-        # take a single plane plus the halo size.
-        #
-        overlap_volume = {}
-        for origin_key, size_key, halo_size in (
-            ("x", "width", self.halo_size_xy),
-            ("y", "height", self.halo_size_xy),
-            ("z", "depth", self.halo_size_z)):
-            v1_0 = v1[origin_key]
-            v1_1 = v1_0 + v1[size_key]
-            v2_0 = v2[origin_key]
-            v2_1 = v2_0 + v2[size_key]
-            if origin_key != overlap_identity:
-                overlap_volume[origin_key] = max(v1_0, v2_0)
-                overlap_volume[size_key] = min(v1_1, v2_1) - max(v1_0, v2_0)
-            else:
-                midpoint = int((max(v1_0, v2_0) + min(v1_1, v2_1))/2)
-                overlap_volume[origin_key] = midpoint - halo_size
-                overlap_volume[size_key] = halo_size * 2 + 1
-        return Volume(
-            overlap_volume["x"], overlap_volume["y"], overlap_volume["z"],
-            overlap_volume["width"], overlap_volume["height"], 
-            overlap_volume["depth"])
-        
     def compute_requirements(self):
         '''Compute the requirements and dependencies for the pipeline
         
         The AllConnectedComponentsTasks must have been run at this point.
         '''
+        self.direction2 = self.direction1.opposite()
         cg1 = json.load(open(self.component_graph_1, "r"))
         cg2 = json.load(open(self.component_graph_2, "r"))
         #
@@ -222,16 +182,25 @@ class StitchPipelineTask(luigi.Task):
         if self.joining_method == JoiningMethod.ABUT:
             al1_by_volume = {}
             al2_by_volume = {}
+            channels_by_volume = {}
             for d, cg in ((al1_by_volume, cg1),
                           (al2_by_volume, cg2)):
                 for al in cg["additional_locations"]:
                     direction = AdditionalLocationDirection[al["direction"]]
                     location_type = AdditionalLocationType[al["location_type"]]
-                    if location_type != AdditionalLocationType.MATCHING:
-                        continue
                     volume = Volume(**al["volume"])
                     key = (direction, volume.x, volume.y, volume.z)
-                    d[key] = al
+                    if location_type == AdditionalLocationType.MATCHING:
+                        d[key] = al
+            for al in cg1["additional_locations"]:
+                direction = AdditionalLocationDirection[al["direction"]]
+                location_type = AdditionalLocationType[al["location_type"]]
+                volume = Volume(**al["volume"])
+                key = (direction, volume.x, volume.y, volume.z)
+                if location_type == AdditionalLocationType.CHANNEL:
+                    if key not in channels_by_volume:
+                        channels_by_volume[key] = {}
+                    channels_by_volume[key][al["channel"]] = al
         #
         # Make a dictionary of the parent segmentations
         # The key is the x, y, z of the block
@@ -244,77 +213,268 @@ class StitchPipelineTask(luigi.Task):
                 volume = Volume(**volume)
                 seg_loading_plans[volume.x, volume.y, volume.z] = loading_plan
 
-        unused_additional_locations = []            
+        unused_additional_locations = [] 
+        #
+        # For abut, we need to get the neuroproof config
+        #
+        if self.joining_method == JoiningMethod.ABUT:
+            config = rh_config.config["neuroproof"]
+            neuroproof = config["neuroproof_graph_predict"]
+            ld_library_path = os.pathsep.join(config.get("ld_library_path", []))
+            
         #
         # Find matching volumes between datasets
         #
-        for d1, d2 in ((AdditionalLocationDirection.X0,
-                        AdditionalLocationDirection.X1),
-                       (AdditionalLocationDirection.X1,
-                        AdditionalLocationDirection.X0),
-                       (AdditionalLocationDirection.Y0,
-                        AdditionalLocationDirection.Y1),
-                       (AdditionalLocationDirection.Y1,
-                        AdditionalLocationDirection.Y0),
-                       (AdditionalLocationDirection.Z0,
-                        AdditionalLocationDirection.Z1),
-                       (AdditionalLocationDirection.Z1,
-                        AdditionalLocationDirection.Z0)):
-            ald1 = al1_by_direction[d1]
-            ald2 = al2_by_direction[d2]
-            for xyzkey, al1 in ald1.items():
-                if xyzkey not in ald2:
-                    unused_additional_locations.append(al1)
-                else:
-                    al2 = ald2[xyzkey]
-                    v1 = Volume(**al1["volume"])
-                    v2 = Volume(**al2["volume"])
-                    cutout_loading_plan1_path = al1["loading_plan"]
-                    cutout_loading_plan2_path = al2["loading_plan"]
-                    segmentation_loading_plan1_path = \
-                        seg_loading_plans1[v1.x, v1.y, v1.z]
-                    segmentation_loading_plan2_path = \
-                        seg_loading_plans2[v2.x, v2.y, v2.z]
-                    filename = "connected-components-%d-%d-%d_%d-%d-%d.json" % (
-                        v1.x, v1.y, v1.z, v2.x, v2.y, v2.z)
-                    output_location = os.path.join(
-                        self.root_dir, filename)
-                    if self.joining_method != JoiningMethod.ABUT:
-                        task = ConnectedComponentsTask(
-                            volume1=v1,
-                            cutout_loading_plan1_path=location1,
-                            segmentation_loading_plan1_path=seg_location1,
-                            volume2=v2,
-                            cutout_loading_plan2_path=location2,
-                            segmentation_loading_plan2_path=seg_location2,
-                            output_location=output_location)
-                    else:
-                        #
-                        # Pipeline is:
-                        #
-                        # Create the chimeric segmentation
-                        # Neuroproof it
-                        # Run connected components using the abut method
-                        #
-                        ctask = ChimericSegmentationTask(
-                        )
-                    joins_to_do.append(task)
-                    #
-                    # Remove the location from the list of additional locations.
-                    # It's inside the combined volume
-                    #
-                    for i, (volume1a, location1a) \
-                        in enumerate(additional_locations_1):
-                        if volume1a == volume1 and location1a == location1:
-                            del additional_locations_1[i]
-                            break
-                    break
+        d1 = self.direction1
+        d2 = self.direction2
+        ald1 = al1_by_direction[d1]
+        ald2 = al2_by_direction[d2]
+        for xyzkey, al1 in ald1.items():
+            if xyzkey not in ald2:
+                unused_additional_locations.append(al1)
             else:
-                #
-                # If the location didn't match anything, put it on the list
-                # for inclusion in the output
-                #
-                additional_locations_2.append((volume2, location2))
+                al2 = ald2[xyzkey]
+                del ald2[xyzkey]
+                v1 = Volume(**al1["volume"])
+                v2 = Volume(**al2["volume"])
+                e1 = Volume(**al1["extent"])
+                e2 = Volume(**al2["extent"])
+                cutout_loading_plan1_path = al1["loading_plan"]
+                cutout_loading_plan2_path = al2["loading_plan"]
+                segmentation_loading_plan1_path = \
+                    seg_loading_plans1[v1.x, v1.y, v1.z]
+                segmentation_loading_plan2_path = \
+                    seg_loading_plans2[v2.x, v2.y, v2.z]
+                filename = "connected-components-%d-%d-%d_%d-%d-%d.json" % (
+                    v1.x, v1.y, v1.z, v2.x, v2.y, v2.z)
+                output_location = os.path.join(
+                    self.root_dir, filename)
+                if self.joining_method != JoiningMethod.ABUT:
+                    task = ConnectedComponentsTask(
+                        volume1=v1,
+                        cutout_loading_plan1_path=
+                        cutout_loading_plan1_path,
+                        segmentation_loading_plan1_path=
+                        segmentation_loading_plan1_path,
+                        volume2=v2,
+                        cutout_loading_plan2_path=
+                        cutout_loading_plan2_path,
+                        segmentation_loading_plan2_path=
+                        segmentation_loading_plan2_path,
+                        output_location=output_location)
+                else:
+                    #
+                    # The slivers to be matched
+                    #
+                    sliverd1 = al1_by_volume[d1, v1.x, v1.y, v1.z]
+                    sliverd2 = al2_by_volume[d2, v2.x, v2.y, v2.z]
+                    slivere1 = Volume(**sliverd1["extent"])
+                    slivere2 = Volume(**sliverd1["extent"])
+                    sliverlp1 = sliverd1["loading_plan"]
+                    sliverlp2 = sliverd2["loading_plan"]
+                    #
+                    # Pipeline is:
+                    #
+                    # Create the chimeric segmentation
+                    # Copy the membrane and other prediction channels
+                    #      some from one volume and some from the other.
+                    # Neuroproof it
+                    # Run connected components using the abut method
+                    #
+                    cvolume = e1.get_union_region(e2)
+                    #
+                    # The storage plan for the chimera segmentation
+                    #
+                    chimeric_storage_plan_path = os.path.join(
+                        self.root_dir, 
+                        str(cvolume.x), str(cvolume.y), str(cvolume.z),
+                        "%s_%s_%d-%d_%d-%d_%d-%d.storage.plan" % (
+                            CHIMERA_INPUT_DATASET, d1,
+                            cvolume.x, cvolume.x1,
+                            cvolume.y, cvolume.y1,
+                            cvolume.z, cvolume.z1))
+                    chimeric_tif_path = os.path.join(
+                        self.root_dir, 
+                        str(cvolume.x), str(cvolume.y), str(cvolume.z),
+                        "%s_%s_%d-%d_%d-%d_%d-%d.tif" % (
+                            CHIMERA_INPUT_DATASET, d1,
+                            cvolume.x, cvolume.x1,
+                            cvolume.y, cvolume.y1,
+                            cvolume.z, cvolume.z1))
+                    dir_path = os.path.dirname(chimeric_storage_plan_path)
+                    if not os.path.isdir(dir_path):
+                        os.makedirs(dir_path)
+                    write_simple_storage_plan(
+                        chimeric_storage_plan_path,
+                        chimeric_tif_path,
+                        cvolume, CHIMERA_INPUT_DATASET,
+                        "uint32")
+                    #
+                    # The plan for loading it in Neuroproof
+                    #
+                    chimeric_load_plan_path = os.path.join(
+                        self.root_dir, 
+                        str(cvolume.x), str(cvolume.y), str(cvolume.z),
+                        "%s_%s_%d-%d_%d-%d_%d-%d.loading.plan" % (
+                            CHIMERA_INPUT_DATASET, d1,
+                            cvolume.x, cvolume.x1,
+                            cvolume.y, cvolume.y1,
+                            cvolume.z, cvolume.z1))
+                    write_simple_loading_plan(
+                        chimeric_load_plan_path,
+                        chimeric_tif_path,
+                        cvolume,
+                        CHIMERA_INPUT_DATASET,
+                        "uint32")
+                    #
+                    # The plan for storing the slivers of the Neuroproof
+                    # segmentation.
+                    #
+                    # First calculate the three volumes making up the
+                    # plan: left, sliver and right. Left and right are
+                    # not used and only for troubleshooting the entire
+                    # neuroproofing.
+                    #
+                    npvolume = slivere1.get_union_region(slivere2)
+                    if AdditionalLocationDirection.X0 in (d1, d2):
+                        left_volume = Volume(
+                            cvolume.x, cvolume.y, cvolume.z,
+                            npvolume.x-cvolume.x, 
+                            cvolume.height, cvolume.depth)
+                        right_volume = Volume(
+                            npvolume.x1, cvolume.y, cvolume.z,
+                            cvolume.x1 - npvolume.x1, 
+                            cvolume.height, cvolume.depth)
+                    elif AdditionalLocationDirection.Y0 in (d1, d2):
+                        left_volume = Volume(
+                            cvolume.x, cvolume.y, cvolume.z,
+                            cvolume.width,
+                            npvolume.y-cvolume.y, 
+                            cvolume.depth)
+                        right_volume = Volume(
+                            cvolume.x, npvolume.y1, cvolume.z,
+                            cvolume.width,
+                            cvolume.y1 - npvolume.y1, 
+                            cvolume.depth)
+                    else:
+                        left_volume = Volume(
+                            cvolume.x, cvolume.y, cvolume.z,
+                            cvolume.width, cvolume.height,
+                            npvolume.z - cvolume.z)
+                        right_volume = Volume(
+                            cvolume.x, cvolume.y, npvolume.z1,
+                            cvolume.width, cvolume.height,
+                            cvolume.z1 - npvolume.z1)
+                    #
+                    # Then build a complex storage plan and a loading
+                    # plan for the slivers
+                    #
+                    np_storage_plan_path = os.path.join(
+                        self.root_dir, 
+                        str(cvolume.x), str(cvolume.y), str(cvolume.z),
+                        "%s_%s_%d-%d_%d-%d_%d-%d.storage.plan" % (
+                            CHIMERA_OUTPUT_DATASET, d1,
+                            cvolume.x, cvolume.x1,
+                            cvolume.y, cvolume.y1,
+                            cvolume.z, cvolume.z1))
+                    np_loading_plan_path = os.path.join(
+                        self.root_dir, 
+                        str(cvolume.x), str(cvolume.y), str(cvolume.z),
+                        "%s_%s_%d-%d_%d-%d_%d-%d.loading.plan" % (
+                            CHIMERA_OUTPUT_DATASET, d1,
+                            npvolume.x, npvolume.x1,
+                            npvolume.y, npvolume.y1,
+                            npvolume.z, npvolume.z1))
+                    left_tif_path = os.path.join(
+                        self.root_dir, 
+                        str(left_volume.x), str(left_volume.y), 
+                        str(left_volume.z),
+                        "%s_%s_%d-%d_%d-%d_%d-%d.tif" % (
+                            CHIMERA_OUTPUT_DATASET, d1,
+                            left_volume.x, left_volume.x1,
+                            left_volume.y, left_volume.y1,
+                            left_volume.z, left_volume.z1))
+                    right_tif_path = os.path.join(
+                        self.root_dir, 
+                        str(right_volume.x), str(right_volume.y), 
+                        str(right_volume.z),
+                        "%s_%s_%d-%d_%d-%d_%d-%d.tif" % (
+                            CHIMERA_OUTPUT_DATASET, d1,
+                            right_volume.x, right_volume.x1,
+                            right_volume.y, right_volume.y1,
+                            right_volume.z, right_volume.z1))
+                    np_tif_path = os.path.join(
+                        self.root_dir, 
+                        str(npvolume.x), str(npvolume.y), 
+                        str(npvolume.z),
+                        "%s_%s_%d-%d_%d-%d_%d-%d.tif" % (
+                            CHIMERA_OUTPUT_DATASET, d1,
+                            npvolume.x, npvolume.x1,
+                            npvolume.y, npvolume.y1,
+                            npvolume.z, npvolume.z1))
+                    write_compound_storage_plan(
+                        np_storage_plan_path,
+                        [left_tif_path, np_tif_path, right_tif_path],
+                        [left_volume, npvolume, right_volume],
+                        cvolume, CHIMERA_OUTPUT_DATASET, "uint32")
+                    write_simple_loading_plan(
+                        np_loading_plan_path,
+                        np_tif_path,
+                        npvolume, CHIMERA_OUTPUT_DATASET, "uint32")
+                    #
+                    # The chimera-building task
+                    #
+                    ctask = ChimericSegmentationTask(
+                        loading_plan1_path=sliverlp1,
+                        loading_plan2_path=sliverlp2,
+                        storage_plan=chimeric_storage_plan_path)
+                    #
+                    # The neuroproof task
+                    #
+                    d = channels_by_volume[d1, volume.x, volume.y, volume.z]
+                    membrane_lp = \
+                        d[self.membrane_neuroproof_channel]["loading_plan"]
+                    additional_loading_plans = [
+                        d[_]["loading_plan"]
+                        for _ in self.additional_neuroproof_channels]
+                    nptask = NeuroproofTask(
+                        storage_plan=np_storage_plan_path,
+                        prob_loading_plan_path=membrane_lp,
+                        additional_loading_plan_paths=
+                            additional_loading_plans,
+                        input_seg_loading_plan_path=chimeric_load_plan_path,
+                        neuroproof=neuroproof,
+                        neuroproof_ld_library_path=ld_library_path,
+                        classifier_filename=self.neuroproof_classifier,
+                        threshold=self.np_threshold,
+                        neuroproof_version=self.neuroproof_version,
+                        cpu_count=self.np_cores)
+                    nptask.set_requirement(ctask)
+                    #
+                    # The connected components task
+                    #
+                    task = ConnectedComponentsTask(
+                        volume1=v1,
+                        cutout_loading_plan1_path=sliverlp1,
+                        segmentation_loading_plan1_path=
+                        segmentation_loading_plan1_path,
+                        volume2=v2,
+                        cutout_loading_plan2_path=sliverlp2,
+                        segmentation_loading_plan2_path=
+                        segmentation_loading_plan2_path,
+                        neuroproof_segmentation=np_loading_plan_path,
+                        output_location=output_location,
+                        joining_method=JoiningMethod.ABUT)
+                    
+                joins_to_do.append(task)
+        #
+        # Filter the additional locations
+        #
+        additional_locations = filter(
+            lambda _:AdditionalLocationDirection[_["direction"]] != d1,
+            cg1["additional_locations"]) + filter(
+            lambda _:AdditionalLocationDirection[_["direction"]] != d2,
+            cg2["additional_locations"])
         #
         # Make the ultra-stupendous AllConnectedComponentsTask
         #
@@ -324,8 +484,7 @@ class StitchPipelineTask(luigi.Task):
             AllConnectedComponentsTask(
                 input_locations=all_join_files, 
                 output_location=self.output_location,
-                additional_loading_plans = 
-                additional_locations_1 + additional_locations_2)
+                additional_loading_plans = additional_locations)
         for task in joins_to_do:
             self.all_connected_components_task.set_requirement(task)
     

@@ -1021,14 +1021,8 @@ class PipelineTaskMixin:
         # output tasks
         # output dataset name
         #
-        if not self.wants_affinity_segmentation:
-            prob_dataset_name = MEMBRANE_DATASET
-            additional_dataset_names = []
-        else:
-            prob_dataset_name = X_AFFINITY_DATASET
-            additional_dataset_names = [
-                Y_AFFINITY_DATASET, Z_AFFINITY_DATASET]
-        additional_dataset_names += self.additional_neuroproof_channels
+        prob_dataset_name, additional_dataset_names = \
+            self.get_neuroproof_channel_names()
         for zi in range(self.n_z):
             for yi in range(self.n_y):
                 for xi in range(self.n_x):
@@ -1049,6 +1043,18 @@ class PipelineTaskMixin:
                     self.np_tasks[zi, yi, xi] = np_task
                     self.datasets[np_task.output().path] = np_task
                     self.tasks.append(np_task)
+
+    def get_neuroproof_channel_names(self):
+        '''Return the dataset names of the inputs to Neuroproof'''
+        if not self.wants_affinity_segmentation:
+            prob_dataset_name = MEMBRANE_DATASET
+            additional_dataset_names = []
+        else:
+            prob_dataset_name = X_AFFINITY_DATASET
+            additional_dataset_names = [
+                Y_AFFINITY_DATASET, Z_AFFINITY_DATASET]
+        additional_dataset_names += self.additional_neuroproof_channels
+        return prob_dataset_name, additional_dataset_names
     
     def generate_gt_cutouts(self):
         '''Generate volumes of ground truth segmentation
@@ -1934,6 +1940,8 @@ class PipelineTaskMixin:
             halo_size_xy = 0
             halo_size_z = 0
             location_type = AdditionalLocationType.MATCHING.name
+            primary, additional = self.get_neuroproof_channel_names()
+            channels = [ primary ] + additional
         else:
             halo_size_xy = self.halo_size_xy
             halo_size_z = self.halo_size_z
@@ -1968,7 +1976,7 @@ class PipelineTaskMixin:
                     # The abutting volume for the chimera to be
                     # neuroproofed.
                     #
-                    chimera_volume = Volume(volume.x + self.np_x_pad,
+                    chimera_volume = Volume(volume.x + self.np_x_pad / 2,
                                             volume.y,
                                             volume.z,
                                             self.np_x_pad / 2,
@@ -1985,6 +1993,24 @@ class PipelineTaskMixin:
                         location_type=AdditionalLocationType.ABUTTING.name))
                 
                     edge_loading_plan_registrars.append(lp)
+                    #
+                    # ABUT also needs the probability maps for neuroproof
+                    # These are the entire overlap volume
+                    #
+                    overlap_volume = Volume(volume.x, volume.y, volume.z,
+                                            self.np_x_pad,
+                                            volume.height, volume.depth)
+                    for channel in channels:
+                        loading_plan, lp = self.factory.loading_plan(
+                            overlap_volume, channel)
+                        self.edge_loading_plans.append(dict(
+                            volume=volume.to_dictionary(),
+                            extent=overlap_volume.to_dictionary(),
+                            loading_plan=loading_plan,
+                            direction=AdditionalLocationDirection.X0.name,
+                            location_type=AdditionalLocationType.CHANNEL.name,
+                             channel=channel))
+                        edge_loading_plan_registrars.append(lp)
                 #
                 # Right side
                 #
@@ -2008,7 +2034,7 @@ class PipelineTaskMixin:
                     location_type=location_type))
                 
                 edge_loading_plan_registrars.append(lp)
-                if self.joining_method != JoiningMethod.ABUT:
+                if self.joining_method == JoiningMethod.ABUT:
                     #
                     # The abutting volume for the chimera to be
                     # neuroproofed.
@@ -2028,6 +2054,24 @@ class PipelineTaskMixin:
                         direction=AdditionalLocationDirection.X1.name,
                         location_type=AdditionalLocationType.ABUTTING.name))
                     edge_loading_plan_registrars.append(lp)
+                    #
+                    # ABUT also needs the probability maps for neuroproof
+                    # These are the entire overlap volume
+                    #
+                    overlap_volume = Volume(
+                        volume.x1 - self.np_x_pad, volume.y, volume.z,
+                        self.np_x_pad, volume.height, volume.depth)
+                    for channel in channels:
+                        loading_plan, lp = self.factory.loading_plan(
+                                            overlap_volume, channel)
+                        self.edge_loading_plans.append(dict(
+                            volume=volume.to_dictionary(),
+                            extent=overlap_volume.to_dictionary(),
+                            loading_plan=loading_plan,
+                            direction=AdditionalLocationDirection.X0.name,
+                            location_type=AdditionalLocationType.CHANNEL.name,
+                            channel=channel))
+                        edge_loading_plan_registrars.append(lp)
         #
         # Y plans
         #
@@ -2060,7 +2104,7 @@ class PipelineTaskMixin:
                     # neuroproofed.
                     #
                     chimera_volume = Volume(volume.x,
-                                            volume.y + self.np_y_pad,
+                                            volume.y + self.np_y_pad / 2,
                                             volume.z,
                                             volume.width,
                                             self.np_y_pad / 2,
@@ -2074,6 +2118,24 @@ class PipelineTaskMixin:
                         direction=AdditionalLocationDirection.Y0.name,
                         location_type=AdditionalLocationType.ABUTTING.name))
                     edge_loading_plan_registrars.append(lp)
+                    #
+                    # ABUT also needs the probability maps for neuroproof
+                    # These are the entire overlap volume
+                    #
+                    overlap_volume = Volume(volume.x, volume.y, volume.z,
+                                            volume.width, self.np_y_pad,
+                                            volume.depth)
+                    for channel in channels:
+                        loading_plan, lp = self.factory.loading_plan(
+                                            overlap_volume, channel)
+                        self.edge_loading_plans.append(dict(
+                            volume=volume.to_dictionary(),
+                            extent=overlap_volume.to_dictionary(),
+                            loading_plan=loading_plan,
+                            direction=AdditionalLocationDirection.X0.name,
+                            location_type=AdditionalLocationType.CHANNEL.name,
+                            channel=channel))
+                        edge_loading_plan_registrars.append(lp)
                 #
                 # Right side
                 #
@@ -2096,7 +2158,7 @@ class PipelineTaskMixin:
                     location_type=location_type))
                 
                 edge_loading_plan_registrars.append(lp)
-                if self.joining_method != JoiningMethod.ABUT:
+                if self.joining_method == JoiningMethod.ABUT:
                     #
                     # The abutting volume for the chimera to be
                     # neuroproofed.
@@ -2116,6 +2178,25 @@ class PipelineTaskMixin:
                         direction=AdditionalLocationDirection.Y1.name,
                         location_type=AdditionalLocationType.ABUTTING.name))
                     edge_loading_plan_registrars.append(lp)
+                    #
+                    # ABUT also needs the probability maps for neuroproof
+                    # These are the entire overlap volume
+                    #
+                    overlap_volume = Volume(
+                        volume.x, volume.y1 - self.np_y_pad, volume.z,
+                        volume.width, self.np_y_pad, volume.depth)
+                    for channel in channels:
+                        loading_plan, lp = self.factory.loading_plan(
+                                            overlap_volume, channel)
+                        self.edge_loading_plans.append(dict(
+                            volume=volume.to_dictionary(),
+                            extent=overlap_volume.to_dictionary(),
+                            loading_plan=loading_plan,
+                            direction=AdditionalLocationDirection.X0.name,
+                            location_type=
+                            AdditionalLocationType.CHANNEL.name,
+                            channel=channel))
+                        edge_loading_plan_registrars.append(lp)
                 
         #
         # Z plans
@@ -2150,7 +2231,7 @@ class PipelineTaskMixin:
                     #
                     chimera_volume = Volume(volume.x,
                                             volume.y,
-                                            volume.z + self.np_z_pad,
+                                            volume.z + self.np_z_pad / 2,
                                             volume.width,
                                             volume.height,
                                             self.np_z_pad / 2)
@@ -2163,6 +2244,24 @@ class PipelineTaskMixin:
                         direction=AdditionalLocationDirection.Z0.name,
                         location_type=AdditionalLocationType.ABUTTING.name))
                     edge_loading_plan_registrars.append(lp)
+                    #
+                    # ABUT also needs the probability maps for neuroproof
+                    # These are the entire overlap volume
+                    #
+                    overlap_volume = Volume(volume.x, volume.y, volume.z,
+                                            volume.width, volume.height, 
+                                            self.np_z_pad)
+                    for channel in channels:
+                        loading_plan, lp = self.factory.loading_plan(
+                                            overlap_volume, channel)
+                        self.edge_loading_plans.append(dict(
+                            volume=volume.to_dictionary(),
+                            extent=overlap_volume.to_dictionary(),
+                            loading_plan=loading_plan,
+                            direction=AdditionalLocationDirection.X0.name,
+                            location_type=AdditionalLocationType.CHANNEL.name,
+                            channel=channel))
+                        edge_loading_plan_registrars.append(lp)
                 #
                 # Right side
                 #
@@ -2184,7 +2283,7 @@ class PipelineTaskMixin:
                     direction=AdditionalLocationDirection.Z1.name,
                     location_type=location_type))
                 edge_loading_plan_registrars.append(lp)
-                if self.joining_method != JoiningMethod.ABUT:
+                if self.joining_method == JoiningMethod.ABUT:
                     #
                     # The abutting volume for the chimera to be
                     # neuroproofed.
@@ -2204,6 +2303,24 @@ class PipelineTaskMixin:
                         direction=AdditionalLocationDirection.Z1.name,
                         location_type=AdditionalLocationType.ABUTTING.name))
                     edge_loading_plan_registrars.append(lp)
+                    #
+                    # ABUT also needs the probability maps for neuroproof
+                    # These are the entire overlap volume
+                    #
+                    overlap_volume = Volume(
+                        volume.x, volume.y, volume.z1 - self.np_z_pad,
+                        volume.width, volume.height, self.np_z_pad)
+                    for channel in channels:
+                        loading_plan, lp = self.factory.loading_plan(
+                                            overlap_volume, channel)
+                        self.edge_loading_plans.append(dict(
+                            volume=volume.to_dictionary(),
+                            extent=overlap_volume.to_dictionary(),
+                            loading_plan=loading_plan,
+                            direction=AdditionalLocationDirection.X0.name,
+                            location_type=AdditionalLocationType.CHANNEL.name,
+                            channel=channel))
+                        edge_loading_plan_registrars.append(lp)
                 
         #
         # Do the loading plan registrations with Null tasks

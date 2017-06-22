@@ -56,6 +56,22 @@ class AdditionalLocationDirection(enum.Enum):
     Z0 = 5
     '''At the trailing (far) edge in the Z direction'''
     Z1 = 6
+    
+    def opposite(self):
+        '''Return the opposite side from self'''
+        if self == AdditionalLocationDirection.X0:
+            return AdditionalLocationDirection.X1
+        elif self == AdditionalLocationDirection.X1:
+            return AdditionalLocationDirection.X0
+        elif self == AdditionalLocationDirection.Y0:
+            return AdditionalLocationDirection.Y1
+        elif self == AdditionalLocationDirection.Y1:
+            return AdditionalLocationDirection.Y0
+        elif self == AdditionalLocationDirection.Z0:
+            return AdditionalLocationDirection.Z1
+        elif self == AdditionalLocationDirection.Z1:
+            return AdditionalLocationDirection.Z0
+    
 
 class AdditionalLocationType(enum.Enum):
     '''The purpose of the additional location'''
@@ -68,6 +84,9 @@ class AdditionalLocationType(enum.Enum):
     
     '''A thin region to be matched against the neuroproofed chimera'''
     MATCHING = 3
+    
+    '''A probability map channel for Neuroproof'''
+    CHANNEL = 4
 
 class ConnectedComponentsTaskMixin:
 
