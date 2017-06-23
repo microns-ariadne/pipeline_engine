@@ -10,7 +10,7 @@ import shutil
 import subprocess
 import tempfile
 
-from .neuroproof_common import NeuroproofVersion
+from .neuroproof_common import NeuroproofVersion, NeuroproofDilateMixin
 from .neuroproof_common import write_seg_volume, write_prob_volume
 from .utilities import RequiresMixin, RunMixin, CILKCPUMixin
 from ..targets import DestVolumeReader
@@ -54,7 +54,7 @@ class NeuroproofLearnTaskMixin:
         return luigi.LocalTarget(self.output_location)
 
 
-class NeuroproofLearnRunMixin:
+class NeuroproofLearnRunMixin(NeuroproofDilateMixin):
     
     neuroproof = luigi.Parameter(
         description="Location of the neuroproof_graph_learn binary")
@@ -77,6 +77,12 @@ class NeuroproofLearnRunMixin:
         default=NeuroproofVersion.MIT,
         description="The command-line convention to be used to run the "
         "Neuroproof binary")
+    dilation_xy=luigi.IntParameter(
+        default=1,
+        description="Amount to dilate the membrane prediction in X and Y")
+    dilation_z=luigi.IntParameter(
+        default=1,
+        description="Amount to dilate the membrane prediction in Z")
     
     def ariadne_run(self):
         '''Run neuroproof_graph_learn in a subprocess'''
@@ -90,7 +96,8 @@ class NeuroproofLearnRunMixin:
         #
         # gt.h5 contains a stack dataset
         #
-        prob_target = DestVolumeReader(self.prob_loading_plan_path)
+        loading_plan = self.dilate_membrane_prediction()
+        prob_target = DestVolumeReader(loading_plan)
         seg_target = DestVolumeReader(self.seg_loading_plan_path)
         gt_target = DestVolumeReader(self.gt_loading_plan_path)
         additional_map_targets = [DestVolumeReader[_]
@@ -203,6 +210,10 @@ class NeuroproofLearnRunMixin:
             subprocess.check_call(args, env=env)
 
         finally:
+            try:
+                self.delete_dilated_loading_plan(loading_plan)
+            except:
+                rh_logger.logger.report_exception()
             try:
                 shutil.rmtree(tempdir)
             except:

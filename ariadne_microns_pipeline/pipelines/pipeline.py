@@ -15,6 +15,7 @@ from ..tasks.connected_components import JoiningMethod
 from ..tasks.connected_components import FakeAllConnectedComponentsTask
 from ..tasks.connected_components import AdditionalLocationDirection
 from ..tasks.connected_components import AdditionalLocationType
+from ..tasks.connected_components import LogicalOperation
 from ..tasks.copytasks import DeleteStoragePlan
 from ..tasks.find_seeds import SeedsMethodEnum, Dimensionality
 from ..tasks.match_synapses import MatchMethod
@@ -254,6 +255,24 @@ class PipelineTaskMixin:
     np_cores = luigi.IntParameter(
         description="The number of cores used by a Neuroproof process",
         default=2)
+    np_stitch_dilation_xy = luigi.IntParameter(
+        default=7,
+        description="The dilation for the membrane if using neuroproof "
+        "stitching")
+    np_stitch_dilation_z = luigi.IntParameter(
+        default=5,
+        description="The dilation for the membrane if using neuroproof "
+        "stitching")
+    np_dilation_xy = luigi.IntParameter(
+        default=1,
+        description="The dilation for the membrane for neuroproof learn")
+    np_dilation_z = luigi.IntParameter(
+        default=1,
+        description="The dilation for the membrane for neuroproof learn")
+    np_stitch_classifier_path = luigi.Parameter(
+        default=EMPTY_LOCATION,
+        description="The path to the neuroproof classifier to use with "
+        "the ABUT stitching method. Default is same as regular Neuroproof")
     membrane_class_name = luigi.Parameter(
         description="The name of the pixel classifier's membrane class",
         default="membrane")
@@ -491,6 +510,8 @@ class PipelineTaskMixin:
         enum=JoiningMethod,
         default=JoiningMethod.PAIRWISE_MULTIMATCH,
         description="Algorithm to use to join neuroproofed segmentation blocks")
+    joining_operation = luigi.EnumParameter(
+        enum=LogicalOperation.OR)
     min_percent_connected = luigi.FloatParameter(
         default=75.0,
         description="Minimum overlap required to join segments across blocks")
@@ -1232,6 +1253,7 @@ class PipelineTaskMixin:
         for task in input_tasks:
             task.joining_method = self.joining_method
             task.min_overlap_percent = self.min_percent_connected
+            task.operatino = self.joining_operation
             task.min_overlap_volume = \
                 self.min_overlap_volume
             task.max_poly_matches = self.max_poly_matches
@@ -1241,7 +1263,8 @@ class PipelineTaskMixin:
         #
         # Create loading plans for the edges
         #
-        lps = self.generate_edge_loading_plans()
+        if not self.wants_neuroproof_learn:
+            lps = self.generate_edge_loading_plans()
         if len(input_tasks) == 0:
             # There's only a single block, so fake doing AllConnectedComponents
             input_task = self.np_tasks[0, 0, 0]
@@ -1265,8 +1288,6 @@ class PipelineTaskMixin:
                 additional_loading_plans=self.edge_loading_plans)
             for task in input_tasks:
                 self.all_connected_components_task.set_requirement(task)
-        #
-        # Register the edge loading plans
     
     def generate_x_connectivity_graph_tasks(self):
         '''Generate connected components tasks to link blocks in x direction
@@ -1274,14 +1295,22 @@ class PipelineTaskMixin:
         '''
         self.x_connectivity_graph_tasks = np.zeros(
             (self.n_z, self.n_y, self.n_x-1), object)
+        def trim_volume(xi, yi, zi):
+            volume = self.get_block_volume(xi, yi, zi)
+            y0 = volume.y if yi == 0 else volume.y + self.np_y_pad
+            y1 = volume.y1 if yi == self.n_y - 1 else volume.y1 - self.np_y_pad
+            z0 = volume.z if zi == 0 else volume.z + self.np_z_pad
+            z1 = volume.z1 if zi == self.n_z - 1 else volume.z1 - self.np_z_pad
+            return Volume(volume.x, y0, z0, volume.width, y1-y0, z1-z0)
+        
         for zi, yi, xi in itertools.product(range(self.n_z),
                                             range(self.n_y),
                                             range(self.n_x-1)):
             left_task = self.np_tasks[zi, yi, xi]
             left_tgt = left_task.output()
-            left_tgt_volume = self.get_block_volume(xi, yi, zi)
+            left_tgt_volume = trim_volume(xi, yi, zi)
             right_task = self.np_tasks[zi, yi, xi+1]
-            right_tgt_volume = self.get_block_volume(xi+1, yi, zi)
+            right_tgt_volume = trim_volume(xi+1, yi, zi)
             right_tgt = right_task.output()
             filename = CONNECTED_COMPONENTS_PATTERN.format(
                 direction="x")
@@ -1357,15 +1386,24 @@ class PipelineTaskMixin:
         '''
         self.y_connectivity_graph_tasks = np.zeros(
             (self.n_z, self.n_y-1, self.n_x), object)
+
+        def trim_volume(xi, yi, zi):
+            volume = self.get_block_volume(xi, yi, zi)
+            x0 = volume.x if xi == 0 else volume.x + self.np_x_pad
+            x1 = volume.x1 if xi == self.n_x - 1 else volume.x1 - self.np_x_pad
+            z0 = volume.z if zi == 0 else volume.z + self.np_z_pad
+            z1 = volume.z1 if zi == self.n_z - 1 else volume.z1 - self.np_z_pad
+            return Volume(x0, volume.y, z0, x1-x0, volume.height, z1-z0)
+
         for zi, yi, xi in itertools.product(range(self.n_z),
                                             range(self.n_y - 1),
                                             range(self.n_x)):
             left_task = self.np_tasks[zi, yi, xi]
             left_tgt = left_task.output()
-            left_tgt_volume = self.get_block_volume(xi, yi, zi)
+            left_tgt_volume = trim_volume(xi, yi, zi)
             right_task = self.np_tasks[zi, yi+1, xi]
             right_tgt = right_task.output()
-            right_tgt_volume = self.get_block_volume(xi, yi+1, zi)
+            right_tgt_volume = trim_volume(xi, yi+1, zi)
             filename = CONNECTED_COMPONENTS_PATTERN.format(
                             direction="y")
             output_location = os.path.join(
@@ -1433,6 +1471,14 @@ class PipelineTaskMixin:
         '''Generate connected components tasks to link blocks in z direction
         
         '''
+        def trim_volume(xi, yi, zi):
+            volume = self.get_block_volume(xi, yi, zi)
+            x0 = volume.x if xi == 0 else volume.x + self.np_x_pad
+            x1 = volume.x1 if xi == self.n_x - 1 else volume.x1 - self.np_x_pad
+            y0 = volume.y if yi == 0 else volume.y + self.np_y_pad
+            y1 = volume.y1 if yi == self.n_y - 1 else volume.y1 - self.np_y_pad
+            return Volume(x0, y0, volume.z, x1-x0, y1-y0, volume.depth)
+        
         self.z_connectivity_graph_tasks = np.zeros(
             (self.n_z-1, self.n_y, self.n_x), object)
         for zi, yi, xi in itertools.product(range(self.n_z-1),
@@ -1440,10 +1486,10 @@ class PipelineTaskMixin:
                                             range(self.n_x)):
             left_task = self.np_tasks[zi, yi, xi]
             left_tgt = left_task.output()
-            left_tgt_volume = self.get_block_volume(xi, yi, zi)
+            left_tgt_volume = trim_volume(xi, yi, zi)
             right_task = self.np_tasks[zi+1, yi, xi]
             right_tgt = right_task.output()
-            right_tgt_volume = self.get_block_volume(xi, yi, zi+1)
+            right_tgt_volume = trim_volume(xi, yi, zi+1)
             filename = CONNECTED_COMPONENTS_PATTERN.format(
                             direction="z")
             output_location = os.path.join(
@@ -1544,11 +1590,18 @@ class PipelineTaskMixin:
                 Y_AFFINITY_DATASET, Z_AFFINITY_DATASET]
         additional_dataset_names += self.additional_neuroproof_channels
         
-        np_task = self.factory.gen_neuroproof_task(
+        if self.np_stitch_classifier_path != EMPTY_LOCATION:
+            classifier_path = self.np_stitch_classifier_path
+        else:
+            classifier_path = self.neuroproof_classifier_path
+        np_task = self.factory.gen_stitched_neuroproof_task(
             overlap_volume, prob_dataset_name, additional_dataset_names,
             CHIMERA_INPUT_DATASET, CHIMERA_OUTPUT_DATASET,
-            self.neuroproof_classifier_path,
-            self.neuroproof_version, chimera_task)
+            classifier_path,
+            self.neuroproof_version, 
+            self.np_stitch_dilation_xy,
+            self.np_stitch_dilation_z,
+            chimera_task)
         np_task.priority = PRIORITY_CHIMERA_NEUROPROOF
         np_task.cpu_count = self.np_cores
         np_task.threshold=self.np_threshold
@@ -1922,6 +1975,8 @@ class PipelineTaskMixin:
                 use_mito=self.use_mito,
                 neuroproof_version=self.neuroproof_version) 
         self.neuroproof_learn_task.cpu_count = self.nplearn_cpu_count
+        self.neuroproof_learn_task.dilation_xy=self.np_dilation_xy
+        self.neuroproof_learn_task.dilation_z=self.np_dilation_z
         self.tasks.append(self.neuroproof_learn_task)
     
     def generate_edge_loading_plans(self):

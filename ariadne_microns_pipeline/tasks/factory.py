@@ -29,6 +29,7 @@ from .match_neurons import MatchNeuronsTask
 from .match_synapses import MatchSynapsesTask
 from .neuroproof import NeuroproofTask
 from .neuroproof_common import NeuroproofVersion
+from .neuroproof_stitch import NeuroproofStitchTask
 from .nplearn import NeuroproofLearnTask, StrategyEnum
 from .segment import \
      SegmentTask, SegmentCC2DTask, SegmentCC3DTask, UnsegmentTask, \
@@ -879,6 +880,65 @@ class AMTaskFactory(object):
             neuroproof=neuroproof,
             neuroproof_ld_library_path=ld_library_path,
             classifier_filename=classifier_filename))))
+        for lp in additional_lps:
+            task = lp(task)
+        return task
+
+    def gen_stitched_neuroproof_task(
+        self, volume, prob_dataset_name, 
+        additional_dataset_names,
+        input_seg_dataset_name, 
+        output_dataset_name,
+        classifier_filename,
+        neuroproof_version,
+        dilate_xy=7,
+        dilate_z=5,
+        input_seg_src_task=None):
+        '''Run Neuroproof on an oversegmented volume
+        
+        :param volume: the volume being Neuroproofed
+        :param prob_dataset_name: the name of the probability dataset e.g.
+        "membrane"
+        :param additional_dataset_names: the names of any additional
+        probability maps.
+        :param input_seg_dataset_name: the name of the input segmentation
+        e.g. "segmentation"
+        :param output_seg_dataset_name: the name of the neuroproofed
+        segmentation, e.g. "neuroproof"
+        :param classifier_filename: the classifier trained to assess merge/no
+        merge decisions.
+        :param np_version: the version of the Neuroproof binary - one
+        of the NeuroproofVersion enums.
+        :param dilate_xy: amount to dilate x and y membrane
+        :param dilate_z: amount to dilate z membrane
+        :param input_seg_src_task: the source of the input segmentation in
+        order to pick the output of a particular block.
+        '''
+        prob_loading_plan_path, plp = self.loading_plan(
+            volume, prob_dataset_name)
+        additional_loading_plan_paths = []
+        additional_lps = []
+        for dataset_name in additional_dataset_names:
+            loading_plan_path, lp = self.loading_plan(
+                volume, dataset_name)
+            additional_loading_plan_paths.append(loading_plan_path)
+            additional_lps.append(lp)
+        input_seg_loading_plan_path, slp = self.loading_plan(
+            volume, input_seg_dataset_name, input_seg_src_task)
+        storage_plan, sp = self.storage_plan(volume, output_dataset_name)
+        neuroproof, ld_library_path = \
+            self.__get_neuroproof_config("neuroproof_graph_predict")
+        task = plp ( slp ( sp ( NeuroproofStitchTask(
+            prob_loading_plan_path=prob_loading_plan_path,
+            additional_loading_plan_paths=additional_loading_plan_paths,
+            input_seg_loading_plan_path=input_seg_loading_plan_path,
+            storage_plan=storage_plan,
+            neuroproof_version=neuroproof_version,
+            neuroproof=neuroproof,
+            neuroproof_ld_library_path=ld_library_path,
+            classifier_filename=classifier_filename,
+            dilation_xy=dilate_xy,
+            dilation_z=dilate_z))))
         for lp in additional_lps:
             task = lp(task)
         return task

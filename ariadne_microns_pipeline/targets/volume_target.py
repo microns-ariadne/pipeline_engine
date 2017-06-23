@@ -458,6 +458,13 @@ class DestVolumeReader(object):
             d = json.load(fd)
             return d["dataset_name"]
     
+    @property
+    def dtype(self):
+        '''The numpy dtype of the dataset'''
+        with open(self.loading_plan_path, "r") as fd:
+            d = json.load(fd)
+            return getattr(np, d["datatype"])
+    
     def get_source_targets(self):
         '''Return the SrcVolumeTargets required to read this volume'''
         with open(self.loading_plan_path, "r") as fd:
@@ -466,6 +473,17 @@ class DestVolumeReader(object):
         for path in d["dataset_done_files"]:
             tgts.append(SrcVolumeTarget(os.path.splitext(path)[0] + ".plan"))
         return tgts
+    
+    def get_tif_paths_and_volumes(self):
+        '''Get the tif paths and the volumes of their data
+        
+        :returns: a sequence of two-tuples of path to the TIF file and
+        the volume corresponding to the location of the data within the file
+        '''
+        with open(self.loading_plan_path, "r") as fd:
+            d = json.load(fd)
+        for tif_path, subvolume in d["blocks"]:
+            yield tif_path, Volume(**subvolume)
     
     def imread(self):
         '''Read the volume'''
