@@ -1257,7 +1257,7 @@ class PipelineTaskMixin:
         for task in input_tasks:
             task.joining_method = self.joining_method
             task.min_overlap_percent = self.min_percent_connected
-            task.operatino = self.joining_operation
+            task.operation = self.joining_operation
             task.min_overlap_volume = \
                 self.min_overlap_volume
             task.max_poly_matches = self.max_poly_matches
