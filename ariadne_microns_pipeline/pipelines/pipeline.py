@@ -511,7 +511,11 @@ class PipelineTaskMixin:
         default=JoiningMethod.PAIRWISE_MULTIMATCH,
         description="Algorithm to use to join neuroproofed segmentation blocks")
     joining_operation = luigi.EnumParameter(
-        enum=LogicalOperation.OR)
+        enum=LogicalOperation,
+        default=LogicalOperation.OR,
+        description="Whether to require that only one of a pair of segments "
+        "have an overlap of at least min_percent_connected (OR) or require "
+        "both of them to have that much overlap (AND).")
     min_percent_connected = luigi.FloatParameter(
         default=75.0,
         description="Minimum overlap required to join segments across blocks")
