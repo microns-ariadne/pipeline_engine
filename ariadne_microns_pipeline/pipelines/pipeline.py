@@ -1301,10 +1301,12 @@ class PipelineTaskMixin:
             (self.n_z, self.n_y, self.n_x-1), object)
         def trim_volume(xi, yi, zi):
             volume = self.get_block_volume(xi, yi, zi)
-            y0 = volume.y if yi == 0 else volume.y + self.np_y_pad
-            y1 = volume.y1 if yi == self.n_y - 1 else volume.y1 - self.np_y_pad
-            z0 = volume.z if zi == 0 else volume.z + self.np_z_pad
-            z1 = volume.z1 if zi == self.n_z - 1 else volume.z1 - self.np_z_pad
+            y0 = volume.y if yi == 0 else volume.y + self.np_y_pad / 2
+            y1 = volume.y1 if yi == self.n_y - 1 else \
+                volume.y1 - self.np_y_pad / 2
+            z0 = volume.z if zi == 0 else volume.z + self.np_z_pad / 2
+            z1 = volume.z1 if zi == self.n_z - 1 else\
+                volume.z1 - self.np_z_pad / 2
             return Volume(volume.x, y0, z0, volume.width, y1-y0, z1-z0)
         
         for zi, yi, xi in itertools.product(range(self.n_z),
@@ -1393,10 +1395,12 @@ class PipelineTaskMixin:
 
         def trim_volume(xi, yi, zi):
             volume = self.get_block_volume(xi, yi, zi)
-            x0 = volume.x if xi == 0 else volume.x + self.np_x_pad
-            x1 = volume.x1 if xi == self.n_x - 1 else volume.x1 - self.np_x_pad
-            z0 = volume.z if zi == 0 else volume.z + self.np_z_pad
-            z1 = volume.z1 if zi == self.n_z - 1 else volume.z1 - self.np_z_pad
+            x0 = volume.x if xi == 0 else volume.x + self.np_x_pad / 2
+            x1 = volume.x1 if xi == self.n_x - 1 else \
+                volume.x1 - self.np_x_pad / 2
+            z0 = volume.z if zi == 0 else volume.z + self.np_z_pad / 2
+            z1 = volume.z1 if zi == self.n_z - 1 else \
+                volume.z1 - self.np_z_pad / 2
             return Volume(x0, volume.y, z0, x1-x0, volume.height, z1-z0)
 
         for zi, yi, xi in itertools.product(range(self.n_z),
@@ -1477,10 +1481,12 @@ class PipelineTaskMixin:
         '''
         def trim_volume(xi, yi, zi):
             volume = self.get_block_volume(xi, yi, zi)
-            x0 = volume.x if xi == 0 else volume.x + self.np_x_pad
-            x1 = volume.x1 if xi == self.n_x - 1 else volume.x1 - self.np_x_pad
-            y0 = volume.y if yi == 0 else volume.y + self.np_y_pad
-            y1 = volume.y1 if yi == self.n_y - 1 else volume.y1 - self.np_y_pad
+            x0 = volume.x if xi == 0 else volume.x + self.np_x_pad / 2
+            x1 = volume.x1 if xi == self.n_x - 1 else \
+                volume.x1 - self.np_x_pad / 2
+            y0 = volume.y if yi == 0 else volume.y + self.np_y_pad / 2
+            y1 = volume.y1 if yi == self.n_y - 1 else \
+                volume.y1 - self.np_y_pad / 2
             return Volume(x0, y0, volume.z, x1-x0, y1-y0, volume.depth)
         
         self.z_connectivity_graph_tasks = np.zeros(
