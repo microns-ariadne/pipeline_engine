@@ -1293,32 +1293,32 @@ class PipelineTaskMixin:
             for task in input_tasks:
                 self.all_connected_components_task.set_requirement(task)
     
+    def trim_volume_x(self, xi, yi, zi):
+        volume = self.get_block_volume(xi, yi, zi)
+        y0 = volume.y if yi == 0 else volume.y + self.np_y_pad / 2
+        y1 = volume.y1 if yi == self.n_y - 1 else \
+            volume.y1 - self.np_y_pad / 2
+        z0 = volume.z if zi == 0 else volume.z + self.np_z_pad / 2
+        z1 = volume.z1 if zi == self.n_z - 1 else\
+            volume.z1 - self.np_z_pad / 2
+        return Volume(volume.x, y0, z0, volume.width, y1-y0, z1-z0)
+    
     def generate_x_connectivity_graph_tasks(self):
         '''Generate connected components tasks to link blocks in x direction
         
         '''
         self.x_connectivity_graph_tasks = np.zeros(
             (self.n_z, self.n_y, self.n_x-1), object)
-        def trim_volume(xi, yi, zi):
-            volume = self.get_block_volume(xi, yi, zi)
-            y0 = volume.y if yi == 0 else volume.y + self.np_y_pad / 2
-            y1 = volume.y1 if yi == self.n_y - 1 else \
-                volume.y1 - self.np_y_pad / 2
-            z0 = volume.z if zi == 0 else volume.z + self.np_z_pad / 2
-            z1 = volume.z1 if zi == self.n_z - 1 else\
-                volume.z1 - self.np_z_pad / 2
-            return Volume(volume.x, y0, z0, volume.width, y1-y0, z1-z0)
-        
         for zi, yi, xi in itertools.product(range(self.n_z),
                                             range(self.n_y),
                                             range(self.n_x-1)):
             left_task = self.np_tasks[zi, yi, xi]
             left_tgt = left_task.output()
             left_tgt_volume = self.get_block_volume(xi, yi, zi)
-            left_trim_volume = trim_volume(xi, yi, zi)
+            left_trim_volume = self.trim_volume_x(xi, yi, zi)
             right_task = self.np_tasks[zi, yi, xi+1]
             right_tgt_volume = self.get_block_volume(xi+1, yi, zi)
-            right_trim_volume = trim_volume(xi+1, yi, zi)
+            right_trim_volume = self.trim_volume_x(xi+1, yi, zi)
             right_tgt = right_task.output()
             filename = CONNECTED_COMPONENTS_PATTERN.format(
                 direction="x")
@@ -1388,6 +1388,16 @@ class PipelineTaskMixin:
             self.tasks.append(task)
             self.x_connectivity_graph_tasks[zi, yi, xi] = task
 
+    def trim_volume_y(self, xi, yi, zi):
+        volume = self.get_block_volume(xi, yi, zi)
+        x0 = volume.x if xi == 0 else volume.x + self.np_x_pad / 2
+        x1 = volume.x1 if xi == self.n_x - 1 else \
+            volume.x1 - self.np_x_pad / 2
+        z0 = volume.z if zi == 0 else volume.z + self.np_z_pad / 2
+        z1 = volume.z1 if zi == self.n_z - 1 else \
+            volume.z1 - self.np_z_pad / 2
+        return Volume(x0, volume.y, z0, x1-x0, volume.height, z1-z0)
+
     def generate_y_connectivity_graph_tasks(self):
         '''Generate connected components tasks to link blocks in y direction
         
@@ -1395,27 +1405,17 @@ class PipelineTaskMixin:
         self.y_connectivity_graph_tasks = np.zeros(
             (self.n_z, self.n_y-1, self.n_x), object)
 
-        def trim_volume(xi, yi, zi):
-            volume = self.get_block_volume(xi, yi, zi)
-            x0 = volume.x if xi == 0 else volume.x + self.np_x_pad / 2
-            x1 = volume.x1 if xi == self.n_x - 1 else \
-                volume.x1 - self.np_x_pad / 2
-            z0 = volume.z if zi == 0 else volume.z + self.np_z_pad / 2
-            z1 = volume.z1 if zi == self.n_z - 1 else \
-                volume.z1 - self.np_z_pad / 2
-            return Volume(x0, volume.y, z0, x1-x0, volume.height, z1-z0)
-
         for zi, yi, xi in itertools.product(range(self.n_z),
                                             range(self.n_y - 1),
                                             range(self.n_x)):
             left_task = self.np_tasks[zi, yi, xi]
             left_tgt = left_task.output()
             left_tgt_volume = self.get_block_volume(xi, yi, zi)
-            left_trim_volume = trim_volume(xi, yi, zi)
+            left_trim_volume = self.trim_volume_y(xi, yi, zi)
             right_task = self.np_tasks[zi, yi+1, xi]
             right_tgt = right_task.output()
             right_tgt_volume = self.get_block_volume(xi, yi+1, zi)
-            right_trim_volume = trim_volume(xi, yi+1, zi)
+            right_trim_volume = self.trim_volume_y(xi, yi+1, zi)
             filename = CONNECTED_COMPONENTS_PATTERN.format(
                             direction="y")
             output_location = os.path.join(
@@ -1479,20 +1479,20 @@ class PipelineTaskMixin:
             self.tasks.append(task)
             self.y_connectivity_graph_tasks[zi, yi, xi] = task
                                         
+    def trim_volume_z(self, xi, yi, zi):
+        volume = self.get_block_volume(xi, yi, zi)
+        x0 = volume.x if xi == 0 else volume.x + self.np_x_pad / 2
+        x1 = volume.x1 if xi == self.n_x - 1 else \
+            volume.x1 - self.np_x_pad / 2
+        y0 = volume.y if yi == 0 else volume.y + self.np_y_pad / 2
+        y1 = volume.y1 if yi == self.n_y - 1 else \
+            volume.y1 - self.np_y_pad / 2
+        return Volume(x0, y0, volume.z, x1-x0, y1-y0, volume.depth)
+    
     def generate_z_connectivity_graph_tasks(self):
         '''Generate connected components tasks to link blocks in z direction
         
         '''
-        def trim_volume(xi, yi, zi):
-            volume = self.get_block_volume(xi, yi, zi)
-            x0 = volume.x if xi == 0 else volume.x + self.np_x_pad / 2
-            x1 = volume.x1 if xi == self.n_x - 1 else \
-                volume.x1 - self.np_x_pad / 2
-            y0 = volume.y if yi == 0 else volume.y + self.np_y_pad / 2
-            y1 = volume.y1 if yi == self.n_y - 1 else \
-                volume.y1 - self.np_y_pad / 2
-            return Volume(x0, y0, volume.z, x1-x0, y1-y0, volume.depth)
-        
         self.z_connectivity_graph_tasks = np.zeros(
             (self.n_z-1, self.n_y, self.n_x), object)
         for zi, yi, xi in itertools.product(range(self.n_z-1),
@@ -1501,11 +1501,11 @@ class PipelineTaskMixin:
             left_task = self.np_tasks[zi, yi, xi]
             left_tgt = left_task.output()
             left_tgt_volume = self.get_block_volume(xi, yi, zi)
-            left_trim_volume = trim_volume(xi, yi, zi)
+            left_trim_volume = self.trim_volume_z(xi, yi, zi)
             right_task = self.np_tasks[zi+1, yi, xi]
             right_tgt = right_task.output()
             right_tgt_volume = self.get_block_volume(xi, yi, zi+1)
-            right_trim_volume = trim_volume(xi, yi, zi+1)
+            right_trim_volume = self.trim_volume_z(xi, yi, zi+1)
             filename = CONNECTED_COMPONENTS_PATTERN.format(
                             direction="z")
             output_location = os.path.join(
@@ -2023,14 +2023,15 @@ class PipelineTaskMixin:
                 # Left side
                 #
                 volume = self.get_block_volume(0, yi, zi)
+                tvolume = self.trim_volume_x(0, yi, zi)
                 left_task = self.np_tasks[zi, yi, 0]
                 x = volume.x + self.np_x_pad / 2
                 overlap_volume = Volume(x - halo_size_xy,
-                                        volume.y,
-                                        volume.z,
+                                        tvolume.y,
+                                        tvolume.z,
                                         halo_size_xy * 2 + 1,
-                                        volume.height,
-                                        volume.depth)
+                                        tvolume.height,
+                                        tvolume.depth)
                 loading_plan, lp = self.factory.loading_plan(
                     overlap_volume, NP_DATASET, left_task)
                 
@@ -2048,11 +2049,11 @@ class PipelineTaskMixin:
                     # neuroproofed.
                     #
                     chimera_volume = Volume(volume.x + self.np_x_pad / 2,
-                                            volume.y,
-                                            volume.z,
+                                            tvolume.y,
+                                            tvolume.z,
                                             self.np_x_pad / 2,
-                                            volume.height,
-                                            volume.depth)
+                                            tvolume.height,
+                                            tvolume.depth)
                     loading_plan, lp = self.factory.loading_plan(
                         chimera_volume, NP_DATASET, left_task)
                 
@@ -2068,9 +2069,9 @@ class PipelineTaskMixin:
                     # ABUT also needs the probability maps for neuroproof
                     # These are the entire overlap volume
                     #
-                    overlap_volume = Volume(volume.x, volume.y, volume.z,
+                    overlap_volume = Volume(tvolume.x, tvolume.y, tvolume.z,
                                             self.np_x_pad,
-                                            volume.height, volume.depth)
+                                            tvolume.height, tvolume.depth)
                     for channel in channels:
                         loading_plan, lp = self.factory.loading_plan(
                             overlap_volume, channel)
@@ -2086,14 +2087,15 @@ class PipelineTaskMixin:
                 # Right side
                 #
                 volume = self.get_block_volume(self.n_x-1, yi, zi)
+                tvolume = self.trim_volume_x(self.n_x-1, yi, zi)
                 right_task = self.np_tasks[zi, yi, self.n_x-1]
                 x = volume.x + volume.width - self.np_x_pad / 2
                 overlap_volume = Volume(x - halo_size_xy,
-                                        volume.y,
-                                        volume.z,
+                                        tvolume.y,
+                                        tvolume.z,
                                         halo_size_xy * 2 + 1,
-                                        volume.height,
-                                        volume.depth)
+                                        tvolume.height,
+                                        tvolume.depth)
                 loading_plan, lp = self.factory.loading_plan(
                                 overlap_volume, NP_DATASET, right_task)
                 
@@ -2111,11 +2113,11 @@ class PipelineTaskMixin:
                     # neuroproofed.
                     #
                     chimera_volume = Volume(volume.x1 - self.np_x_pad,
-                                            volume.y,
-                                            volume.z,
+                                            tvolume.y,
+                                            tvolume.z,
                                             self.np_x_pad / 2,
-                                            volume.height,
-                                            volume.depth)
+                                            tvolume.height,
+                                            tvolume.depth)
                     loading_plan, lp = self.factory.loading_plan(
                         chimera_volume, NP_DATASET, right_task)
                     self.edge_loading_plans.append(dict(
@@ -2130,8 +2132,8 @@ class PipelineTaskMixin:
                     # These are the entire overlap volume
                     #
                     overlap_volume = Volume(
-                        volume.x1 - self.np_x_pad, volume.y, volume.z,
-                        self.np_x_pad, volume.height, volume.depth)
+                        volume.x1 - self.np_x_pad, tvolume.y, tvolume.z,
+                        self.np_x_pad, tvolume.height, tvolume.depth)
                     for channel in channels:
                         loading_plan, lp = self.factory.loading_plan(
                                             overlap_volume, channel)
@@ -2152,14 +2154,15 @@ class PipelineTaskMixin:
                 # Left side
                 #
                 volume = self.get_block_volume(xi, 0, zi)
+                tvolume = self.trim_volume_y(xi, 0, zi)
                 left_task = self.np_tasks[zi, 0, xi]
                 y = volume.y + self.np_y_pad / 2
-                overlap_volume = Volume(volume.x,
+                overlap_volume = Volume(tvolume.x,
                                         y - self.halo_size_xy,
-                                        volume.z,
-                                        volume.width,
+                                        tvolume.z,
+                                        tvolume.width,
                                         self.halo_size_xy * 2 + 1,
-                                        volume.depth)
+                                        tvolume.depth)
                 loading_plan, lp = self.factory.loading_plan(
                     overlap_volume, NP_DATASET, left_task)
                 self.edge_loading_plans.append(dict(
@@ -2174,12 +2177,12 @@ class PipelineTaskMixin:
                     # The abutting volume for the chimera to be
                     # neuroproofed.
                     #
-                    chimera_volume = Volume(volume.x,
+                    chimera_volume = Volume(tvolume.x,
                                             volume.y + self.np_y_pad / 2,
-                                            volume.z,
-                                            volume.width,
+                                            tvolume.z,
+                                            tvolume.width,
                                             self.np_y_pad / 2,
-                                            volume.depth)
+                                            tvolume.depth)
                     loading_plan, lp = self.factory.loading_plan(
                         chimera_volume, NP_DATASET, left_task)
                     self.edge_loading_plans.append(dict(
@@ -2193,9 +2196,9 @@ class PipelineTaskMixin:
                     # ABUT also needs the probability maps for neuroproof
                     # These are the entire overlap volume
                     #
-                    overlap_volume = Volume(volume.x, volume.y, volume.z,
-                                            volume.width, self.np_y_pad,
-                                            volume.depth)
+                    overlap_volume = Volume(tvolume.x, tvolume.y, tvolume.z,
+                                            tvolume.width, self.np_y_pad,
+                                            tvolume.depth)
                     for channel in channels:
                         loading_plan, lp = self.factory.loading_plan(
                                             overlap_volume, channel)
@@ -2211,14 +2214,15 @@ class PipelineTaskMixin:
                 # Right side
                 #
                 volume = self.get_block_volume(xi, self.n_y-1, zi)
+                tvolume = self.trim_volume_y(xi, self.n_y-1, zi)
                 right_task = self.np_tasks[zi, self.n_y-1, xi]
                 y = volume.y + volume.height - self.np_y_pad / 2
-                overlap_volume = Volume(volume.x,
+                overlap_volume = Volume(tvolume.x,
                                         y - self.halo_size_xy,
-                                        volume.z,
-                                        volume.width,
+                                        tvolume.z,
+                                        tvolume.width,
                                         self.halo_size_xy * 2 + 1,
-                                        volume.depth)
+                                        tvolume.depth)
                 loading_plan, lp = self.factory.loading_plan(
                                 overlap_volume, NP_DATASET, right_task)
                 self.edge_loading_plans.append(dict(
@@ -2234,12 +2238,12 @@ class PipelineTaskMixin:
                     # The abutting volume for the chimera to be
                     # neuroproofed.
                     #
-                    chimera_volume = Volume(volume.x,
+                    chimera_volume = Volume(tvolume.x,
                                             volume.y1 - self.np_y_pad,
-                                            volume.z,
-                                            volume.width,
+                                            tvolume.z,
+                                            tvolume.width,
                                             self.np_y_pad / 2,
-                                            volume.depth)
+                                            tvolume.depth)
                     loading_plan, lp = self.factory.loading_plan(
                         chimera_volume, NP_DATASET, right_task)
                     self.edge_loading_plans.append(dict(
@@ -2254,8 +2258,8 @@ class PipelineTaskMixin:
                     # These are the entire overlap volume
                     #
                     overlap_volume = Volume(
-                        volume.x, volume.y1 - self.np_y_pad, volume.z,
-                        volume.width, self.np_y_pad, volume.depth)
+                        tvolume.x, volume.y1 - self.np_y_pad, tvolume.z,
+                        tvolume.width, self.np_y_pad, tvolume.depth)
                     for channel in channels:
                         loading_plan, lp = self.factory.loading_plan(
                                             overlap_volume, channel)
@@ -2278,13 +2282,14 @@ class PipelineTaskMixin:
                 # Left side
                 #
                 volume = self.get_block_volume(xi, yi, 0)
+                tvolume = self.trim_volume_z(xi, yi, 0)
                 left_task = self.np_tasks[0, yi, xi]
                 z = volume.z + self.np_z_pad / 2
-                overlap_volume = Volume(volume.x,
-                                        volume.y,
+                overlap_volume = Volume(tvolume.x,
+                                        tvolume.y,
                                         z - self.halo_size_z,
-                                        volume.width,
-                                        volume.height,
+                                        tvolume.width,
+                                        tvolume.height,
                                         self.halo_size_z * 2 + 1)
                 loading_plan, lp = self.factory.loading_plan(
                     overlap_volume, NP_DATASET, left_task)
@@ -2300,11 +2305,11 @@ class PipelineTaskMixin:
                     # The abutting volume for the chimera to be
                     # neuroproofed.
                     #
-                    chimera_volume = Volume(volume.x,
-                                            volume.y,
+                    chimera_volume = Volume(tvolume.x,
+                                            tvolume.y,
                                             volume.z + self.np_z_pad / 2,
-                                            volume.width,
-                                            volume.height,
+                                            tvolume.width,
+                                            tvolume.height,
                                             self.np_z_pad / 2)
                     loading_plan, lp = self.factory.loading_plan(
                         chimera_volume, NP_DATASET, left_task)
@@ -2319,8 +2324,8 @@ class PipelineTaskMixin:
                     # ABUT also needs the probability maps for neuroproof
                     # These are the entire overlap volume
                     #
-                    overlap_volume = Volume(volume.x, volume.y, volume.z,
-                                            volume.width, volume.height, 
+                    overlap_volume = Volume(tvolume.x, tvolume.y, tvolume.z,
+                                            tvolume.width, tvolume.height, 
                                             self.np_z_pad)
                     for channel in channels:
                         loading_plan, lp = self.factory.loading_plan(
@@ -2337,13 +2342,14 @@ class PipelineTaskMixin:
                 # Right side
                 #
                 volume = self.get_block_volume(xi, yi, self.n_z-1)
+                tvolume = self.trim_volume_z(xi, yi, self.n_z-1)
                 right_task = self.np_tasks[self.n_z-1, yi, xi]
                 z = volume.z + volume.depth - self.np_z_pad / 2
-                overlap_volume = Volume(volume.x,
-                                        volume.y,
+                overlap_volume = Volume(tvolume.x,
+                                        tvolume.y,
                                         z - self.halo_size_z,
-                                        volume.width,
-                                        volume.height,
+                                        tvolume.width,
+                                        tvolume.height,
                                         self.halo_size_z * 2 + 1)
                 loading_plan, lp = self.factory.loading_plan(
                                 overlap_volume, NP_DATASET, right_task)
@@ -2359,11 +2365,11 @@ class PipelineTaskMixin:
                     # The abutting volume for the chimera to be
                     # neuroproofed.
                     #
-                    chimera_volume = Volume(volume.x,
-                                            volume.y,
+                    chimera_volume = Volume(tvolume.x,
+                                            tvolume.y,
                                             volume.z1 - self.np_z_pad,
-                                            volume.width,
-                                            volume.height,
+                                            tvolume.width,
+                                            tvolume.height,
                                             self.np_z_pad / 2)
                     loading_plan, lp = self.factory.loading_plan(
                         chimera_volume, NP_DATASET, right_task)
@@ -2379,8 +2385,8 @@ class PipelineTaskMixin:
                     # These are the entire overlap volume
                     #
                     overlap_volume = Volume(
-                        volume.x, volume.y, volume.z1 - self.np_z_pad,
-                        volume.width, volume.height, self.np_z_pad)
+                        tvolume.x, tvolume.y, volume.z1 - self.np_z_pad,
+                        tvolume.width, tvolume.height, self.np_z_pad)
                     for channel in channels:
                         loading_plan, lp = self.factory.loading_plan(
                                             overlap_volume, channel)
