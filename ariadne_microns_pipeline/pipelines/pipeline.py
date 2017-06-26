@@ -1414,7 +1414,7 @@ class PipelineTaskMixin:
             left_trim_volume = trim_volume(xi, yi, zi)
             right_task = self.np_tasks[zi, yi+1, xi]
             right_tgt = right_task.output()
-            right_tgt_volume = self.get_block_volume(xi, yi, zi)
+            right_tgt_volume = self.get_block_volume(xi, yi+1, zi)
             right_trim_volume = trim_volume(xi, yi+1, zi)
             filename = CONNECTED_COMPONENTS_PATTERN.format(
                             direction="y")
