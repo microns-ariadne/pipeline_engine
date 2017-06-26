@@ -1314,9 +1314,11 @@ class PipelineTaskMixin:
                                             range(self.n_x-1)):
             left_task = self.np_tasks[zi, yi, xi]
             left_tgt = left_task.output()
-            left_tgt_volume = trim_volume(xi, yi, zi)
+            left_tgt_volume = self.get_block_volume(xi, yi, zi)
+            left_trim_volume = trim_volume(xi, yi, zi)
             right_task = self.np_tasks[zi, yi, xi+1]
-            right_tgt_volume = trim_volume(xi+1, yi, zi)
+            right_tgt_volume = self.get_block_volume(xi+1, yi, zi)
+            right_trim_volume = trim_volume(xi+1, yi, zi)
             right_tgt = right_task.output()
             filename = CONNECTED_COMPONENTS_PATTERN.format(
                 direction="x")
@@ -1324,8 +1326,8 @@ class PipelineTaskMixin:
                     os.path.dirname(left_tgt.path), filename)
             
             if self.joining_method == JoiningMethod.ABUT:
-                overlap_volume = left_tgt_volume.get_overlapping_region(
-                    right_tgt_volume)
+                overlap_volume = left_trim_volume.get_overlapping_region(
+                    right_trim_volume)
                 left_volume = Volume(overlap_volume.x,
                                      overlap_volume.y,
                                      overlap_volume.z,
@@ -1369,11 +1371,11 @@ class PipelineTaskMixin:
                 x = self.x_grid[xi+1]
                 overlap_volume = Volume(
                     x-self.halo_size_xy,
-                    left_tgt_volume.y,
-                    left_tgt_volume.z,
+                    left_trim_volume.y,
+                    left_trim_volume.z,
                     self.halo_size_xy * 2 + 1, 
-                    left_tgt_volume.height,
-                    left_tgt_volume.depth)
+                    left_trim_volume.height,
+                    left_trim_volume.depth)
                 task = self.factory.gen_connected_components_task(
                     dataset_name=NP_DATASET,
                     volume1=left_tgt_volume,
@@ -1408,17 +1410,19 @@ class PipelineTaskMixin:
                                             range(self.n_x)):
             left_task = self.np_tasks[zi, yi, xi]
             left_tgt = left_task.output()
-            left_tgt_volume = trim_volume(xi, yi, zi)
+            left_tgt_volume = self.get_block_volume(xi, yi, zi)
+            left_trim_volume = trim_volume(xi, yi, zi)
             right_task = self.np_tasks[zi, yi+1, xi]
             right_tgt = right_task.output()
-            right_tgt_volume = trim_volume(xi, yi+1, zi)
+            right_tgt_volume = self.get_block_volume(xi, yi, zi)
+            right_trim_volume = trim_volume(xi, yi+1, zi)
             filename = CONNECTED_COMPONENTS_PATTERN.format(
                             direction="y")
             output_location = os.path.join(
                             os.path.dirname(left_tgt.path), filename)
             if self.joining_method == JoiningMethod.ABUT:
-                overlap_volume = left_tgt_volume.get_overlapping_region(
-                    right_tgt_volume)
+                overlap_volume = left_trim_volume.get_overlapping_region(
+                    right_trim_volume)
                 left_volume = Volume(overlap_volume.x,
                                      overlap_volume.y,
                                      overlap_volume.z,
@@ -1457,12 +1461,12 @@ class PipelineTaskMixin:
             else:
                 y = self.y_grid[yi+1]
                 overlap_volume = Volume(
-                    left_tgt_volume.x,
+                    left_trim_volume.x,
                     y - self.halo_size_xy,
-                    left_tgt_volume.z,
-                    left_tgt_volume.width, 
+                    left_trim_volume.z,
+                    left_trim_volume.width, 
                     self.halo_size_xy * 2 + 1, 
-                    left_tgt_volume.depth)
+                    left_trim_volume.depth)
                 task = self.factory.gen_connected_components_task(
                     dataset_name=NP_DATASET,
                     volume1=left_tgt_volume,
@@ -1496,17 +1500,19 @@ class PipelineTaskMixin:
                                             range(self.n_x)):
             left_task = self.np_tasks[zi, yi, xi]
             left_tgt = left_task.output()
-            left_tgt_volume = trim_volume(xi, yi, zi)
+            left_tgt_volume = self.get_block_volume(xi, yi, zi)
+            left_trim_volume = trim_volume(xi, yi, zi)
             right_task = self.np_tasks[zi+1, yi, xi]
             right_tgt = right_task.output()
-            right_tgt_volume = trim_volume(xi, yi, zi+1)
+            right_tgt_volume = self.get_block_volume(xi, yi, zi+1)
+            right_trim_volume = trim_volume(xi, yi, zi+1)
             filename = CONNECTED_COMPONENTS_PATTERN.format(
                             direction="z")
             output_location = os.path.join(
                             os.path.dirname(left_tgt.path), filename)
             if self.joining_method == JoiningMethod.ABUT:
-                overlap_volume = left_tgt_volume.get_overlapping_region(
-                    right_tgt_volume)
+                overlap_volume = left_trim_volume.get_overlapping_region(
+                    right_trim_volume)
                 left_volume = Volume(overlap_volume.x,
                                      overlap_volume.y,
                                      overlap_volume.z,
@@ -1544,11 +1550,11 @@ class PipelineTaskMixin:
             else:
                 z = self.z_grid[zi+1]
                 overlap_volume = Volume(
-                    left_tgt_volume.x,
-                    left_tgt_volume.y,
+                    left_trim_volume.x,
+                    left_trim_volume.y,
                     z - self.halo_size_z,
-                    left_tgt_volume.width, 
-                    left_tgt_volume.height, 
+                    left_trim_volume.width, 
+                    left_trim_volume.height, 
                     self.halo_size_z * 2 + 1)
                 task = self.factory.gen_connected_components_task(
                     dataset_name=NP_DATASET,
