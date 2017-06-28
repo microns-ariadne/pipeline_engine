@@ -6,6 +6,8 @@ import numpy as np
 import rh_logger
 from scipy.ndimage import grey_dilation, grey_erosion, center_of_mass
 from scipy.sparse import coo_matrix
+from scipy.spatial import KDTree
+import time
 
 from ..parameters import VolumeParameter, EMPTY_LOCATION, Volume
 from ..targets import DestVolumeReader
@@ -319,6 +321,17 @@ class AggregateSynapseConnectionsTaskMixin:
 
 class AggregateSynapseConnectionsRunMixin:
     
+    xy_nm = luigi.FloatParameter(
+        default=4.0,
+        description="Size of a voxel in the X and Y directions")
+    z_nm = luigi.FloatParameter(
+        default=30.0,
+        description="Size of a voxel in the Z direction")
+    min_distance_nm = luigi.FloatParameter(
+        default=70.0,
+        description="Minimum allowable distance between a synapse in one "
+        "volume and a synapse in another (otherwise merge them)")
+    
     def ariadne_run(self):
         inputs = self.input()
         cg_tgt = inputs.next()
@@ -333,10 +346,13 @@ class AggregateSynapseConnectionsRunMixin:
         synapse_center_x = []
         synapse_center_y = []
         synapse_center_z = []
-        for synapse_tgt in synapse_tgts:
+        volumes = []
+        volume_idx = []
+        for idx, synapse_tgt in enumerate(synapse_tgts):
             with synapse_tgt.open("r") as fd:
                 synapse_dict = json.load(fd)
             volume = Volume(**synapse_dict["volume"])
+            volumes.append(volume)
             if len(synapse_dict["neuron_1"]) == 0:
                 rh_logger.logger.report_event(
                     "No synapses found in volume, %d, %d, %d" % 
@@ -352,9 +368,63 @@ class AggregateSynapseConnectionsRunMixin:
             synapse_center_x.append(sx)
             synapse_center_y.append(sy)
             synapse_center_z.append(sz)
+            volume_idx.append([idx] * len(n1))
+        volume_idx, neuron_1, neuron_2, \
+            synapse_center_x, synapse_center_y, synapse_center_z = \
+            map(np.hstack, [volume_idx, neuron_1, neuron_2, synapse_center_x, 
+                            synapse_center_y, synapse_center_z])
+        #
+        # We pick the synapse farthest from the edge when eliminating.
+        # The following code computes the distance to the edge
+        #
+        vx0, vx1, vy0, vy1, vz0, vz1 = [
+            np.array([getattr(volume, _) for volume in volumes])
+            for _ in "x", "x1", "y", "y1", "z", "z1"]
+        sx, sy, vx0, vx1, vy0, vy1 = \
+            [_ * self.xy_nm for _ in 
+             synapse_center_x, synapse_center_y, vx0, vx1, vy0, vy1]
+        sz, vz0, vz1 = \
+            [np.array(_) * self.z_nm for _ in 
+                     synapse_center_z, vz0, vz1]
+        volume_idx = np.array(volume_idx)
+        dx = np.minimum(sx - vx0[volume_idx], vx1[volume_idx] - sx)
+        dy = np.minimum(sy - vy0[volume_idx], vy0[volume_idx] - sy)
+        dz = np.minimum(sz - vz0[volume_idx], vz1[volume_idx] - sz)
+        d_edge = np.sqrt(dx * dx + dy * dy + dz * dz)
+        #
+        # Create a KDTree, converting coordinates to nm and get pairs
+        # closer than the allowed minimum inter-synapse distance.
+        #
+        t0 = time.time()
+        kdtree = KDTree(np.column_stack((
+            np.array(synapse_center_x) * self.xy_nm,
+            np.array(synapse_center_y) * self.xy_nm,
+            np.array(synapse_center_z) * self.z_nm)))
+        rh_logger.logger.report_metric(
+             "AggregateSynapseConnectionsTask.KDTreeBuildTime", 
+             time.time() - t0)
+        t0 = time.time()
+        pairs = np.array(list(kdtree.query_pairs(self.min_distance_nm)))
+        rh_logger.logger.report_metric(
+                "AggregateSynapseConnectionsTask.KDTreeQueryPairsTime", 
+                 time.time() - t0)
+        #
+        # Eliminate the duplicates.
+        #
+        first_is_best = d_edge[pairs[:, 0]] > d_edge[pairs[:, 1]]
+        to_remove = np.unique(np.hstack(
+             [pairs[first_is_best, 1], pairs[~ first_is_best, 0]]))
+        neuron_1, neuron_2, \
+            synapse_center_x, synapse_center_y, synapse_center_z = \
+            [np.delete(_, to_remove) for _ in 
+             neuron_1, neuron_2, 
+             synapse_center_x, synapse_center_y, synapse_center_z]
+        #
+        # Make the dictionaries.
+        #
         neuron_1, neuron_2, synapse_center_x, synapse_center_y, \
             synapse_center_z = [
-                np.hstack(_).tolist() for _ in
+                _.tolist() for _ in
                 neuron_1, neuron_2, synapse_center_x, synapse_center_y,
                 synapse_center_z]
         result = dict(
