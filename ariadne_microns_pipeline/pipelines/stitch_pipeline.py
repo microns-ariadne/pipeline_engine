@@ -55,6 +55,10 @@ class StitchPipelineTask(luigi.Task):
         enum=JoiningMethod,
         default=JoiningMethod.SIMPLE_OVERLAP,
         description="Algorithm to use to join segmentations across blocks")
+    min_overlap_volume = luigi.IntParameter(
+        default=1000,
+        description="The minimum acceptable volume in voxels of overlap "
+        "between segments needed to join them.")
     partner_min_total_area_ratio = luigi.FloatParameter(
         default=0.001)
     max_poly_matches = luigi.IntParameter(
@@ -62,8 +66,10 @@ class StitchPipelineTask(luigi.Task):
     dont_join_orphans = luigi.BoolParameter()
     orphan_min_overlap_ratio = luigi.FloatParameter(
         default=0.9)
-    orphan_min_total_area_ratio = luigi.FloatParameter(
-        default=0.001)
+    orphan_min_overlap_volume = luigi.IntParameter(
+        default=1000,
+        description="The minimum acceptable volume in voxels of overlap "
+                    "needed to join an orphan segment.")
     halo_size_xy = luigi.IntParameter(
         default=5,
         description="The number of pixels on either side of the origin to "
@@ -261,6 +267,14 @@ class StitchPipelineTask(luigi.Task):
                         cutout_loading_plan2_path,
                         segmentation_loading_plan2_path=
                         segmentation_loading_plan2_path,
+                        min_overlap_percent=self.min_overlap_percent,
+                        operation=self.operation,
+                        joining_method=self.joining_method,
+                        min_overlap_volume=self.min_overlap_volume,
+                        max_poly_matches=self.max_poly_matches,
+                        dont_join_orphans=self.dont_join_orphans,
+                        orphan_min_overlap_ratio=self.orphan_min_overlap_ratio,
+                        orphan_min_overlap_volume=self.orphan_min_overlap_volume,
                         output_location=output_location)
                 else:
                     #
