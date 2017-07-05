@@ -330,6 +330,8 @@ def normalize_image(img, normalize_method,
         return normalize_image_match(img)
     elif normalize_method == NormalizeMethod.MATCH_ECS:
         return normalize_image_match_ecs(img)
+    elif normalize_method == NormalizeMethod.MATCH_ECS_R0:
+        return normalize_image_match_ecs_r0(img, offset)
     else:
         return img.astype(float) / 255.0
 
