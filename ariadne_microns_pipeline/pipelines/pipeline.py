@@ -1234,6 +1234,72 @@ class PipelineTaskMixin:
                         self.tasks.append(stask)
                         self.skeletonize_tasks[zi, yi, xi] = stask
     
+    def segment_for_overlap(self, volume):
+        '''Create a neuroproofed segmentation pipeline for a volume
+        
+        :param volume: the volume to be segmented
+        '''
+        mask_task = self.factory.gen_mask_border_task(
+            volume=volume,
+            prob_dataset_name=MEMBRANE_DATASET,
+            mask_dataset_name=MASK_DATASET,
+            threshold=self.mask_threshold)
+        self.datasets[mask_task.output().path] = mask_task
+        mask_task.priority = PRIORITY_MASK
+        self.tasks.append(mask_task)
+        
+        fstask = self.factory.gen_find_seeds_task(
+            volume=volume, 
+            prob_dataset_name=MEMBRANE_DATASET,
+            seeds_dataset_name=SEEDS_DATASET,
+            sigma_xy=self.sigma_xy, 
+            sigma_z=self.sigma_z, 
+            threshold=self.threshold,
+            method=self.method,
+            dimensionality=self.dimensionality,
+            minimum_distance_xy=self.minimum_distance_xy,
+            minimum_distance_z=self.minimum_distance_z)
+        fstask.priority = PRIORITY_FIND_SEEDS
+        self.datasets[fstask.output().path] = fstask
+        self.tasks.append(fstask)
+        
+        stask = self.factory.gen_segmentation_task(
+            volume=volume,
+            prob_dataset_name=MEMBRANE_DATASET,
+            mask_dataset_name=MASK_DATASET,
+            mask_src_task=mask_task,
+            seeds_dataset_name=SEEDS_DATASET,
+            seeds_src_task=fstask,
+            seg_dataset_name=SEG_DATASET,
+            sigma_xy=self.sigma_xy,
+            sigma_z=self.sigma_z,
+            dimensionality=self.dimensionality)
+        if self.use_distance_watershed:
+            stask.use_distance = True
+            stask.threshold = self.watershed_threshold
+        stask.priority = PRIORITY_SEGMENT
+        self.datasets[stask.output().path] = stask
+        self.tasks.append(stask)
+        
+        prob_dataset_name, additional_dataset_names = \
+            self.get_neuroproof_channel_names()
+        np_task = self.factory.gen_neuroproof_task(
+            volume=volume,
+            prob_dataset_name=prob_dataset_name,
+            additional_dataset_names=additional_dataset_names,
+            input_seg_dataset_name=SEG_DATASET,
+            output_dataset_name=NP_DATASET,
+            classifier_filename=self.neuroproof_classifier_path,
+            neuroproof_version= self.neuroproof_version,
+            input_seg_src_task=stask)
+        np_task.priority = PRIORITY_NEUROPROOF
+        np_task.cpu_count = self.np_cores
+        np_task.threshold=self.np_threshold
+        self.datasets[np_task.output().path] = np_task
+        self.tasks.append(np_task)
+        return np_task
+        
+        
     def generate_connectivity_graph_tasks(self):
         '''Create the tasks that join components across blocks'''
         if not self.wants_connectivity:
@@ -1320,6 +1386,14 @@ class PipelineTaskMixin:
             right_tgt_volume = self.get_block_volume(xi+1, yi, zi)
             right_trim_volume = self.trim_volume_x(xi+1, yi, zi)
             right_tgt = right_task.output()
+            x = self.x_grid[xi+1]
+            halo_volume = Volume(
+                x-self.halo_size_xy,
+                left_trim_volume.y,
+                left_trim_volume.z,
+                self.halo_size_xy * 2 + 1, 
+                left_trim_volume.height,
+                left_trim_volume.depth)
             filename = CONNECTED_COMPONENTS_PATTERN.format(
                 direction="x")
             output_location = os.path.join(
@@ -1362,31 +1436,90 @@ class PipelineTaskMixin:
                     overlap_volume, 
                     sliver1, sliver2, left_tgt_volume, right_tgt_volume, 
                     output_location)
+            elif self.joining_method == JoiningMethod.NEUROPROOF_OVERLAP:
+                task = self.build_neuroproof_overlap_task(
+                        left_task, left_tgt_volume, 
+                        right_task, right_tgt_volume,
+                        halo_volume, output_location)
                 
             else:
                 #
                 # The overlap is at the average of the x end of the
                 # left block and the x start of the right block
                 #
-                x = self.x_grid[xi+1]
-                overlap_volume = Volume(
-                    x-self.halo_size_xy,
-                    left_trim_volume.y,
-                    left_trim_volume.z,
-                    self.halo_size_xy * 2 + 1, 
-                    left_trim_volume.height,
-                    left_trim_volume.depth)
                 task = self.factory.gen_connected_components_task(
                     dataset_name=NP_DATASET,
                     volume1=left_tgt_volume,
                     src_task1=left_task,
                     volume2=right_tgt_volume,
                     src_task2=right_task,
-                    overlap_volume=overlap_volume,
+                    overlap_volume=halo_volume,
                     output_location=output_location)
             task.priority = PRIORITY_CONNECTED_COMPONENTS
             self.tasks.append(task)
             self.x_connectivity_graph_tasks[zi, yi, xi] = task
+
+    def build_neuroproof_overlap_task(
+        self,
+        left_task, left_tgt_volume, 
+        right_task, right_tgt_volume,
+        halo_volume, output_location):
+        '''Build a task that joins two volumes via a re-neuroproofed overlap
+        
+        :param left_task: The task producing the neuroproofing of the left
+                          side.
+        :param right_task: the task producing the neuroproofing of the right
+                           side
+        :param left_tgt_volume: the volume produced by the left task
+        :param right_tgt_volume: the volume produced by the right task
+        :param halo_volume: the volume of the region to be considered for
+                            overlap matching
+        :param output_location: the location to store the resulting
+             connectivity graph file.
+        '''
+        #
+        # Neuroproof the overlap volume, match the left against
+        # the overlap, match the right against the overlap and
+        # then join the left and right overlaps
+        #
+
+        overlap_volume = left_tgt_volume.get_overlapping_region(
+            right_tgt_volume)
+        nptask = self.segment_for_overlap(overlap_volume)
+        left_output_location, ext = os.path.splitext(output_location)
+        left_output_location += "-left" + ext
+        right_output_location, ext = os.path.splitext(output_location)
+        right_output_location += "-right" + ext
+        left_task = self.factory.gen_connected_components_task(
+            dataset_name=NP_DATASET,
+            volume1=left_tgt_volume,
+            src_task1=left_task,
+            volume2=overlap_volume,
+            src_task2=nptask,
+            overlap_volume=halo_volume,
+            output_location=left_output_location)
+        left_task.priority = PRIORITY_CONNECTED_COMPONENTS
+        self.tasks.append(left_task)
+        right_task = self.factory.gen_connected_components_task(
+            dataset_name=NP_DATASET,
+            volume1=overlap_volume,
+            src_task1=nptask,
+            volume2=right_tgt_volume,
+            src_task2=right_task,
+            overlap_volume=halo_volume,
+            output_location=right_output_location)
+        right_task.priority = PRIORITY_CONNECTED_COMPONENTS
+        self.tasks.append(right_task)
+        
+        task = self.factory.gen_join_connected_components_task(
+            connectivity_graph1=left_output_location, 
+            index1=0, 
+            connectivity_graph2=right_output_location, 
+            index2=1, 
+            output_location=output_location)
+        task.set_requirement(left_task)
+        task.set_requirement(right_task)
+        return task
 
     def trim_volume_y(self, xi, yi, zi):
         volume = self.get_block_volume(xi, yi, zi)
@@ -1416,6 +1549,14 @@ class PipelineTaskMixin:
             right_tgt = right_task.output()
             right_tgt_volume = self.get_block_volume(xi, yi+1, zi)
             right_trim_volume = self.trim_volume_y(xi, yi+1, zi)
+            y = self.y_grid[yi+1]
+            halo_volume = Volume(
+                left_trim_volume.x,
+                y - self.halo_size_xy,
+                left_trim_volume.z,
+                left_trim_volume.width, 
+                self.halo_size_xy * 2 + 1, 
+                left_trim_volume.depth)
             filename = CONNECTED_COMPONENTS_PATTERN.format(
                             direction="y")
             output_location = os.path.join(
@@ -1457,23 +1598,19 @@ class PipelineTaskMixin:
                     overlap_volume, 
                     sliver1, sliver2, left_tgt_volume, right_tgt_volume, 
                     output_location)
-                
+            elif self.joining_method == JoiningMethod.NEUROPROOF_OVERLAP:
+                task = self.build_neuroproof_overlap_task(
+                        left_task, left_tgt_volume, 
+                        right_task, right_tgt_volume,
+                        halo_volume, output_location)
             else:
-                y = self.y_grid[yi+1]
-                overlap_volume = Volume(
-                    left_trim_volume.x,
-                    y - self.halo_size_xy,
-                    left_trim_volume.z,
-                    left_trim_volume.width, 
-                    self.halo_size_xy * 2 + 1, 
-                    left_trim_volume.depth)
                 task = self.factory.gen_connected_components_task(
                     dataset_name=NP_DATASET,
                     volume1=left_tgt_volume,
                     src_task1=left_task,
                     volume2=right_tgt_volume,
                     src_task2=right_task,
-                    overlap_volume=overlap_volume,
+                    halo_volume=overlap_volume,
                     output_location=output_location)
             task.priority = PRIORITY_CONNECTED_COMPONENTS
             self.tasks.append(task)
@@ -1506,6 +1643,14 @@ class PipelineTaskMixin:
             right_tgt = right_task.output()
             right_tgt_volume = self.get_block_volume(xi, yi, zi+1)
             right_trim_volume = self.trim_volume_z(xi, yi, zi+1)
+            z = self.z_grid[zi+1]
+            halo_volume = Volume(
+                left_trim_volume.x,
+                left_trim_volume.y,
+                z - self.halo_size_z,
+                left_trim_volume.width, 
+                left_trim_volume.height, 
+                self.halo_size_z * 2 + 1)
             filename = CONNECTED_COMPONENTS_PATTERN.format(
                             direction="z")
             output_location = os.path.join(
@@ -1547,22 +1692,19 @@ class PipelineTaskMixin:
                     overlap_volume, 
                     sliver1, sliver2, left_tgt_volume, right_tgt_volume, 
                     output_location)
+            elif self.joining_method == JoiningMethod.NEUROPROOF_OVERLAP:
+                task = self.build_neuroproof_overlap_task(
+                        left_task, left_tgt_volume, 
+                        right_task, right_tgt_volume,
+                        halo_volume, output_location)
             else:
-                z = self.z_grid[zi+1]
-                overlap_volume = Volume(
-                    left_trim_volume.x,
-                    left_trim_volume.y,
-                    z - self.halo_size_z,
-                    left_trim_volume.width, 
-                    left_trim_volume.height, 
-                    self.halo_size_z * 2 + 1)
                 task = self.factory.gen_connected_components_task(
                     dataset_name=NP_DATASET,
                     volume1=left_tgt_volume,
                     src_task1=left_task,
                     volume2=right_tgt_volume,
                     src_task2=right_task,
-                    overlap_volume=overlap_volume,
+                    halo_volume=overlap_volume,
                     output_location=output_location)
             task.priority = PRIORITY_CONNECTED_COMPONENTS
             self.z_connectivity_graph_tasks[zi, yi, xi] = task

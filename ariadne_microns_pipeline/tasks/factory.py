@@ -14,6 +14,7 @@ from .connected_components import ConnectedComponentsTask
 from .connected_components import FakeAllConnectedComponentsTask
 from .connected_components import VolumeRelabelingTask
 from .connected_components import StoragePlanRelabelingTask
+from .connected_components import JoinConnectedComponentsTask
 from .connect_synapses import ConnectSynapsesTask
 from .connect_synapses import AggregateSynapseConnectionsTask
 from .copytasks import BossShardingTask, CopyStoragePlanTask,\
@@ -107,7 +108,7 @@ class AMTaskFactory(object):
         '''
         loading_plan_id = \
             self.volume_db.find_loading_plan_id_by_type_and_volume(
-                dataset_name, volume)
+                dataset_name, volume, src_task)
         if loading_plan_id is not None:
             magic_obj = self.__Null()
         else:
@@ -1091,6 +1092,29 @@ class AMTaskFactory(object):
             segmentation_loading_plan2_path=full2,
             neuroproof_segmentation = neuroproof_loading_plan,
             output_location=output_location))))))
+    
+    def gen_join_connected_components_task(
+        self, connectivity_graph1, index1,
+        connectivity_graph2, index2,
+        output_location):
+        '''Join the outputs of two connected components tasks
+        
+        :param connectivity_graph1: the output of a ConnectedComponentsTask
+        :param index1: the index (0, or 1) of the component to keep from
+        the first graph. The other becomes the component to join to the
+        second graph.
+        :param connectivity_graph2: the output of a ConnectedComponentsTask
+        :param index2: the index (0, or 1) of the component to keep from
+        the second graph. The other becomes the component to join to the
+        first graph.
+        :param output_location: where to store the resulting file
+        '''
+        return JoinConnectedComponentsTask(
+            connectivity_graph1=connectivity_graph1,
+            index1=index1,
+            connectivity_graph2=connectivity_graph2,
+            index2=index2,
+            output_location=output_location)
 
     def gen_all_connected_components_task(
         self, input_locations, output_location, additional_loading_plans = []):

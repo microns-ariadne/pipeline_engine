@@ -40,6 +40,8 @@ class JoiningMethod(enum.Enum):
     PAIRWISE_MULTIMATCH = 2
     '''Join two abutting blocks using Neuroproof'''
     ABUT=3
+    '''Neuroproof the overlap region and join through that'''
+    NEUROPROOF_OVERLAP=4
 
 class AdditionalLocationDirection(enum.Enum):
     '''The joining direction of an additional location for stitching'''
@@ -468,29 +470,7 @@ class ConnectedComponentsRunMixin:
         # Then link the first from 1 to all from 2 with same neuroproof ID
         # and do same with 2 and 1 to get a linking graph between the two.
         #
-        idx1 = 0
-        idx2 = 0
-        pairs = []
-        while idx1 < len(c1) and idx2 < len(c2):
-            if c1[idx1, 1] < c2[idx2, 1]:
-                idx1 += 1
-            elif c1[idx1, 1] > c2[idx2, 1]:
-                idx2 += 1
-            else:
-                idx1a = idx1+1
-                idx2a = idx2+1
-                nid = c1[idx1, 1]
-                while idx1a < len(c1) and c1[idx1a, 1] == nid:
-                    idx1a += 1
-                while idx2a < len(c2) and c2[idx2a, 1] == nid:
-                    idx2a += 1
-                for idx2b in range(idx2, idx2a):
-                    pairs.append((int(c1[idx1, 0]), int(c2[idx2b, 0])))
-                for idx1b in range(idx1+1, idx1a):
-                    pairs.append((int(c1[idx1b, 0]), int(c2[idx2, 0])))
-                idx1 = idx1a
-                idx2 = idx2a
-        return pairs
+        return permute_pairs(c1, c2)
 
     @staticmethod
     def get_abut_nproof_match(cutout, cvolume, nproof, nvolume):
@@ -508,9 +488,48 @@ class ConnectedComponentsRunMixin:
                         (cutout, nproof)))
         m.sum_duplicates()
         cid, nid = m.nonzero()
-        order = np.lexsort((cid, nid))
-        cid, nid = cid[order], nid[order]
         return np.column_stack((cid, nid))
+
+def permute_pairs(c1, c2):
+    '''Find pairs of connected components
+    
+    Given two Nx2 arrays of pairs of connected components,
+    (A, B) and  (B, C), return (A, C) which has connected components of A and C
+    through B (not all pairs, just enough to establish connectivity).
+    
+    :param c1: an Nx2 array where the first element is the comonents to keep
+    and the second is the components to join
+    :param c2: an Nx2 array where the first element is the comonents to keep
+    and the second is the components to join
+    :returns: an Nx2 array of the first elements from c1 and c2
+    '''
+    order = np.lexsort((c1[:, 0], c1[:, 1]))
+    c1 = c1[order]
+    order = np.lexsort((c2[:, 0], c2[:, 1]))
+    c2 = c2[order]
+    idx1 = 0
+    idx2 = 0
+    pairs = []
+    while idx1 < len(c1) and idx2 < len(c2):
+        if c1[idx1, 1] < c2[idx2, 1]:
+            idx1 += 1
+        elif c1[idx1, 1] > c2[idx2, 1]:
+            idx2 += 1
+        else:
+            idx1a = idx1+1
+            idx2a = idx2+1
+            nid = c1[idx1, 1]
+            while idx1a < len(c1) and c1[idx1a, 1] == nid:
+                idx1a += 1
+            while idx2a < len(c2) and c2[idx2a, 1] == nid:
+                idx2a += 1
+            for idx2b in range(idx2, idx2a):
+                pairs.append((int(c1[idx1, 0]), int(c2[idx2b, 0])))
+            for idx1b in range(idx1+1, idx1a):
+                pairs.append((int(c1[idx1b, 0]), int(c2[idx2, 0])))
+            idx1 = idx1a
+            idx2 = idx2a
+    return pairs
 
 class ConnectedComponentsTask(ConnectedComponentsTaskMixin,
                               ConnectedComponentsRunMixin,
@@ -534,6 +553,65 @@ class ConnectedComponentsTask(ConnectedComponentsTaskMixin,
     
     task_namespace = 'ariadne_microns_pipeline'
 
+class JoinConnectedComponentsTask(RequiresMixin,
+                                  RunMixin,
+                                  SingleThreadedMixin,
+                                  luigi.Task):
+    '''Chain the results of two connected components tasks together
+    
+    Consider three segmentations of the same volume: A, B and C and 
+    the connected components output of A <-> B and B <-> C. This task
+    produces an output file of A <-> C through B. The output is in the
+    same format as the output of the ConnectedComponentsTask.
+    '''
+    task_namespace = 'ariadne_microns_pipeline'
+    
+    connectivity_graph1 = luigi.Parameter(
+        description="The location of the first connectivity graph, "
+        "e.g. as output by ConnectedComponentsTask")
+    index1 = luigi.IntParameter(
+        description="The index of the member to take from the first file "
+        "(either 0 or 1). This is the element to keep, the other is to join "
+        "through.")
+    connectivity_graph2 = luigi.Parameter(
+        description="The location of the second connectivity graph, "
+        "e.g. as output by ConnectedComponentsTask")
+    index2 = luigi.IntParameter(
+        description="The index of the member to take from the second file "
+        "(either 0 or 1). This is the element to keep, the other is to join "
+        "through.")
+    output_location = luigi.Parameter(
+        description="The location for the resulting connectivity graph")
+    
+    def input(self):
+        yield luigi.LocalTarget(self.connectivity_graph1)
+        yield luigi.LocalTarget(self.connectivity_graph2)
+    
+    def output(self):
+        return luigi.LocalTarget(self.output_location)
+    
+    def ariadne_run(self):
+        cg1, cg2 = [json.load(_.open()) for _ in self.input()]
+        c1 = np.array(cg1["connections"])
+        if self.index1 == 1:
+            c1 = c1[:, ::-1]
+            tbl1 = cg1["2"]
+        else:
+            tbl1 = cg1["1"]
+        c2 = np.array(cg2["connections"])
+        if self.index2 == 1:
+            c2 = c2[:, ::-1]
+            tbl2 = cg2["2"]
+        else:
+            tbl2 = cg2["1"]
+
+        pairs = permute_pairs(c1, c2)
+        d = dict(connections=pairs)
+        d["1"] = tbl1
+        d["2"] = tbl2
+        d["overlap"] = cg1["overlap"]
+        with self.output().open("w") as fd:
+            json.dump(d, fd)
 
 class AllConnectedComponentsTaskMixin:
     

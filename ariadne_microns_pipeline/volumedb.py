@@ -667,7 +667,8 @@ class VolumeDB(object):
                 VolumeObj.z0.op("<", is_comparison=True)(z1)))
         return dataset_objs.all()
     
-    def find_loading_plan_id_by_type_and_volume(self, dataset_name, volume):
+    def find_loading_plan_id_by_type_and_volume(self, dataset_name, volume,
+                                                src_task=None):
         '''Find the ID of the loading plan that loads the given dataset volume
         
         This can be used either to retrieve a known loading plan or to search
@@ -678,17 +679,22 @@ class VolumeDB(object):
         
         :param dataset_name: the name of the dataset to be loaded
         :param volume: the volume to be loaded from the dataset
+        :param src_task: the task that produced the volume, defaults to any
         :returns: None if there is no such loading plan, otherwise the loading
         plan ID of the already-existing loading plan
         '''
-        key = self._get_loading_plan_key(dataset_name, volume)
+        key = self._get_loading_plan_key(dataset_name, volume, src_task)
         if key in self.all_loading_plans_by_type_and_volume:
             return self.all_loading_plans_by_type_and_volume[key]\
                        .loading_plan_id
         return None
     
     @staticmethod
-    def _get_loading_plan_key(dataset_name, volume):
+    def _get_loading_plan_key(dataset_name, volume, src_task=None):
+        if src_task is not None:
+            return (dataset_name, src_task.task_id,
+                    volume.x, volume.y, volume.z,
+                    volume.width, volume.height, volume.depth)
         key = (dataset_name, volume.x, volume.y, volume.z,
                volume.width, volume.height, volume.depth)
         return key
@@ -729,7 +735,7 @@ class VolumeDB(object):
             src_task_obj = self.get_or_create_task(src_task)
             loading_plan.src_task_id = src_task_obj.task_id
         self.session.add(loading_plan)
-        key = self._get_loading_plan_key(dataset_name, volume)
+        key = self._get_loading_plan_key(dataset_name, volume, src_task)
         self.all_loading_plans_by_type_and_volume[key] = loading_plan
         self.all_loading_plans[loading_plan_id] = loading_plan
         return loading_plan.loading_plan_id
