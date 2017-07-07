@@ -1626,7 +1626,7 @@ class PipelineTaskMixin:
                     src_task1=left_task,
                     volume2=right_tgt_volume,
                     src_task2=right_task,
-                    halo_volume=overlap_volume,
+                    overlap_volume=halo_volume,
                     output_location=output_location)
             task.priority = PRIORITY_CONNECTED_COMPONENTS
             self.tasks.append(task)
@@ -1720,7 +1720,7 @@ class PipelineTaskMixin:
                     src_task1=left_task,
                     volume2=right_tgt_volume,
                     src_task2=right_task,
-                    halo_volume=overlap_volume,
+                    overlap_volume=halo_volume,
                     output_location=output_location)
             task.priority = PRIORITY_CONNECTED_COMPONENTS
             self.z_connectivity_graph_tasks[zi, yi, xi] = task
