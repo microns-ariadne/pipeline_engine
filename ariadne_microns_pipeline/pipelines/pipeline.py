@@ -510,6 +510,12 @@ class PipelineTaskMixin:
         enum=JoiningMethod,
         default=JoiningMethod.PAIRWISE_MULTIMATCH,
         description="Algorithm to use to join neuroproofed segmentation blocks")
+    npoverlap_joining_method = luigi.EnumParameter(
+         enum=JoiningMethod,
+         default=JoiningMethod.SIMPLE_OVERLAP,
+         description="Algorithm to use to join sub-blocks. Choices are limited "
+         "to PAIRWISE_MULTIMATCH or SIMPLE_OVERLAP. Applicable only to "
+         "the NEUROPROOF_OVERLAP method")
     joining_operation = luigi.EnumParameter(
         enum=LogicalOperation,
         default=LogicalOperation.OR,
@@ -1321,15 +1327,7 @@ class PipelineTaskMixin:
         # Apply parameterizations common to x, y and z
         #
         for task in input_tasks:
-            task.joining_method = self.joining_method
-            task.min_overlap_percent = self.min_percent_connected
-            task.operation = self.joining_operation
-            task.min_overlap_volume = \
-                self.min_overlap_volume
-            task.max_poly_matches = self.max_poly_matches
-            task.dont_join_orphans = self.dont_join_orphans
-            task.orphan_min_overlap_ratio = self.orphan_min_overlap_ratio
-            task.orphan_min_overlap_volume = self.orphan_min_overlap_volume
+            self.parameterize_connected_components_task(task)
         #
         # Create loading plans for the edges
         #
@@ -1358,6 +1356,21 @@ class PipelineTaskMixin:
                 additional_loading_plans=self.edge_loading_plans)
             for task in input_tasks:
                 self.all_connected_components_task.set_requirement(task)
+
+    def parameterize_connected_components_task(self, task):
+        '''Apply the minor parameters to a connected components task'''
+        if self.joining_method == JoiningMethod.NEUROPROOF_OVERLAP:
+            task.joining_method = self.npoverlap_joining_method
+        else:
+            task.joining_method = self.joining_method
+        task.min_overlap_percent = self.min_percent_connected
+        task.operation = self.joining_operation
+        task.min_overlap_volume = \
+            self.min_overlap_volume
+        task.max_poly_matches = self.max_poly_matches
+        task.dont_join_orphans = self.dont_join_orphans
+        task.orphan_min_overlap_ratio = self.orphan_min_overlap_ratio
+        task.orphan_min_overlap_volume = self.orphan_min_overlap_volume
     
     def trim_volume_x(self, xi, yi, zi):
         volume = self.get_block_volume(xi, yi, zi)
@@ -1499,6 +1512,7 @@ class PipelineTaskMixin:
             overlap_volume=halo_volume,
             output_location=left_output_location)
         left_task.priority = PRIORITY_CONNECTED_COMPONENTS
+        self.parameterize_connected_components_task(left_task)
         self.tasks.append(left_task)
         right_task = self.factory.gen_connected_components_task(
             dataset_name=NP_DATASET,
@@ -1509,6 +1523,7 @@ class PipelineTaskMixin:
             overlap_volume=halo_volume,
             output_location=right_output_location)
         right_task.priority = PRIORITY_CONNECTED_COMPONENTS
+        self.parameterize_connected_components_task(right_task)
         self.tasks.append(right_task)
         
         task = self.factory.gen_join_connected_components_task(
@@ -1517,6 +1532,7 @@ class PipelineTaskMixin:
             connectivity_graph2=right_output_location, 
             index2=1, 
             output_location=output_location)
+
         task.set_requirement(left_task)
         task.set_requirement(right_task)
         return task
