@@ -4,6 +4,7 @@ CopyStoragePlan copies one storage plan to another.
 CopyFile copies one file to another
 '''
 
+import enum
 import luigi
 import numpy as np
 import os
@@ -139,6 +140,76 @@ class CopyLoadingPlansTask(DatasetMixin,
                      overlap_volume.x - src_volume.x:
                      overlap_volume.x1 - src_volume_x1]
         self.output().imwrite(data)
+
+class AggregateOperation(enum.Enum):
+    '''The aggregation operation for combining multiple data sources'''
+    
+    SUM=1,
+    PRODUCT=2,
+    MEAN=3,
+    MEDIAN=4,
+    MIN=5,
+    MAX=6
+
+class AggregateLoadingPlansTask(DatasetMixin,
+                                  RunMixin,
+                                  RequiresMixin,
+                                  luigi.Task):
+    '''This task aggregates the input loading plans to produce an output
+    
+    Any of the aggregate operations in AggregateOperation (e.g.
+    AggregateOperation.MEAN) can be used to combine the values at each voxel
+    of the inputs to produce the output.
+    '''
+    task_namespace = "ariadne_microns_pipeline"
+    
+    loading_plan_paths = luigi.ListParameter(
+        description="The loading plans of the volumes to aggregate")
+    operation = luigi.EnumParameter(
+        enum=AggregateOperation,
+        description="The operation to use to aggregate, e.g. MEAN")
+    
+    def input(self):
+        for loading_plan in self.loading_plan_paths:
+            for tgt in DestVolumeReader(loading_plan).get_source_targets():
+                yield tgt
+    
+    def ariadne_run(self):
+        loading_plans = [DestVolumeReader(_) for _ in self.loading_plan_paths]
+        storage_plan = self.output()
+        volume = storage_plan.volume
+        dtype = storage_plan.dtype
+        if dtype == np.uint8 and self.operation == AggregateOperation.MEAN:
+            #
+            # Temporarily use 16 bits for the summation of the mean
+            #
+            dtype = np.uint16
+        if self.operation  == AggregateOperation.MEDIAN:
+            #
+            # Median isn't commutative, so all must be loaded
+            #
+            data = [_.imread().flatten() for _ in loading_plans]
+            result = np.median(data, axis=0).reshape(
+                volume.depth, volume.height, volume.width)
+        else:
+            if self.operation == AggregateOperation.MAX:
+                op = np.max
+            elif self.operation == AggregateOperation.MEAN:
+                op = np.sum
+            elif self.operation == AggregateOperation.MIN:
+                op = np.min
+            elif self.operation == AggregateOperation.PRODUCT:
+                op = np.prod
+            elif self.operation == AggregateOperation.SUM:
+                op = np.sum
+            result = loading_plans[0].imread().astype(dtype)
+            for loading_plan in loading_plans[1:]:
+                result = op([result, loading_plan.imread().astype(dtype)],
+                            axis=0)
+            if self.operation == AggregateOperation.MEAN:
+                result = result / len(loading_plans)
+        storage_plan.imwrite(result)    
+    
 
 class DeleteStoragePlan(RunMixin,
                         RequiresMixin,

@@ -18,7 +18,7 @@ from .connected_components import JoinConnectedComponentsTask
 from .connect_synapses import ConnectSynapsesTask
 from .connect_synapses import AggregateSynapseConnectionsTask
 from .copytasks import BossShardingTask, CopyStoragePlanTask,\
-     CopyLoadingPlanTask, ChimericSegmentationTask
+     CopyLoadingPlanTask, ChimericSegmentationTask, AggregateLoadingPlansTask
 from .distance_transform import DistanceTransformInputType
 from .distance_transform import DistanceTransformTask
 from .filter import FilterSegmentationTask
@@ -1138,9 +1138,9 @@ class AMTaskFactory(object):
             additional_loading_plans=additional_loading_plans)
     
     def gen_fake_all_connected_components_task(
-        self, volume, dataset_name, output_location):
+        self, volume, dataset_name, output_location, src_task=None):
         '''Generate a connectivity graph file for a single location'''
-        loading_plan, lp = self.loading_plan(volume, dataset_name)
+        loading_plan, lp = self.loading_plan(volume, dataset_name, src_task)
         return lp(FakeAllConnectedComponentsTask(
             volume=volume,
             loading_plan=loading_plan,
@@ -1212,6 +1212,36 @@ class AMTaskFactory(object):
             src_loading_plan=loading_plan_path,
             offset=offset))
         return task
+    
+    def gen_aggregate_loading_plan_tasks(
+        self, volume, input_datasets, output_dataset, operation, 
+        src_tasks=None):
+        '''Generate an AggregatLoadingPlansTask
+        
+        :param volume: the volume to process
+        :param input_datasets: the dataset names of the input datasets
+        :param output_dataset: the dataset name of the output dataset
+        :param operation: the name of the operation, from
+                          copytasks.AggregateOperation
+        :param src_tasks: the source tasks for each of the datasets, defaults
+        to any task.
+        '''
+        loading_plans, lps = [], []
+        if src_tasks is None:
+            src_tasks = [None] * len(input_datasets)
+            for dataset_name, src_task in zip(input_datasets, src_tasks):
+                loading_plan, lp = self.loading_plan(
+                    volume, dataset_name, src_task)
+                loading_plans.append(loading_plan)
+                lps.append(lp)
+        storage_plan, sp = self.storage_plan(volume, output_dataset)
+        task = AggregateLoadingPlansTask(
+           loading_plan_paths=loading_plans,
+           operation=operation,
+           storage_plan = storage_plan)
+        for lp in lps:
+            task = lp(task)
+        return sp(task)
         
     def gen_storage_plan_relabeling_task(
         self, connectivity_graph_path, volume, src_loading_plan,
@@ -1440,9 +1470,9 @@ class AMTaskFactory(object):
         yprob_loading_plan, ylp = self.loading_plan(volume, y_prob_dataset_name)
         zprob_loading_plan, zlp = self.loading_plan(volume, z_prob_dataset_name)
         storage_plan, sp = self.storage_plan(volume, output_dataset_name)
-        return xlp | ylp | zlp | sp | ZWatershedTask(
+        return xlp ( ylp ( zlp ( sp ( ZWatershedTask(
             volume=volume,
-            x_prob_loading_plan_path=x_prob_loading_plan,
-            y_prob_loading_plan_path=y_prob_loading_plan,
-            z_prob_loading_plan_path=z_prob_loading_plan,
-            storage_plan=storage_plan)
+            x_prob_loading_plan_path=xprob_loading_plan,
+            y_prob_loading_plan_path=yprob_loading_plan,
+            z_prob_loading_plan_path=zprob_loading_plan,
+            storage_plan=storage_plan)))))

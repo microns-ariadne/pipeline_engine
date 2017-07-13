@@ -411,14 +411,15 @@ class AggregateSynapseConnectionsRunMixin:
         #
         # Eliminate the duplicates.
         #
-        first_is_best = d_edge[pairs[:, 0]] > d_edge[pairs[:, 1]]
-        to_remove = np.unique(np.hstack(
-             [pairs[first_is_best, 1], pairs[~ first_is_best, 0]]))
-        neuron_1, neuron_2, \
-            synapse_center_x, synapse_center_y, synapse_center_z = \
-            [np.delete(_, to_remove) for _ in 
-             neuron_1, neuron_2, 
-             synapse_center_x, synapse_center_y, synapse_center_z]
+        if len(pairs) > 0:
+            first_is_best = d_edge[pairs[:, 0]] > d_edge[pairs[:, 1]]
+            to_remove = np.unique(np.hstack(
+                 [pairs[first_is_best, 1], pairs[~ first_is_best, 0]]))
+            neuron_1, neuron_2, \
+                synapse_center_x, synapse_center_y, synapse_center_z = \
+                [np.delete(_, to_remove) for _ in 
+                 neuron_1, neuron_2, 
+                 synapse_center_x, synapse_center_y, synapse_center_z]
         #
         # Make the dictionaries.
         #

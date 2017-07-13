@@ -16,7 +16,7 @@ from ..tasks.connected_components import FakeAllConnectedComponentsTask
 from ..tasks.connected_components import AdditionalLocationDirection
 from ..tasks.connected_components import AdditionalLocationType
 from ..tasks.connected_components import LogicalOperation
-from ..tasks.copytasks import DeleteStoragePlan
+from ..tasks.copytasks import DeleteStoragePlan, AggregateOperation
 from ..tasks.find_seeds import SeedsMethodEnum, Dimensionality
 from ..tasks.match_synapses import MatchMethod
 from ..tasks.neuroproof_common import NeuroproofVersion
@@ -914,6 +914,21 @@ class PipelineTaskMixin:
                             dataset_name=channel)
                         self.datasets[shim_task.output().path] = shim_task
                         self.tasks.append(shim_task)
+                    #
+                    # If we are using affinity, then aggregate over the
+                    # three affinity channels
+                    #
+                    affinity_task = \
+                        self.factory.gen_aggregate_loading_plan_tasks(
+                            volume=output_volume,
+                            input_datasets=[X_AFFINITY_DATASET,
+                                            Y_AFFINITY_DATASET,
+                                            Z_AFFINITY_DATASET],
+                            output_dataset=MEMBRANE_DATASET,
+                            operation=AggregateOperation.MEAN)
+                    self.datasets[affinity_task.output().path] = \
+                        affinity_task
+                    self.tasks.append(affinity_task)
     
     def get_block_volume(self, xi, yi, zi):
         '''Get the volume for a segmentation block
@@ -1077,14 +1092,8 @@ class PipelineTaskMixin:
 
     def get_neuroproof_channel_names(self):
         '''Return the dataset names of the inputs to Neuroproof'''
-        if not self.wants_affinity_segmentation:
-            prob_dataset_name = MEMBRANE_DATASET
-            additional_dataset_names = []
-        else:
-            prob_dataset_name = X_AFFINITY_DATASET
-            additional_dataset_names = [
-                Y_AFFINITY_DATASET, Z_AFFINITY_DATASET]
-        additional_dataset_names += self.additional_neuroproof_channels
+        prob_dataset_name = MEMBRANE_DATASET
+        additional_dataset_names = self.additional_neuroproof_channels
         return prob_dataset_name, additional_dataset_names
     
     def generate_gt_cutouts(self):
@@ -1341,9 +1350,11 @@ class PipelineTaskMixin:
             self.all_connected_components_task = \
                 self.factory.gen_fake_all_connected_components_task(
                     volume=volume,
-                    dataset_name=SEG_DATASET,
-                    output_location=self.get_connectivity_graph_location())
+                    dataset_name=NP_DATASET,
+                    output_location=self.get_connectivity_graph_location(),
+                    src_task=input_task)
             self.tasks.append(self.all_connected_components_task)
+            self.all_connected_components_task.set_requirement(input_task)
         else:
             #
             # Build the all-connected-components task
