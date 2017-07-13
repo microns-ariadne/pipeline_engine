@@ -210,7 +210,7 @@ class DatasetObj(Base):
         ForeignKey(TaskObj.task_id),
         doc="The link to the task that produced the dataset")
     __table_args__ = (
-            UniqueConstraint("dataset_type_id", "volume_id"),
+            UniqueConstraint("dataset_type_id", "volume_id", "task_id"),
         )
     volume = relationship(VolumeObj, 
                           primaryjoin=volume_id==VolumeObj.volume_id)
