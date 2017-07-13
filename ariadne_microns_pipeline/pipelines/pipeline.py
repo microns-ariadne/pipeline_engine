@@ -918,17 +918,18 @@ class PipelineTaskMixin:
                     # If we are using affinity, then aggregate over the
                     # three affinity channels
                     #
-                    affinity_task = \
-                        self.factory.gen_aggregate_loading_plan_tasks(
-                            volume=output_volume,
-                            input_datasets=[X_AFFINITY_DATASET,
-                                            Y_AFFINITY_DATASET,
-                                            Z_AFFINITY_DATASET],
-                            output_dataset=MEMBRANE_DATASET,
-                            operation=AggregateOperation.MEAN)
-                    self.datasets[affinity_task.output().path] = \
-                        affinity_task
-                    self.tasks.append(affinity_task)
+                    if self.wants_affinity_segmentation:
+                        affinity_task = \
+                            self.factory.gen_aggregate_loading_plan_tasks(
+                                volume=output_volume,
+                                input_datasets=[X_AFFINITY_DATASET,
+                                                Y_AFFINITY_DATASET,
+                                                Z_AFFINITY_DATASET],
+                                output_dataset=MEMBRANE_DATASET,
+                                operation=AggregateOperation.MEAN)
+                        self.datasets[affinity_task.output().path] = \
+                            affinity_task
+                        self.tasks.append(affinity_task)
     
     def get_block_volume(self, xi, yi, zi):
         '''Get the volume for a segmentation block
