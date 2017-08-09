@@ -68,6 +68,10 @@ class MatchSynapsesRunMixin:
         default=25.,
         description="The percentage of the total object that must overlap "
         "to be considered a match.")
+    min_gt_overlap_pct = luigi.FloatParameter(
+        default=50.,
+        description="The percentage of the total ground-truth object that "
+        "must overlap to be considered a match")
     
     def ariadne_run(self):
         gt_tgt = DestVolumeReader(self.gt_loading_plan_path)
@@ -92,7 +96,8 @@ class MatchSynapsesRunMixin:
             
         if self.match_method == MatchMethod.overlap:
             matching_d, matching_gt = match_synapses_by_overlap(
-                gt, d, self.min_overlap_pct)
+                gt, d, self.min_overlap_pct, 
+                min_gt_overlap_pct=self.min_gt_overlap_pct)
         else:
             matching_d, matching_gt = match_synapses_by_distance(
                 gt, d, self.xy_nm, self.z_nm, self.max_distance)

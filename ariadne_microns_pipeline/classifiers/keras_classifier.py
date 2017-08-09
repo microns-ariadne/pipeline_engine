@@ -38,7 +38,10 @@ class KerasClassifier(AbstractPixelClassifier):
                  mirrored=False,
                  stretch_output=False,
                  invert=False,
-                 split_positive_negative=False):
+                 split_positive_negative=False,
+                 normalize_offset=None,
+                 normalize_saturation_level=None,
+                 transpose=(None, None, 0, 1, 2)):
         '''Initialize from a model and weights
         
         :param model_path: path to JSON model file suitable for 
@@ -66,6 +69,20 @@ class KerasClassifier(AbstractPixelClassifier):
         :param split_positive_negative: if True, create two channels by
         clipping the output at 0, 1 for the first channel and by clipping
         and inverting the output at 0, -1 for the second channel
+        :param normalize_offset: the offset to subtract after normalizing the
+               image
+        :param normalize_saturation_level: the saturation level for the
+        rescale method - the image is stretched to values below and above 1/2 of
+        this fraction of the population
+        :param transpose: The volume is submitted to the classifier as a tensor
+        which is typically "batch", "channel", "time", "y", "x". We submit only
+        one volume at a time, so "batch" is 1 and we don't have channels on
+        input, so "channel" is 1 also, resulting in a transpose in this case of
+        (None, None, 0, 1, 2) meaning "reshape to 1, 1, shape[0],
+        shape[1], shape[2]". But I've seen both 4D tensors 
+        (0, None, 1, 2) and 5D tensors of (None, 0, None, 1, 2), so the 
+        "transpose" parameter is here to give the caller total flexibility
+        when constructing the tensor.
         '''
         self.xypad_size = xypad_size
         self.zpad_size = zpad_size
@@ -82,6 +99,9 @@ class KerasClassifier(AbstractPixelClassifier):
         self.stretch_output=stretch_output
         self.invert = invert
         self.split_positive_negative = split_positive_negative
+        self.normalize_offset = normalize_offset
+        self.normalize_saturation_level = normalize_saturation_level
+        self.transpose = transpose
 
     @staticmethod
     def __keras_backend():
@@ -164,10 +184,14 @@ class KerasClassifier(AbstractPixelClassifier):
         logger.report_event(
             "Loading classifier model from %s" % self.model_path)
         model_json = open(self.model_path, "r").read()
+        def retanh(x):
+            return K.maximum(0, K.tanh(x))
+        
         model = keras.models.model_from_json(
             model_json,
             custom_objects={"Cropping2D":Cropping2D,
-                            "DepthToSpace3D":DepthToSpace3D})
+                            "DepthToSpace3D":DepthToSpace3D,
+                            "retanh": retanh})
         logger.report_event(
             "Loading weights from %s" % self.weights_path)
         model.load_weights(self.weights_path)
@@ -203,7 +227,10 @@ class KerasClassifier(AbstractPixelClassifier):
                     mirrored=self.mirrored,
                     stretch_output=self.stretch_output,
                     invert=self.invert,
-                    split_positive_negative = self.split_positive_negative)
+                    split_positive_negative = self.split_positive_negative,
+                    normalize_offset=self.normalize_offset,
+                    normalize_saturation_level=self.normalize_saturation_level,
+                    transpose=self.transpose)
     
     def __setstate__(self, state):
         '''Restore the state from the pickle'''
@@ -249,6 +276,20 @@ class KerasClassifier(AbstractPixelClassifier):
             self.split_positive_negative = state["split_positive_negative"]
         else:
             self.split_positive_negative = False
+        if "normalize_offset" in state:
+            self.normalize_offset = state["normalize_offset"]
+        else:
+            self.normalize_offset = None
+        if "normalize_saturation_level" in state:
+            self.normalize_saturation_level = \
+                state["normalize_saturation_level"]
+        else:
+            self.normalize_saturation_level = None
+        if "transpose" in state:
+            self.transpose = state["transpose"]
+        else:
+            # Legacy - guesstimate the transposition using heuristics
+            self.transpose = None
     
     def get_class_names(self):
         return self.classes
@@ -413,7 +454,22 @@ class KerasClassifier(AbstractPixelClassifier):
         n_x = 1 + int((x1-x0 - 1) / output_block_size[2])
         xs = np.linspace(x0, x1, n_x+1).astype(int)
         t0 = time.time()
-        norm_img = normalize_image(image, self.normalize_method)
+        if self.normalize_offset is None:
+            if self.normalize_saturation_level is None:
+                norm_img = normalize_image(image, self.normalize_method)
+            else:
+                norm_img = normalize_image(
+                    image, self.normalize_method,
+                    saturation_level=self.normalize_saturation_level)
+        elif self.normalize_saturation_level is None:
+            norm_img = normalize_image(image,
+                                       self.normalize_method,
+                                       offset=self.normalize_offset)
+        else:
+            norm_img = normalize_image(
+                image, self.normalize_method,
+                offset=self.normalize_offset,
+                saturation_level=self.normalize_saturation_level)
         logger.report_metric("keras_cpu_block_processing_time",
                              time.time() - t0)
         #
@@ -451,18 +507,38 @@ class KerasClassifier(AbstractPixelClassifier):
                     x1b = x1a - xpad_ds * 2
                     block = np.array([norm_img[z][y0a:y1a, x0a:x1a]
                                       for z in range(z0a, z1a)])
-                    if block.shape[0] == 1:
-                        if KerasClassifier.__keras_backend() == 'theano':
-                            block.shape = \
-                                [1, 1, block.shape[-2], block.shape[-1]]
+                    if self.transpose is None:
+                        # Legacy transpose: guess
+                        if block.shape[0] == 1:
+                            if KerasClassifier.__keras_backend() == 'theano':
+                                block.shape = \
+                                    [1, 1, block.shape[-2], block.shape[-1]]
+                            else:
+                                block.shape = \
+                                    [1, block.shape[-2], block.shape[-1], 1]
                         else:
-                            block.shape = \
-                                [1, block.shape[-2], block.shape[-1], 1]
+                            if KerasClassifier.__keras_backend() == 'theano':
+                                block.shape = [1, 1] + list(block.shape)
+                            else:
+                                block.shape = [1] + list(block.shape) + [1]
                     else:
-                        if KerasClassifier.__keras_backend() == 'theano':
-                            block.shape = [1, 1] + list(block.shape)
-                        else:
-                            block.shape = [1] + list(block.shape) + [1]
+                        #
+                        # The format of the transpose is "None" for an
+                        # unused ("1") slot in the tensor and the given axis
+                        # otherwise, e.g. (None, None, 0, 1, 2) means
+                        # "don't transpose and reshape as [1, 1] + shape"
+                        #
+                        reshape = []
+                        for slot in self.transpose:
+                            if slot is None:
+                                reshape.append(1)
+                            else:
+                                reshape.append(block.shape[slot])
+                        transpose = tuple(filter(lambda _:_ is not None,
+                                                 self.transpose))
+                        if transpose != tuple(sorted(transpose)):
+                            block = block.transpose(*transpose)
+                        block = block.reshape(*reshape)
                     #
                     # 
                     self.pred_queue.put((block, x0b, x1b, y0b, y1b, z0b, z1b))

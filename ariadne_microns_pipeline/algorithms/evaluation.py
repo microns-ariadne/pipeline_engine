@@ -347,7 +347,8 @@ def plot_evaluations():
 
 
     
-def match_synapses_by_overlap(gt, detected, min_overlap_pct):
+def match_synapses_by_overlap(gt, detected, min_overlap_pct, \
+                              min_gt_overlap_pct=None):
     '''Determine the best ground truth synapse for a detected synapse by overlap
     
     :param gt: the ground-truth labeling of the volume. 0 = not synapse,
@@ -355,6 +356,8 @@ def match_synapses_by_overlap(gt, detected, min_overlap_pct):
     :param detected: the computer-generated labeling of the volume
     :param min_overlap_pct: the percentage of voxels that must overlap
                for the algorithm to consider two objects.
+    :param min_gt_overlap_pct: the percentage of gt voxels that must overlap
+               detected voxels to score an overlap. Defaults to min_overlap_pct
     
     The algorithm tries to maximize the number of overlapping voxels
     globally. It finds the overlap between each pair of gt and detected
@@ -370,6 +373,8 @@ def match_synapses_by_overlap(gt, detected, min_overlap_pct):
     gt label (with zero for "not a match"). The second vector is the matching
     label in gt for each detected label.
     '''
+    if min_gt_overlap_pct is None:
+        min_gt_overlap_pct = min_overlap_pct
     gt_areas = np.bincount(gt.flatten())
     gt_areas[0] = 0
     #
@@ -404,7 +409,7 @@ def match_synapses_by_overlap(gt, detected, min_overlap_pct):
     # Enforce minimum overlap
     #
     d_min_overlap = d_areas[d_map] * min_overlap_pct / 100
-    gt_min_overlap = gt_areas[gt_map] * min_overlap_pct / 100
+    gt_min_overlap = gt_areas[gt_map] * min_gt_overlap_pct / 100
     bad_gt, bad_d = np.where((matrix < gt_min_overlap[:, np.newaxis]) |
                              (matrix < d_min_overlap[np.newaxis, :]))
     matrix[bad_gt, bad_d] = 0

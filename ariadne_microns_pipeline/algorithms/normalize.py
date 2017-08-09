@@ -47,16 +47,20 @@ def normalize_image_rescale(img, saturation_level=0.05, offset=.5):
     two extrema
     :param offset: the offset to subtract from the result, scaled to 0-1
     '''
-    sortedValues = np.sort( img.ravel())                                        
-    minVal = np.float32(
-        sortedValues[np.int(len(sortedValues) * (saturation_level / 2))])                                                                      
-    maxVal = np.float32(
-        sortedValues[np.int(len(sortedValues) * (1 - saturation_level / 2))])                                                                  
-    normImg = np.float32(img - minVal) * \
-        (255 / (maxVal-minVal + np.finfo(np.float32).eps))                
-    normImg[normImg<0] = 0                                                      
-    normImg[normImg>255] = 255                                                  
-    return (np.float32(normImg) / 255.0) - offset
+    if saturation_level == 0:
+        normImg = (img.astype(np.float32) - img.min()) / (
+            img.max() - img.min() + np.finfo(np.float32).eps)
+    else:
+        sortedValues = np.sort( img.ravel())                                        
+        minVal = np.float32(
+            sortedValues[np.int(len(sortedValues) * (saturation_level / 2))])                                                                      
+        maxVal = np.float32(
+            sortedValues[np.int(len(sortedValues) * (1 - saturation_level / 2))])                                                                  
+        normImg = (np.float32(img) - minVal) / (
+            maxVal-minVal + np.finfo(np.float32).eps)
+        normImg[normImg<0] = 0                                     
+        normImg[normImg>1] = 1                                                  
+    return normImg - offset
 
 #
 # The normalization for the histogram matching method was done on the
@@ -243,7 +247,8 @@ def normalize_image_match(img, offset=0):
         plane = plane.copy()
         plane[plane < int(uim_low)] = int(uim_low)
         plane[plane > int(uim_high)] = int(uim_high)
-        plane = ((plane.astype(np.float32) - uim_low) / (uim_high - uim_low)).astype(np.uint8)
+        plane = (255. * (plane.astype(np.float32) - uim_low)\
+            / (uim_high - uim_low)).astype(np.uint8)
         p_bincount = np.bincount(plane.flatten(), minlength=256)
         p_quantiles = \
             np.cumsum(p_bincount).astype(np.float32) / np.prod(plane.shape)
