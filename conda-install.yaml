@@ -1,6 +1,7 @@
 name: ariadne_microns_pipeline
 channels:
 - menpo
+- conda-forge
 dependencies:
 - numpy
 - cython
