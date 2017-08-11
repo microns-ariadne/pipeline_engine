@@ -6,6 +6,7 @@ import os
 import rh_logger
 import sys
 import time
+from frozenordereddict import FrozenOrderedDict
 
 from ..parameters import VolumeParameter
 from ..volumedb import VolumeDB
@@ -167,7 +168,7 @@ def to_hashable(x):
     # and a consistent insertion order
     #
     if isinstance(x, dict):
-        return luigi.parameter.FrozenOrderedDict(
+        return FrozenOrderedDict(
             [(k, to_hashable(x[k])) for k in sorted(x.keys())])
     #
     # Make sure all other cases are hashable before returning them
