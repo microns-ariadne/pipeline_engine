@@ -1195,7 +1195,6 @@ class PipelineTaskMixin:
                         self.tasks.append(stask)
                         stask.set_requirement(
                             self.all_connected_components_task)
-                        self.datasets[stask.output().path] = stask
                         self.statistics_tasks[zi, yi, xi] = stask
                         json_paths.append(stask.output().path)
             self.statistics_csv_task = self.factory.gen_json_to_csv_task(
@@ -2038,8 +2037,8 @@ class PipelineTaskMixin:
                         "gt_synapse_neuron.json")
                     gt_sn_task = self.factory.gen_connect_synapses_task(
                         volume=volume,
-                        neuron_dataset_name=NP_DATASET,
-                        synapse_dataset_name=SYN_SEG_DATASET,
+                        neuron_dataset_name=GT_DATASET,
+                        synapse_dataset_name=SYN_SEG_GT_DATASET,
                         xy_dilation=self.gt_neuron_synapse_xy_dilation,
                         z_dilation=self.gt_neuron_synapse_z_dilation,
                         min_contact=self.gt_neuron_synapse_min_contact,
@@ -2696,6 +2695,12 @@ class PipelineTaskMixin:
                     self.generate_stitched_segmentation_task()
                     self.requirements.append(self.stitched_segmentation_task)
             #
+            # (maybe) generate the statistics tasks
+            #
+            self.generate_statistics_tasks()
+            if self.statistics_csv_task is not None:
+                self.requirements.append(self.statistics_report_task)
+            #
             # Do the VolumeDB computation
             #
             rh_logger.logger.report_event("Computing load/store plans")
@@ -2763,12 +2768,6 @@ class PipelineTaskMixin:
                 self.requirements.append(self.all_connected_components_task)
             if self.wants_synapse_statistics:
                 self.requirements.append(self.synapse_statistics_task)
-            #
-            # (maybe) generate the statistics tasks
-            #
-            self.generate_statistics_tasks()
-            if self.statistics_csv_task is not None:
-                self.requirements.append(self.statistics_report_task)
             rh_logger.logger.report_event(
                 "Pipeline task graph computation finished")
             

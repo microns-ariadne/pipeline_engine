@@ -155,6 +155,12 @@ class SingleThreadedMixin:
         return resources
 
 
+try:
+    # old Luigi
+    from luigi.parameter import FrozenOrderedDict
+except ImportError:
+    from luigi.parameter import _FrozenOrderedDict as FrozenOrderedDict
+    
 def to_hashable(x):
     '''Make dictionaries and lists hashable
     

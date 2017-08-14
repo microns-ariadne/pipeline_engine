@@ -15,4 +15,3 @@ sqlalchemy
 luigi>=2.1.1
 pyzmq
 tiffile==0.10.0
-frozenordereddict>=1.2.0

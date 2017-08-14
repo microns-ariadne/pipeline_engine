@@ -35,7 +35,6 @@ setup(
     long_description=README,
     install_requires=[
         "Cython>=0.24.0",
-        "frozenordereddict>=1.2.0",
         "python-dateutil>=2.2",
         "enum34>=1.0.0",
         "hungarian>=0.2.3",
