@@ -664,6 +664,8 @@ class PipelineTaskMixin:
                                "The ground-truth synapse segmentation")
         self.register_datatype(FINAL_SEGMENTATION, UINT32,
                                "The stitched global segmentation")
+        self.register_datatype(GT_MASK_DATASET, UINT8,
+                               "The valid region of the ground truth volume")
         
         
     def compute_extents(self):
