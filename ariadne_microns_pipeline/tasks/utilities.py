@@ -6,7 +6,6 @@ import os
 import rh_logger
 import sys
 import time
-from frozenordereddict import FrozenOrderedDict
 
 from ..parameters import VolumeParameter
 from ..volumedb import VolumeDB
