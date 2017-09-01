@@ -171,6 +171,14 @@ class ConnectedComponentsRunMixin:
         default=1000,
         description="The minimum acceptable volume in voxels of overlap "
                     "needed to join an orphan segment.")
+    exclude1 = luigi.ListParameter(
+        default=[],
+        description="A list of object IDs in the first block that should be "
+        "prevented from merging to anything across block boundaries")
+    exclude2 = luigi.ListParameter(
+        default=[],
+        description="A list of object IDs in the second block that should be "
+        "prevented from merging to anything across block boundaries")
     
     def ariadne_run(self):
         '''Look within the overlap volume to find the concordances
@@ -194,6 +202,12 @@ class ConnectedComponentsRunMixin:
             connections, counts = self.pairwise_multimatch(cutout1, cutout2)
         else:
             connections, counts = self.overlap_match(cutout1, cutout2)
+        if len(self.exclude1) > 0:
+            connections = \
+                filter(lambda _:_[0] not in self.exclude1, connections)
+        if len(self.exclude2) > 0:
+            connections = \
+                filter(lambda _:_[1] not in self.exclude2, connections)
         d = dict(connections=connections, counts=counts)
         for volume, name in ((self.volume1, "1"),
                              (self.volume2, "2"),
@@ -984,4 +998,29 @@ class ConnectivityGraph(object):
         location = DestVolumeReader(
             **self.locations[to_hashable(volume.to_dictionary())])
         return location
+    
+    @staticmethod
+    def promote(lcg, gcg, lid):
+        '''Return the new global ID, given the old one
+        
+        Given a block's connectivity graph, convert its global ids to those
+        of a stitching join of that block.
+        
+        :param lcg: the local connectivity graph
+        :param gcg: the global connectivity graph
+        :param lid: the lcg ID to translate.
+        :returns: The corresponding ID in gcg
+        '''
+        for volume, mapping in lcg.volumes.items():
+            w = np.where(mapping[:, 1] == lid)[0]
+            if len(w) > 0:
+                llid = mapping[w[0], 0]
+                gmapping = gcg.volumes.get(volume, np.zeros((0, 2), int))
+                w = np.where(llid == gmapping[:, 0])[0]
+                if len(w) > 0:
+                    return gmapping[w[0], 1]
+        else:
+            raise ValueError("%d has no local/global pair" % lid)
+                    
+                
         

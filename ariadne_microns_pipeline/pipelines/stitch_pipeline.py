@@ -1,5 +1,6 @@
 import json
 import luigi
+import numpy as np
 import os
 import rh_config
 
@@ -9,7 +10,7 @@ from ..parameters import Volume, EMPTY_LOCATION
 from ..tasks.connected_components import \
      LogicalOperation, JoiningMethod, Direction, ConnectedComponentsTask, \
      AllConnectedComponentsTask, AdditionalLocationDirection, \
-     AdditionalLocationType
+     AdditionalLocationType, ConnectivityGraph
 from ..tasks.copytasks import ChimericSegmentationTask, CopyLoadingPlansTask
 from ..tasks.neuroproof import NeuroproofTask, NeuroproofVersion
 from ..tasks.utilities import to_hashable
@@ -48,6 +49,14 @@ class StitchPipelineTask(luigi.Task):
         description="Whether to join if either objects overlap the other "
                     "by the minimum amount (""OR"") or whether they both "
                     "have to overlap the other by the minimum amount (""AND"")")
+    exclude1 = luigi.ListParameter(
+        default=[],
+        description="The segment IDs to exclude from block # 1. These should be global "
+        "IDs in the block's component graph")
+    exclude2 = luigi.ListParameter(
+        default=[],
+        description="The segment IDs to exclude from block # 2. These should be global "
+        "IDs in the block's component graph")
     #
     # Parameters for the pairwise multimatch
     #
@@ -125,6 +134,26 @@ class StitchPipelineTask(luigi.Task):
     def output(self):
         return luigi.LocalTarget(self.output_location+".pipeline.done")
 
+    def find_local_exclusions(self, exclusions, volume, cg):
+        '''Convert global to local exclusions
+        
+        :param exclusions: The exclusions using global IDs
+        :param volume: the volume to be joined
+        :param cg: the connectivity graph of the volume to be joined
+        :returns: a list of local IDs for the exclusions
+        '''
+        if len(exclusions) == 0:
+            return []
+        result = []
+        connections = cg.volumes.get(to_hashable(volume.to_dictionary()))
+        if connections is None:
+            return result
+        for exclusion in exclusions:
+            idxs = np.where(connections[:, 1] == exclusion)[0]
+            if len(idxs) > 0:
+                result.append(connections[idxs[0], 0])
+        return result
+    
     def compute_requirements(self):
         '''Compute the requirements and dependencies for the pipeline
         
@@ -132,7 +161,17 @@ class StitchPipelineTask(luigi.Task):
         '''
         self.direction2 = self.direction1.opposite()
         cg1 = json.load(open(self.component_graph_1, "r"))
+        if len(self.exclude1) > 0:
+            connectivity_graph1 = \
+                ConnectivityGraph.load(open(self.component_graph_1))
+        else:
+            connectivity_graph1 = None
         cg2 = json.load(open(self.component_graph_2, "r"))
+        if len(self.exclude2) > 0:
+            connectivity_graph2 = \
+                ConnectivityGraph.load(open(self.component_graph_2))
+        else:
+            connectivity_graph2 = None
         #
         # These are the block joins done by the individual pipelines. They
         # are re-fed into AllConnectedComponents for the next round.
@@ -255,6 +294,10 @@ class StitchPipelineTask(luigi.Task):
                     v1.x, v1.y, v1.z, v2.x, v2.y, v2.z)
                 output_location = os.path.join(
                     self.root_dir, filename)
+                exclude1 = self.find_local_exclusions(
+                    self.exclude1, v1, connectivity_graph1)
+                exclude2 = self.find_local_exclusions(
+                    self.exclude2, v2, connectivity_graph2)
                 if self.joining_method != JoiningMethod.ABUT:
                     task = ConnectedComponentsTask(
                         volume1=v1,
@@ -267,6 +310,8 @@ class StitchPipelineTask(luigi.Task):
                         cutout_loading_plan2_path,
                         segmentation_loading_plan2_path=
                         segmentation_loading_plan2_path,
+                        exclude1=exclude1,
+                        exclude2=exclude2,
                         min_overlap_percent=self.min_overlap_percent,
                         operation=self.operation,
                         joining_method=self.joining_method,

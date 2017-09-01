@@ -478,6 +478,10 @@ class PipelineTaskMixin:
         default=25.0,
         description="The minimum acceptable overlap between "
             "ground-truth and detected synapses")
+    synapse_min_gt_overlap_pct = luigi.FloatParameter(
+        default=50.0,
+        description="The percentage of the total ground-truth object "
+        "that must overlap to be considered a match")
     synapse_max_distance = luigi.FloatParameter(
         default=100.,
         description="The maximum allowed distance between centroids of "
@@ -2011,6 +2015,8 @@ class PipelineTaskMixin:
                         method=self.synapse_match_method)
                     synapse_match_task.min_overlap_pct = \
                         self.synapse_min_overlap_pct
+                    synapse_match_task.min_gt_overlap_pct = \
+                        self.synapse_min_gt_overlap_pct
                     synapse_match_task.max_distance = self.synapse_max_distance
                     synapse_match_task.set_requirement(synapse_seg_task)
                     synapse_match_task.set_requirement(synapse_gt_seg_task)

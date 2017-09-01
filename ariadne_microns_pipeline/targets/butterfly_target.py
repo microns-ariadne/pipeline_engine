@@ -12,13 +12,14 @@ from urllib2 import HTTPError
 # This stupid monkey patch fixes an incompatibility between numpy 1.13 and
 # tifffile.
 #
-old_fromfile = np.fromfile
-def fromfile(*args, **kwargs):
-    try:
-        old_fromfile(*args, **kwargs)
-    except TypeError:
-        raise IOError("Work-around for tifffile")
-np.fromfile = fromfile
+if tuple(map(int, np.version.version.split("."))) >= (1, 13):
+    old_fromfile = np.fromfile
+    def fromfile(*args, **kwargs):
+        try:
+            return old_fromfile(*args, **kwargs)
+        except TypeError:
+            raise IOError("Work-around for tifffile")
+    np.fromfile = fromfile
 
 class ButterflyTarget(luigi.Target):
     '''The ButterflyTarget gets a Butterfly cutout plane from the server'''
