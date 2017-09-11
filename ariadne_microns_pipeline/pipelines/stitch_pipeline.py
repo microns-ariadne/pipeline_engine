@@ -89,15 +89,6 @@ class StitchPipelineTask(luigi.Task):
         description="The number of pixels on either side of the origin to "
                     "use as context when extracting the slice to be joined, "
                     "joining slices in the z direction")
-    np_x_pad = luigi.IntParameter(
-        default=100,
-        description="The X padding per block from the volumes to be joined")
-    np_y_pad = luigi.IntParameter(
-        default=100,
-        description="The Y padding per block from the volumes to be joined")
-    np_z_pad = luigi.IntParameter(
-        default=100,
-        description="The Z padding per block from the volumes to be joined")
     neuroproof_classifier = luigi.Parameter(
         default=EMPTY_LOCATION,
         description="The classifier to use for neuroproofing in the ABUT "
@@ -154,6 +145,17 @@ class StitchPipelineTask(luigi.Task):
                 result.append(connections[idxs[0], 0])
         return result
     
+    def validate(self, cg1, cg2):
+        '''Make sure that cg1 and cg2 are compatible
+        
+        Check that their paddings are the same.
+        Check that the volumes overlap properly
+        '''
+        for key in "np_x_pad", "np_y_pad", "np_z_pad":
+            assert cg1.metadata[key] == cg2.metadata[key], \
+                   "%s differs: 1=%s, 2=%s" % (
+                       key, cg1.metadata[key], cg2.metadata[key])
+        
     def compute_requirements(self):
         '''Compute the requirements and dependencies for the pipeline
         
@@ -172,6 +174,7 @@ class StitchPipelineTask(luigi.Task):
                 ConnectivityGraph.load(open(self.component_graph_2))
         else:
             connectivity_graph2 = None
+        self.validate(cg1, cg2)
         #
         # These are the block joins done by the individual pipelines. They
         # are re-fed into AllConnectedComponents for the next round.
@@ -537,6 +540,14 @@ class StitchPipelineTask(luigi.Task):
         #
         # Make the ultra-stupendous AllConnectedComponentsTask
         #
+        metadata = {}
+        metadata["1"] = cg1.metadata
+        metadata["2"] = cg2.metadata
+        # merge identical metadata from left & right
+        for key, value in cg1.metadata.values():
+            if key in cg2.metadata and cg2.metadata[key] == value:
+                metadata[key] == value
+        
         all_join_files = [_[2] for _ in joins_done]
         all_join_files += [task.output().path for task in joins_to_do]
         self.all_connected_components_task = \
@@ -544,6 +555,7 @@ class StitchPipelineTask(luigi.Task):
                 input_locations=all_join_files, 
                 output_location=self.output_location,
                 additional_loading_plans = additional_locations)
+        self.all_connected_components_task.metadata = metadata
         for task in joins_to_do:
             self.all_connected_components_task.set_requirement(task)
     

@@ -90,11 +90,14 @@ class BossPipelineTaskMixin:
         default=100,
         description="The number of planes per task")
     x_pad = luigi.IntParameter(
-        description="Amount to crop off of each Neuroproof block in X")
+        default=250,
+        description="(legacy) Amount to crop off of each Neuroproof block in X")
     y_pad = luigi.IntParameter(
-        description="Amount to crop off of each Neuroproof block in Y")
+        default=250,
+        description="(legacy) Amount to crop off of each Neuroproof block in Y")
     z_pad = luigi.IntParameter(
-        description="Amount to crop off of each Neuroproof block in Z")
+        default=50,
+        description="(legacy) Amount to crop off of each Neuroproof block in Z")
     
     #############################
     #
@@ -155,6 +158,15 @@ class BossPipelineTaskMixin:
         connectivity_graph_path = os.path.join(self.temp_dir, 
                                                        "connectivity-graph.json")
         cg = json.load(open(self.connectivity_graph_path))
+        #
+        # The x_pad, y_pad and z_pad for each block are 1/2 the values
+        # from the np_x_pad from the pipeline - it's the amount to trim
+        # from each block which is from the np_x_pad midpoint
+        #
+        params = cg["metadata"]["parameters"]
+        x_pad = params.get("np_x_pad", self.x_pad * 2) / 2
+        y_pad = params.get("np_y_pad", self.y_pad * 2) / 2
+        z_pad = params.get("np_z_pad", self.z_pad * 2) / 2
         if do_remap:
             #
             # Set up to copy the connectivity graph to local storage
@@ -192,27 +204,27 @@ class BossPipelineTaskMixin:
             if volume.x == min_x:
                 x0 = min_x
             else:
-                x0 = volume.x + self.x_pad
+                x0 = volume.x + x_pad
             if volume.x1 == max_x:
                 x1 = max_x
             else:
-                x1 = volume.x1 - self.x_pad + 1
+                x1 = volume.x1 - x_pad + 1
             if volume.y == min_y:
                 y0 = min_y
             else:
-                y0 = volume.y + self.y_pad
+                y0 = volume.y + y_pad
             if volume.y1 == max_y:
                 y1 = max_y
             else:
-                y1 = volume.y1 - self.y_pad + 1
+                y1 = volume.y1 - y_pad + 1
             if volume.z == min_z:
                 z0 = min_z
             else:
-                z0 = volume.z + self.z_pad
+                z0 = volume.z + z_pad
             if volume.z1 == max_z:
                 z1 = max_z
             else:
-                z1 = volume.z1 - self.z_pad + 1
+                z1 = volume.z1 - z_pad + 1
             volume = Volume(x0, y0, z0, x1-x0, y1-y0, z1-z0)
             if not volume.overlaps(self.volume):
                 # Padding disqualified it

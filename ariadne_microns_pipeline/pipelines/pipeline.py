@@ -195,6 +195,10 @@ class PipelineTaskMixin:
     # Optional parameters
     #
     #########
+    additional_metadata = luigi.DictParameter(
+        default={},
+        description="Any metadata that the instantiator wants to include "
+        "in the connectivity-graph.json output file")
     butterfly_index_file = luigi.Parameter(
         default=EMPTY_LOCATION,
         description="The index file giving the location of image tiles "
@@ -588,6 +592,30 @@ class PipelineTaskMixin:
     def has_annotation_mask(self):
         '''True if there is a mask of the ground-truth annotated volume'''
         return self.gt_mask_channel != NO_CHANNEL
+    
+    @property
+    def metadata(self):
+        '''The metadata for the pipeline
+        
+        The standard metadata is a dictionary with the following keys
+        
+        parameters: a dictionary of the pipeline's parameters
+        '''
+        d = self.additional_metadata.copy()
+        params = {}
+        for key in self.get_param_names():
+            v = getattr(self, key, None)
+            if not any([isinstance(v, _) for _ in 
+                        basestring, tuple, list, dict, int, float]):
+                if isinstance(v, Volume):
+                    v = v.to_dictionary()
+                else:
+                    v = str(v)
+            params[key] = v
+        # "assert" that the parameters are json serializable
+        json.dumps(params)
+        d["parameters"] = params
+        return d
 
     def register_datatype(self, name, datatype, doc):
         '''Register a datatype with the VolumeDB
@@ -1373,6 +1401,7 @@ class PipelineTaskMixin:
                 additional_loading_plans=self.edge_loading_plans)
             for task in input_tasks:
                 self.all_connected_components_task.set_requirement(task)
+        self.all_connected_components_task.metadata = self.metadata
 
     def parameterize_connected_components_task(self, task):
         '''Apply the minor parameters to a connected components task'''

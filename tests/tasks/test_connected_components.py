@@ -10,6 +10,8 @@ import uuid
 from ariadne_microns_pipeline.targets.factory import TargetFactory
 from ariadne_microns_pipeline.tasks \
      import AllConnectedComponentsTask, ConnectedComponentsTask
+from ariadne_microns_pipeline.tasks.connected_components import \
+     LogicalOperation, JoiningMethod
 from ariadne_microns_pipeline.parameters import Volume
 from ariadne_microns_pipeline.targets.volume_target import \
      DestVolumeReader, write_simple_loading_plan, DestVolumeReader
@@ -208,6 +210,131 @@ class TestConnectedComponents(unittest.TestCase):
         self.assertEqual(len(connections), 1)
         self.assertFalse(any([a == 1 and b == 3 for a, b in connections]))
         self.assertTrue(any([a == 2 and b == 4 for a, b in connections]))
+    
+    def test_05_min_overlap_percent(self):
+        #
+        # Test the minimum allowed overlap percent
+        #
+        # 49 % should be OK, 51 % should be a fail
+        #
+        va = np.zeros((10, 10, 10), np.uint16)
+        va[1, 1, 9] = 1
+        va[3, 4, 9] = 2
+        va[3, 5, 9] = 2
+        va[3, 6, 9] = 1
+        vb = np.zeros((10, 10, 10), np.uint16)
+        vb[1, 1, 0] = 3
+        vb[3, 4, 0] = 4
+        vb[3, 5, 0] = 3
+        vb[3, 6, 0] = 4
+        
+        overlap_volume=Volume(9, 0, 0, 1, 10, 10)
+        a = self.make_input(va, 0, 0, 0, overlap_volume)
+        b = self.make_input(vb, 9, 0, 0, overlap_volume)
+        
+        task = ConnectedComponentsTask(
+            volume1=a.volume,
+            cutout_loading_plan1_path=a.loading_plan_path,
+            segmentation_loading_plan1_path=a.loading_plan_path,
+            volume2=b.volume,
+            cutout_loading_plan2_path=b.loading_plan_path,
+            segmentation_loading_plan2_path=b.loading_plan_path,
+            output_location=self.output_location,
+            min_overlap_percent=49)
+        task.run()
+        result = json.load(task.output().open("r"))
+        connections = result["connections"]
+        self.assertEqual(len(connections), 4)
+        self.assertTrue(
+            any([id1 == 1 and id2 == 3 for id1, id2 in connections]))
+        self.assertTrue(
+            any([id1 == 2 and id2 == 3 for id1, id2 in connections]))
+        self.assertTrue(
+            any([id1 == 1 and id2 == 4 for id1, id2 in connections]))
+        self.assertTrue(
+            any([id1 == 2 and id2 == 4 for id1, id2 in connections]))
+        task = ConnectedComponentsTask(
+            volume1=a.volume,
+            cutout_loading_plan1_path=a.loading_plan_path,
+            segmentation_loading_plan1_path=a.loading_plan_path,
+            volume2=b.volume,
+            cutout_loading_plan2_path=b.loading_plan_path,
+            segmentation_loading_plan2_path=b.loading_plan_path,
+            output_location=self.output_location,
+            min_overlap_percent=51)
+        task.run()
+        result = json.load(task.output().open("r"))
+        connections = result["connections"]
+        self.assertEqual(len(connections), 0)
+    
+    def test_06_OR_AND(self):
+        #
+        # Test that OR succeeds when smaller overlaps larger but AND fails
+        #
+        # at 50% 1 totally overlaps 3 and 3 half-overlaps 1
+        #        2 overlaps 3 by 1/3 and 3 overlaps 2 by 1/2
+        #        1 does not overlap 4
+        #        2 overlaps 4 by 2/3 and 4 overlaps 2 completely
+        #
+        # OR: 1 overlaps 3
+        #     2 overlaps 3
+        #     2 overlaps 4
+        # AND: 1 overlaps 3
+        #     2 overlaps 4
+        #
+        va = np.zeros((10, 10, 10), np.uint16)
+        va[1, 1, 9] = 1
+        va[3, 4, 9] = 2
+        va[3, 5, 9] = 2
+        va[3, 6, 9] = 2
+        vb = np.zeros((10, 10, 10), np.uint16)
+        vb[1, 1, 0] = 3
+        vb[3, 4, 0] = 4
+        vb[3, 5, 0] = 3
+        vb[3, 6, 0] = 4
+        
+        overlap_volume=Volume(9, 0, 0, 1, 10, 10)
+        a = self.make_input(va, 0, 0, 0, overlap_volume)
+        b = self.make_input(vb, 9, 0, 0, overlap_volume)
+        
+        task = ConnectedComponentsTask(
+            volume1=a.volume,
+            cutout_loading_plan1_path=a.loading_plan_path,
+            segmentation_loading_plan1_path=a.loading_plan_path,
+            volume2=b.volume,
+            cutout_loading_plan2_path=b.loading_plan_path,
+            segmentation_loading_plan2_path=b.loading_plan_path,
+            output_location=self.output_location,
+            operation=LogicalOperation.OR)
+        task.run()
+        result = json.load(task.output().open("r"))
+        connections = result["connections"]
+        self.assertEqual(len(connections), 3)
+        self.assertTrue(
+            any([id1 == 1 and id2 == 3 for id1, id2 in connections]))
+        self.assertTrue(
+            any([id1 == 2 and id2 == 3 for id1, id2 in connections]))
+        self.assertTrue(
+            any([id1 == 2 and id2 == 4 for id1, id2 in connections]))
+        task = ConnectedComponentsTask(
+            volume1=a.volume,
+            cutout_loading_plan1_path=a.loading_plan_path,
+            segmentation_loading_plan1_path=a.loading_plan_path,
+            volume2=b.volume,
+            cutout_loading_plan2_path=b.loading_plan_path,
+            segmentation_loading_plan2_path=b.loading_plan_path,
+            output_location=self.output_location,
+            operation=LogicalOperation.AND)
+        task.run()
+        result = json.load(task.output().open("r"))
+        connections = result["connections"]
+        self.assertEqual(len(connections), 2)
+        self.assertTrue(
+            any([id1 == 1 and id2 == 3 for id1, id2 in connections]))
+        self.assertTrue(
+            any([id1 == 2 and id2 == 4 for id1, id2 in connections]))
+        
+        
 
 class TestAllConnectedComponents(unittest.TestCase):
     def setUp(self):

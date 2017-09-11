@@ -642,6 +642,9 @@ class AllConnectedComponentsTaskMixin:
         default=[],
         description="Additional loading-plan files to be written into the "
         "locations dictionary, e.g. for use by a stitching pipeline.")
+    metadata=luigi.DictParameter(
+         default={},
+         description="Metadata for the run, e.g. the parameters for the run")
     
     def input(self):
         for input_location in self.input_locations:
@@ -746,6 +749,7 @@ class AllConnectedComponentsRunMixin:
         d["joins"] = []
         for (k1, k2), path in joins.items():
             d["joins"].append((dict(k1), dict(k2), path))
+        d["metadata"] = self.metadata
         with self.output().open("w") as fd:
             json.dump(d, fd)
 
@@ -780,6 +784,10 @@ class FakeAllConnectedComponentsTaskMixin:
         description="The location of the segmentation")
     output_location = luigi.Parameter(
         description="The location of the connectivity graph")
+    metadata = luigi.DictParameter(
+        default={},
+        description="Any metadata that needs to be saved in the "
+        "output file.")
     
     def input(self):
         for tgt in DestVolumeReader(self.loading_plan).get_source_targets():
@@ -803,7 +811,8 @@ class FakeAllConnectedComponentsRunMixin:
         d = dict(count=len(components),
                  volumes=volumes,
                  locations=locations,
-                 joins=[])
+                 joins=[],
+                 metadata=self.metadata)
         with self.output().open("w") as fd:
             json.dump(d, fd)
 
@@ -970,6 +979,7 @@ class ConnectivityGraph(object):
         self = ConnectivityGraph()
         self.volumes = {}
         mappings = json.load(fd)
+        self.metadata = mappings["metadata"]
         for volume, mapping in mappings["volumes"]:
             self.volumes[to_hashable(volume)] = np.array(mapping)
         self.locations = {}
