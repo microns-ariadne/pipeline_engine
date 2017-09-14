@@ -15,7 +15,7 @@ from scipy.ndimage import binary_dilation
 from ..algorithms.evaluation import segmentation_metrics, Rand, f_info
 from ..algorithms.vi import split_vi, bits_to_nats
 from ..targets import DestVolumeReader
-from ..parameters import EMPTY_LOCATION
+from ..parameters import EMPTY_LOCATION, VolumeParameter
 from .connected_components import ConnectivityGraph
 from .utilities import RequiresMixin, RunMixin
 
@@ -26,6 +26,9 @@ class SegmentationStatisticsTaskMixin:
         description="The location of the test dataset")
     ground_truth_loading_plan_path = luigi.Parameter(
         description="The location of the ground truth dataset")
+    block_volume=VolumeParameter(
+        description="The volume of the segmented block (for table "
+        "lookup in the connectivity graph")
     connectivity = luigi.Parameter(
         default=EMPTY_LOCATION,
         description="The connectivity graph .json file that is the output "
@@ -86,7 +89,7 @@ class SegmentationStatisticsRunMixin:
         if self.connectivity != EMPTY_LOCATION:
             with open(self.connectivity, "r") as fd:
                 c = ConnectivityGraph.load(fd)
-                test_labels = c.convert(test_labels, test_volume.volume)
+                test_labels = c.convert(test_labels, self.block_volume)
         d = segmentation_metrics(gt_labels, test_labels, per_object=True)
         rand = d["Rand"]
         F_Info = d["F_Info"]

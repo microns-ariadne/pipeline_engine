@@ -1205,22 +1205,18 @@ class PipelineTaskMixin:
             json_paths = []
             acc_file = self.all_connected_components_task.output().path
             for zi in range(self.n_z):
-                z0 = self.z_grid[zi]
-                z1 = self.z_grid[zi+1]
                 for yi in range(self.n_y):
-                    y0 = self.y_grid[yi]
-                    y1 = self.y_grid[yi+1]
                     for xi in range(self.n_x):
-                        x0 = self.x_grid[xi]
-                        x1 = self.x_grid[xi+1]
-                        volume = Volume(x0, y0, z0, x1-x0, y1-y0, z1-z0)
+                        block_volume = self.get_block_volume(xi, yi, zi)
+                        trim_volume = self.get_trim_volume(xi, yi, zi)
                         ptask = self.np_tasks[zi, yi, xi]
                         output_location = os.path.join(
                             self.get_dir(
                                 self.xs[xi], self.ys[yi], self.zs[zi]),
                             "segmentation_statistics.json")
                         stask = self.factory.gen_segmentation_statistics_task(
-                            volume=volume, 
+                            volume=trim_volume,
+                            block_volume=block_volume,
                             gt_seg_dataset_name=GT_DATASET,
                             pred_seg_dataset_name=NP_DATASET,
                             connectivity=acc_file,
@@ -1687,6 +1683,18 @@ class PipelineTaskMixin:
         y1 = volume.y1 if yi == self.n_y - 1 else \
             volume.y1 - self.np_y_pad / 2
         return Volume(x0, y0, volume.z, x1-x0, y1-y0, volume.depth)
+    
+    def get_trim_volume(self, xi, yi, zi):
+        '''Gives the dimensions of the volume after trimming 1/2 np padding
+        
+        :param xi: the X index of the block
+        :param yi: the Y index of the block
+        :param zi: the Z index of the block
+        '''
+        vx = self.trim_volume_x(xi, yi, zi)
+        vy = self.trim_volume_y(xi, yi, zi)
+        vz = self.trim_volume_z(xi, yi, zi)
+        return Volume(vx.x, vy.y, vz.z, vx.width, vy.height, vz.depth)
     
     def generate_z_connectivity_graph_tasks(self):
         '''Generate connected components tasks to link blocks in z direction

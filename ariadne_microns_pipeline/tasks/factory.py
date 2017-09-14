@@ -1336,6 +1336,7 @@ class AMTaskFactory(object):
 
     def gen_segmentation_statistics_task(self,
                                          volume,
+                                         block_volume,
                                          gt_seg_dataset_name,
                                          pred_seg_dataset_name,
                                          connectivity,
@@ -1347,7 +1348,9 @@ class AMTaskFactory(object):
         comparing it against the ground truth. The data are saved as a
         JSON dictionary.
         
-        :param volume: The volume that was segmented
+        :param volume: The volume to have statistics performed
+        :param block_volume: the volume for table lookup into the connectivity
+                             graph
         :param gt_seg_dataset_name: the location of the ground truth volume
         :param pred_seg_dataset_name: the location of the classifier prediction
         :param connectivity: the location of the connectivity-graph.json file
@@ -1364,6 +1367,7 @@ class AMTaskFactory(object):
         return glp ( plp ( SegmentationStatisticsTask(
             ground_truth_loading_plan_path=gt_load_plan,
             test_loading_plan_path=pred_load_plan,
+            block_volume=block_volume,
             connectivity=connectivity,
             output_path=output_location)))
     
