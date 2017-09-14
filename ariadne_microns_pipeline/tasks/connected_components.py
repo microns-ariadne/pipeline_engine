@@ -979,7 +979,7 @@ class ConnectivityGraph(object):
         self = ConnectivityGraph()
         self.volumes = {}
         mappings = json.load(fd)
-        self.metadata = mappings["metadata"]
+        self.metadata = mappings.get("metadata", {})
         for volume, mapping in mappings["volumes"]:
             self.volumes[to_hashable(volume)] = np.array(mapping)
         self.locations = {}
