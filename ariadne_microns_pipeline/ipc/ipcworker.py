@@ -49,6 +49,10 @@ def process_args():
         default=False,
         action="store_true",
         help="Import Keras in order to bind the GPU")
+    parser.add_argument(
+        "--environment-id",
+        default="default",
+        help="The environment ID of the operating environment of this worker")
     result = parser.parse_args()
     
     class SWorkerArgs:
@@ -59,9 +63,10 @@ def process_args():
         lifetime = float(result.lifetime)
         diagnostics = result.diagnostics
         keras = result.keras
+        environment_id = result.environment_id
     return SWorkerArgs()
 
-def worker_socket(context, poller, broker):
+def worker_socket(context, poller, broker, environment_id):
     '''Get a new socket connected to the queue
     
     :param context: the ZMQ context
@@ -72,7 +77,7 @@ def worker_socket(context, poller, broker):
     worker.setsockopt(zmq.IDENTITY, str(uuid.uuid4()))
     poller.register(worker, zmq.POLLIN)
     worker.connect(broker)
-    worker.send(SP_READY)
+    worker.send_multipart([SP_READY, environment_id])
     return worker
 
 def main():
@@ -86,7 +91,7 @@ def main():
     t0 = time.time()
     context = zmq.Context(1)
     poller = zmq.Poller()
-    worker = worker_socket(context, poller, args.broker)
+    worker = worker_socket(context, poller, args.broker, args.environment_id)
     heartbeat_timeout = time.time() + args.heartbeat_interval
     next_heartbeat = time.time() + args.heartbeat_interval
     last_heartbeat = time.time()
@@ -122,12 +127,17 @@ def main():
                             "IPCWorker."+key, value)
                     worker.send_multipart(frames)
                     rh_logger.logger.report_event("Sent work result")
+                    next_heartbeat = 0
+                    heartbeat_timeout = time.time() + args.heartbeat_interval
                 except:
                     rh_logger.logger.report_exception()
                     e = sys.exc_info()[1]
                     frames = [client, "", SP_EXCEPTION, cPickle.dumps(e)]
                     worker.send_multipart(frames)
                 gc.collect()
+            else:
+                rh_logger.logger.report_event(
+                    "Unknown message code: %s" % repr(frames))
         if heartbeat_timeout < time.time():
             heartbeat_misses += 1
             if heartbeat_misses >= args.max_tries:
@@ -135,7 +145,7 @@ def main():
                     "No heartbeat after %.1f sec, exiting." % 
                     (time.time() - last_heartbeat))
         if next_heartbeat < time.time():
-            worker.send(SP_HEARTBEAT)
+            worker.send_multipart([SP_HEARTBEAT, args.environment_id])
             rh_logger.logger.report_event("lub")
             next_heartbeat = time.time() + args.heartbeat_interval
     rh_logger.logger.end_process("Process lifetime exceeded", 

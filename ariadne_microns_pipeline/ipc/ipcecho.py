@@ -49,6 +49,8 @@ def process_args():
                         help="Throw an exeption instead of echoing")
     parser.add_argument("--keras", default=False, action="store_true",
                         help="Import Keras to initiate binding to a GPU")
+    parser.add_argument("--environment-id", default="default",
+                        help="Environment ID of target worker environment")
     parser.add_argument("phrase",
                         help="Phrase to echo")
     args = parser.parse_args()
@@ -69,7 +71,7 @@ def main():
         work = KerasWork()
     else:
         work = Work(args.phrase)
-    socket.send(cPickle.dumps(work))
+    socket.send_multipart([SP_WORK, args.environment_id, cPickle.dumps(work)])
     while True:
         socks = dict(poll.poll(timeout=10))
         if socks.get(socket) == zmq.POLLIN:

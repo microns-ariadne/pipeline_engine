@@ -38,6 +38,10 @@ class ClassifyTaskMixin:
     done_file = luigi.Parameter(
         description="The touchfile that's written after all datasets have "
         "been written to disk.")
+    environment_id = luigi.Parameter(
+        default="default",
+        description="The ID of the worker's environment, e.g. the name "
+                    "of the conda or virtual environment")
     
     def input(self):
         yield self.get_classifier_target()
@@ -104,7 +108,6 @@ class ClassifyTaskMixin:
         '''The volume of the output'''
         return Volume(self.out_x, self.out_y, self.out_z,
                       self.out_width, self.out_height, self.out_depth)
-    
     def output(self):
         return luigi.LocalTarget(self.done_file)
     
@@ -146,7 +149,7 @@ class ClassifyRunMixin:
             poll = zmq.Poller()
             poll.register(socket, zmq.POLLIN)
             work = cPickle.dumps(ClassifyTaskRunner(self))
-            socket.send(work)
+            socket.send_multipart([SP_WORK, self.environment_id, work])
             while True:
                 socks = dict(poll.poll())
                 if socks.get(socket) == zmq.POLLIN:
