@@ -120,6 +120,12 @@ ALL_CONNECTED_COMPONENTS_JSON = "connected-components.json"
 '''Signals that the channel isn't available (e.g. no ground truth)'''
 NO_CHANNEL = "no-channel"
 
+'''Membrane index (or affinity) when dealing with classification'''
+MIDX = 0
+
+'''Synapse index when dealing with classification'''
+SIDX = 1
+
 #
 # The priorities of dependents are higher than the priorities of the
 # sources of their data. This should lead to items for the same or related
@@ -176,6 +182,8 @@ class PipelineTaskMixin:
         description="The URL of the Butterfly REST endpoint")
     pixel_classifier_path = luigi.Parameter(
         description="Path to pickled pixel classifier")
+    synapse_classifier_path = luigi.Parameter(
+        description="Path to pickled synapse classifier")
     neuroproof_classifier_path = luigi.Parameter(
         description="Location of Neuroproof classifier")
     volume = VolumeParameter(
@@ -230,13 +238,40 @@ class PipelineTaskMixin:
         default=50)
     classifier_block_width = luigi.IntParameter(
         default=1024,
-        description="Width of a block sent to the classifier")
+        description="Width of a block sent to the membrane / affinity "
+        "classifier")
     classifier_block_height = luigi.IntParameter(
         default=1024,
         description="Height of a block sent to the classifier")
     classifier_block_depth = luigi.IntParameter(
         default=64,
         description="Depth of a block sent to the classifier")
+    classifier_environment = luigi.Parameter(
+        default="default",
+        description="The name of the IPC worker environment that handles "
+        "this classifier (e.g. \"keras-2.0\".")
+    synapse_classifier_block_width = luigi.IntParameter(
+        default=1024,
+        description="Width of a block sent to the synapse classifier")
+    synapse_classifier_block_height = luigi.IntParameter(
+        default=1024,
+        description="Height of a block sent to the synapse classifier")
+    synapse_classifier_block_depth = luigi.IntParameter(
+        default=64,
+        description="Depth of a block sent to the synapse classifier")
+    synapse_classifier_environment = luigi.Parameter(
+        default="default",
+        description="The name of the IPC worker environment that handles "
+        "the synapse classifier (e.g. \"keras-2.0\".")
+    butterfly_block_width = luigi.IntParameter(
+        default=1024,
+        description="The width of a block downloaded by Butterfly")
+    butterfly_block_height = luigi.IntParameter(
+        default=1024,
+        description="The height of a block downloaded by Butterfly")
+    butterfly_block_depth = luigi.IntParameter(
+        default=64, 
+        description="The depth of a block downloaded by Butterfly")
     np_x_pad = luigi.IntParameter(
         description="The size of the border region for the Neuroproof merge "
         "of blocks to the left and right. The value is the amount of padding"
@@ -283,6 +318,12 @@ class PipelineTaskMixin:
     wants_affinity_segmentation = luigi.BoolParameter(
         description="Use affinity probabilities and z-watershed to "
         "segment the volume.")
+    wants_affinity_aggregation = luigi.BoolParameter(
+        description="Take the average of the X, Y and Z affinities to "
+        "create a single channel for Neuroproof. If "
+        "--wants-affinity-segmentation is specified and this is not "
+        "specified, the pipeline will feed each affinity channel into "
+        "Neuroproof separately")
     x_affinity_class_name = luigi.Parameter(
         default="x",
         description="The name of the affinity classifier's class connecting "
@@ -750,43 +791,92 @@ class PipelineTaskMixin:
                 self.experiment, self.sample, self.dataset, self.channel, 
                 self.url)
         #
-        # The useable width, height and depth are the true widths
-        # minus the classifier padding
+        # Prepare for cycling through the membrane and synapse classifiers
         #
-        classifier = self.pixel_classifier.classifier
-        self.nn_x_pad = classifier.get_x_pad()
-        self.nn_y_pad = classifier.get_y_pad()
-        self.nn_z_pad = classifier.get_z_pad()
-        self.x1 = min(butterfly.x_extent - classifier.get_x_pad(), 
-                      self.volume.x + self.volume.width)
-        self.y1 = min(butterfly.y_extent - classifier.get_y_pad(),
-                      self.volume.y + self.volume.height)
-        self.z1 = min(butterfly.z_extent - classifier.get_z_pad(),
-                      self.volume.z + self.volume.depth)
-        self.x0 = max(classifier.get_x_pad(), self.volume.x)
-        self.y0 = max(self.nn_y_pad, self.volume.y)
-        self.z0 = max(self.nn_z_pad, self.volume.z)
+        # Initialize the extents.
+        #
+        self.x0 = self.volume.x
+        self.y0 = self.volume.y
+        self.z0 = self.volume.z
+        self.x1 = self.volume.x1
+        self.y1 = self.volume.y1
+        self.z1 = self.volume.z1
+        self.ncl_x = []
+        self.ncl_y = []
+        self.ncl_z = []
+        self.cl_xs = []
+        self.cl_xe = []
+        self.cl_ys = []
+        self.cl_ye = []
+        self.cl_zs = []
+        self.cl_ze = []
+        self.nn_x_pad = []
+        self.nn_y_pad = []
+        self.nn_z_pad = []
+        for classifier in self.pixel_classifier, self.synapse_classifier:
+            self.nn_x_pad.append(classifier.x_pad)
+            self.nn_y_pad.append(classifier.y_pad)
+            self.nn_z_pad.append(classifier.z_pad)
+            self.x1 = min(butterfly.x_extent - classifier.x_pad, 
+                          self.x1)
+            self.y1 = min(butterfly.y_extent - classifier.y_pad,
+                          self.y1)
+            self.z1 = min(butterfly.z_extent - classifier.z_pad,
+                          self.z1)
+            self.x0 = max(classifier.x_pad, self.x0)
+            self.y0 = max(classifier.y_pad, self.y0)
+            self.z0 = max(classifier.z_pad, self.z0)
         self.useable_width = self.x1 - self.x0
         self.useable_height = self.y1 - self.y0
         self.useable_depth = self.z1 - self.z0
         #
         # Compute exact block sizes for the classifier w/o overlap
         #
-        self.ncl_x = \
-            int((self.useable_width-1) / self.classifier_block_width) + 1
-        self.ncl_y = \
-            int((self.useable_height-1) / self.classifier_block_height) + 1
-        self.ncl_z = \
-            int((self.useable_depth-1) / self.classifier_block_depth) + 1
-        self.cl_xs = \
-            self.x0 + self.classifier_block_width * np.arange(self.ncl_x)
-        self.cl_xe = self.cl_xs + self.classifier_block_width
-        self.cl_ys = \
-            self.y0 + self.classifier_block_height * np.arange(self.ncl_y)
-        self.cl_ye = self.cl_ys + self.classifier_block_height
-        self.cl_zs = \
-            self.z0 + self.classifier_block_depth * np.arange(self.ncl_z)
-        self.cl_ze = self.cl_zs + self.classifier_block_depth
+        for idx, block_width, block_height, block_depth in (
+            (MIDX, 
+             self.classifier_block_width, 
+             self.classifier_block_height,
+             self.classifier_block_depth),
+            (SIDX,
+             self.synapse_classifier_block_width,
+             self.synapse_classifier_block_height,
+             self.synapse_classifier_block_depth)):
+            self.ncl_x.append(
+                int((self.useable_width-1) / block_width) + 1)
+            self.ncl_y.append(
+                int((self.useable_height-1) / block_height) + 1)
+            self.ncl_z.append(
+                int((self.useable_depth-1) / block_depth) + 1)
+            self.cl_xs.append(
+                self.x0 + block_width * np.arange(self.ncl_x[idx]))
+            self.cl_xe.append(self.cl_xs[idx] + block_width)
+            self.cl_ys.append(
+                self.y0 + block_height * np.arange(self.ncl_y[idx]))
+            self.cl_ye.append(self.cl_ys[idx] + block_height)
+            self.cl_zs.append(
+                self.z0 + block_depth * np.arange(self.ncl_z[idx]))
+            self.cl_ze.append(self.cl_zs[idx] + block_depth)
+        #
+        # Compute block sizes for Butterfly
+        #
+        self.bx0 = self.x0 - max(self.nn_x_pad)
+        self.bx1 = self.x1 + max(self.nn_x_pad)
+        self.by0 = self.y0 - max(self.nn_y_pad)
+        self.by1 = self.y1 + max(self.nn_y_pad)
+        self.bz0 = self.z0 - max(self.nn_z_pad)
+        self.bz1 = self.z1 + max(self.nn_z_pad)
+        self.n_bx = int(self.bx1 - self.bx0) / self.butterfly_block_width
+        tmp = np.linspace(self.bx0, self.bx1, self.n_bx+1).astype(int)
+        self.bxs = tmp[:-1]
+        self.bxe = tmp[1:]
+        self.n_by = int(self.by1 - self.by0) / self.butterfly_block_height
+        tmp = np.linspace(self.by0, self.by1, self.n_by+1).astype(int)
+        self.bys = tmp[:-1]
+        self.bye = tmp[1:]
+        self.n_bz = int(self.bz1 - self.bz0) / self.butterfly_block_depth
+        tmp = np.linspace(self.bz0, self.bz1, self.n_bz+1).astype(int)
+        self.bzs = tmp[:-1]
+        self.bze = tmp[1:]
         #
         # Compute # of blocks for segmentation and beyond. We need at least
         # the Neuroproof padding between n-1 blocks.
@@ -842,16 +932,16 @@ class PipelineTaskMixin:
     def generate_butterfly_tasks(self):
         '''Get volumes padded for classifier'''
         self.butterfly_tasks = np.zeros(
-            (self.ncl_z, self.ncl_y, self.ncl_x), object)
-        for zi in range(self.ncl_z):
-            z0 = self.cl_zs[zi] - self.nn_z_pad
-            z1 = self.cl_ze[zi] + self.nn_z_pad
-            for yi in range(self.ncl_y):
-                y0 = self.cl_ys[yi] - self.nn_y_pad
-                y1 = self.cl_ye[yi] + self.nn_y_pad
-                for xi in range(self.ncl_x):
-                    x0 = self.cl_xs[xi] - self.nn_x_pad
-                    x1 = self.cl_xe[xi] + self.nn_x_pad
+            (self.ncl_z[MIDX], self.ncl_y[MIDX], self.ncl_x[MIDX]), object)
+        for zi in range(self.n_bz):
+            z0 = self.bzs[zi]
+            z1 = self.bze[zi]
+            for yi in range(self.n_by):
+                y0 = self.bys[yi]
+                y1 = self.bye[yi]
+                for xi in range(self.n_bx):
+                    x0 = self.bxs[xi]
+                    x1 = self.bxe[xi]
                     volume = Volume(x0, y0, z0, x1-x0, y1-y0, z1-z0)
                     if self.butterfly_index_file == EMPTY_LOCATION:
                         task = self.factory.gen_get_volume_task(
@@ -885,74 +975,75 @@ class PipelineTaskMixin:
         # The taskmaps dictionary maps a generic name to the 3D array that
         # stores the shim task associated with that generic name.
         #
-        if self.wants_affinity_segmentation:
-            datasets = {
-                self.x_affinity_class_name:X_AFFINITY_DATASET,
-                self.y_affinity_class_name:Y_AFFINITY_DATASET,
-                self.z_affinity_class_name:Z_AFFINITY_DATASET
-                }
-        else:
-            datasets = {
-                self.membrane_class_name: MEMBRANE_DATASET
-            }
-            
+        items = [
+            (MIDX, self.pixel_classifier_path, self.classifier_environment)]
         if not self.wants_neuroproof_learn:
-            if self.wants_transmitter_receptor_synapse_maps:
-                datasets.update({
+            items.append((SIDX, self.synapse_classifier_path, 
+                          self.synapse_classifier_environment))
+        for idx, classifier_path, environment_id in items:
+            if idx == MIDX:
+                if self.wants_affinity_segmentation:
+                    datasets = {
+                        self.x_affinity_class_name:X_AFFINITY_DATASET,
+                        self.y_affinity_class_name:Y_AFFINITY_DATASET,
+                        self.z_affinity_class_name:Z_AFFINITY_DATASET
+                        }
+                else:
+                    datasets = {
+                        self.membrane_class_name: MEMBRANE_DATASET
+                    }
+            elif self.wants_transmitter_receptor_synapse_maps:
+                datasets = {
                     self.transmitter_class_name: SYNAPSE_TRANSMITTER_DATASET, 
                     self.receptor_class_name: SYNAPSE_RECEPTOR_DATASET
-                })
+                }
             else:
-                datasets.update({
-                    self.synapse_class_name: SYNAPSE_DATASET})
-        for channel in self.additional_neuroproof_channels:
-            if channel not in (SYNAPSE_DATASET, SYNAPSE_TRANSMITTER_DATASET,
-                               SYNAPSE_RECEPTOR_DATASET) \
-               and not self.wants_neuroproof_learn:
-                datasets[channel] = channel
-        for zi in range(self.ncl_z):
-            for yi in range(self.ncl_y):
-                for xi in range(self.ncl_x):
-                    btask = self.butterfly_tasks[zi, yi, xi]
-                    x0 = self.cl_xs[xi]
-                    x1 = self.cl_xe[xi]
-                    y0 = self.cl_ys[yi]
-                    y1 = self.cl_ye[yi]
-                    z0 = self.cl_zs[zi]
-                    z1 = self.cl_ze[zi]
-                    output_volume = Volume(x0, y0, z0, 
-                                           x1-x0, y1-y0, z1-z0)
-                    x0p = x0 - self.nn_x_pad
-                    x1p = x1 + self.nn_x_pad
-                    y0p = y0 - self.nn_y_pad
-                    y1p = y1 + self.nn_y_pad
-                    z0p = z0 - self.nn_z_pad
-                    z1p = z1 + self.nn_z_pad
-                    input_volume = Volume(x0p, y0p, z0p,
-                                          x1p - x0p, y1p - y0p, z1p - z0p)
-                    ctask = self.factory.gen_classify_task(
-                        datasets=datasets,
-                        img_volume=input_volume,
-                        output_volume=output_volume,
-                        dataset_name=IMG_DATASET,
-                        classifier_path=self.pixel_classifier_path,
-                        src_task=btask)
-                    ctask.priority = self.compute_task_priority(x0, y0, z0)
-                    self.tasks.append(ctask)
-                    #
-                    # Create shims for all channels
-                    #
-                    for channel in datasets.values():
-                        shim_task = ClassifyShimTask.make_shim(
-                            classify_task=ctask,
-                            dataset_name=channel)
-                        self.datasets[shim_task.output().path] = shim_task
-                        self.tasks.append(shim_task)
+                datasets = {
+                    self.synapse_class_name: SYNAPSE_DATASET
+                }
+            for zi in range(self.ncl_z[idx]):
+                for yi in range(self.ncl_y[idx]):
+                    for xi in range(self.ncl_x[idx]):
+                        x0 = self.cl_xs[idx][xi]
+                        x1 = self.cl_xe[idx][xi]
+                        y0 = self.cl_ys[idx][yi]
+                        y1 = self.cl_ye[idx][yi]
+                        z0 = self.cl_zs[idx][zi]
+                        z1 = self.cl_ze[idx][zi]
+                        output_volume = Volume(x0, y0, z0, 
+                                               x1-x0, y1-y0, z1-z0)
+                        x0p = x0 - self.nn_x_pad[idx]
+                        x1p = x1 + self.nn_x_pad[idx]
+                        y0p = y0 - self.nn_y_pad[idx]
+                        y1p = y1 + self.nn_y_pad[idx]
+                        z0p = z0 - self.nn_z_pad[idx]
+                        z1p = z1 + self.nn_z_pad[idx]
+                        input_volume = Volume(x0p, y0p, z0p,
+                                              x1p - x0p, y1p - y0p, z1p - z0p)
+                        ctask = self.factory.gen_classify_task(
+                            datasets=datasets,
+                            img_volume=input_volume,
+                            output_volume=output_volume,
+                            dataset_name=IMG_DATASET,
+                            classifier_path=classifier_path,
+                            environment_id=environment_id)
+                        ctask.priority = self.compute_task_priority(x0, y0, z0)
+                        self.tasks.append(ctask)
+                        #
+                        # Create shims for all channels
+                        #
+                        for channel in datasets.values():
+                            shim_task = ClassifyShimTask.make_shim(
+                                classify_task=ctask,
+                                dataset_name=channel)
+                            self.datasets[shim_task.output().path] = shim_task
+                            self.tasks.append(shim_task)
                     #
                     # If we are using affinity, then aggregate over the
                     # three affinity channels
                     #
-                    if self.wants_affinity_segmentation:
+                    if self.wants_affinity_segmentation and\
+                       self.wants_affinity_aggregation:
                         affinity_task = \
                             self.factory.gen_aggregate_loading_plan_tasks(
                                 volume=output_volume,
@@ -2644,6 +2735,8 @@ class PipelineTaskMixin:
                 "Loading pixel classifier")
             self.pixel_classifier = PixelClassifierTarget(
                 self.pixel_classifier_path)
+            self.synapse_classifier = PixelClassifierTarget(
+                self.synapse_classifier_path)
             rh_logger.logger.report_event(
                 "Computing blocks")
             self.compute_extents()

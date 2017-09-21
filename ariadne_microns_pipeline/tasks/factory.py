@@ -228,7 +228,7 @@ class AMTaskFactory(object):
 
     def gen_classify_task(
         self, datasets, img_volume, output_volume, dataset_name, 
-        classifier_path, src_task=None):
+        classifier_path, environment_id, src_task=None):
         '''Classify a volume
 
         :param datasets: a dictionary with keys of the class indexes or names
@@ -241,6 +241,8 @@ class AMTaskFactory(object):
         cropped at the borders.
         :param dataset_name: the name of the dataset type, e.g. "image"
         :param classifier_path: path to a pickled classifer
+        :param environment_id: the ID of the worker environment to use
+        for this classifier.
         :param src_task: preferred source for image data
         '''
         datasets = to_hashable(datasets)
@@ -278,7 +280,8 @@ class AMTaskFactory(object):
                                image_loading_plan=loading_plan,
                                prob_plans=to_hashable(prob_plans),
                                class_names=datasets,
-                               done_file=done_file_location))
+                               done_file=done_file_location,
+                               environment_id=environment_id))
         #
         # Register the datasets
         #
