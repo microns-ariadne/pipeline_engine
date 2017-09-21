@@ -8,6 +8,7 @@ Code derived from example at above. Thank you Daniel Lundin
 import argparse
 import cPickle
 import gc
+import logging
 import rh_logger
 import sys
 import time
@@ -130,6 +131,9 @@ def main():
                     next_heartbeat = 0
                     heartbeat_timeout = time.time() + args.heartbeat_interval
                 except:
+                    rh_logger.logger.report_event(
+                        "Error while running %s" % repr(frames),
+                        log_level=logging.ERROR)
                     rh_logger.logger.report_exception()
                     e = sys.exc_info()[1]
                     frames = [client, "", SP_EXCEPTION, cPickle.dumps(e)]
