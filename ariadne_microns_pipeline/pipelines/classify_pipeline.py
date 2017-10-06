@@ -18,6 +18,10 @@ from ..targets.classifier_target import PixelClassifierTarget
 from ..volumedb import VolumeDB, Persistence, UINT8
 import rh_logger
 
+BUTTERFLY_PRIORITY = 0
+BOSS_PRIORITY = 1
+CLASSIFIER_PRIORITY = 2
+
 class ClassifyPipelineTask(luigi.Task):
     task_namespace='ariadne_microns_pipeline'
     volume = VolumeParameter(
@@ -83,6 +87,33 @@ class ClassifyPipelineTask(luigi.Task):
         for channel_name in ct.classifier.get_class_names():
             self.volume_db.register_dataset_type(
                 channel_name, Persistence.Temporary, UINT8)
+    
+    def compute_task_priority(self, volume, base_priority):
+        '''Get the priority of a task based on its position in the volume
+        
+        The idea here is to prioritize tasks closest to the origin in order
+        to get contiguous tasks to be scheduled consecutively or concurrently.
+        
+        :param volume: the volume that the task operates on
+        :param base_priority: a baseline priority multiplier to proiritize
+                              the task by its type or category
+        '''
+        dx = volume.x - self.volume.x
+        dy = volume.y - self.volume.y
+        dz = volume.z - self.volume.z
+        d = int(np.sqrt(dx*dx + dy*dy + dz * dz))
+        return self.max_task_priority * (base_priority+1) - d
+    
+    @property
+    def max_task_priority(self):
+        '''The maximum priority that would be returned by compute_task_priority
+        
+        '''
+        dx = self.volume.x1 - self.volume.x
+        dy = self.volume.y1 - self.volume.y
+        dz = self.volume.z1 - self.volume.z
+        d = int(np.sqrt(dx*dx + dy*dy + dz * dz))
+        return ((d+9999) / 10000) * 10000
     
     def compute_extents(self):
         butterfly = LocalButterflyChannelTarget(
@@ -234,10 +265,12 @@ class ClassifyPipelineTask(luigi.Task):
                             self.classifier_xei[xi] - self.classifier_xsi[xi],
                             self.classifier_yei[yi] - self.classifier_ysi[yi],
                             self.classifier_zei[zi] - self.classifier_zsi[zi])
+            priority = self.compute_task_priority(volume, BUTTERFLY_PRIORITY)
             task = self.factory.gen_local_butterfly_task(
                 self.butterfly_index_file,
                 volume,
                 IMG_DATASET)
+            task.priority = priority
             self.datasets[task.output().path] = task
             self.tasks.append(task)
     
@@ -268,6 +301,8 @@ class ClassifyPipelineTask(luigi.Task):
                 dataset_name=IMG_DATASET,
                 classifier_path = self.classifier,
                 environment_id=self.environment_id)
+            ctask.priority = self.compute_task_priority(input_volume,
+                                                        CLASSIFIER_PRIORITY)
             self.tasks.append(ctask)
             for channel_name in classifier.get_class_names():
                 shim_task = ClassifyShimTask.make_shim(
@@ -275,6 +310,7 @@ class ClassifyPipelineTask(luigi.Task):
                     dataset_name=channel_name)    
                 self.datasets[shim_task.output().path] = shim_task
                 self.tasks.append(shim_task)
+                shim_task.priority = ctask.priority
     
     def generate_boss_tasks(self):
         class_names = self.classifier_target().classifier.get_class_names()
@@ -308,6 +344,7 @@ class ClassifyPipelineTask(luigi.Task):
                 output_dtype="uint8",
                 pattern=pattern,
                 done_file=done_file)
+            task.priority = self.compute_task_priority(volume, BOSS_PRIORITY)
             self.tasks.append(task)
             self.shard_tasks[dataset_name].append(task)
             self.requirements.append(task)
