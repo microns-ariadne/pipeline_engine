@@ -5,6 +5,7 @@ import luigi
 import numpy as np
 import rh_logger
 from scipy.ndimage import grey_dilation, grey_erosion, center_of_mass
+from scipy.ndimage import minimum_position
 from scipy.sparse import coo_matrix
 from scipy.spatial import KDTree
 import time
@@ -84,6 +85,19 @@ class ConnectSynapsesRunMixin:
         description="If true, only count pixels along the edge of the "
         "synapse, otherwise consider overlap between the whole synapse "
         "and neurons")
+    x_nm = luigi.FloatParameter(
+        default=4.0,
+        description="size of a voxel in the x direction")
+    y_nm = luigi.FloatParameter(
+        default=4.0,
+        description="size of a voxel in the y direction")
+    z_nm = luigi.FloatParameter(
+        default=30.0,
+        description="size of a voxel in the z direction")
+    distance_from_centroid = luigi.FloatParameter(
+        default=70.0,
+        description="Ideal distance from centroid marker of markers for "
+                    "neuron positiions")
     
     def report_empty_result(self):
         '''Report a result with no synapses.'''
@@ -261,7 +275,6 @@ class ConnectSynapsesRunMixin:
             yc = ys[synapses] / areas[synapses]
             zc = zs[synapses] / areas[synapses]
             #
-            #
             # Record the synapse coords. "synapse_centers" goes from 1 to
             # N so that is why we subtract 1 below.
             #
@@ -269,10 +282,44 @@ class ConnectSynapsesRunMixin:
                 x=xc.tolist(),
                 y=yc.tolist(),
                 z=zc.tolist())
+            #
+            # Compute the point in n1 that is closest to the synapse center
+            #
+            n1_per_synapse = np.zeros(maxsynapses, np.uint32)
+            n1_per_synapse[synapses] = neuron_1
+            idx_per_synapse = np.zeros(maxsynapses, np.uint32)
+            idx_per_synapse[synapses] = np.arange(len(synapses))
+            n1z, n1y, n1x = np.where(n1_per_synapse[synapse] == neuron)
+            n1_idxs = idx_per_synapse[synapse[n1z, n1y, n1x]]
+            d = np.sqrt(((n1z - zc[n1_idxs]) * self.z_nm)**2 +
+                        ((n1y - yc[n1_idxs]) * self.y_nm)**2 +
+                        ((n1x - xc[n1_idxs]) * self.x_nm)**2)
+            n1_idx = np.array(
+                minimum_position(np.abs(d - self.distance_from_centroid),
+                                 synapse[n1z, n1y, n1x], 
+                                 synapses)).flatten()
+            xn1, yn1, zn1 = n1x[n1_idx], n1y[n1_idx], n1z[n1_idx]
+            n1_center_dict = \
+                dict(x=xn1.tolist(), y=yn1.tolist(), z=zn1.tolist())
+            n2_per_synapse = np.zeros(maxsynapses, np.uint32)
+            n2_per_synapse[synapses] = neuron_2
+            n2z, n2y, n2x = np.where(n2_per_synapse[synapse] == neuron)
+            n2_idxs = idx_per_synapse[synapse[n2z, n2y, n2x]]
+            d = np.sqrt(((n2z - zc[n2_idxs]) * self.z_nm)**2 +
+                        ((n2y - yc[n2_idxs]) * self.y_nm)**2 +
+                        ((n2x - xc[n2_idxs]) * self.x_nm)**2)
+            n2_idx = np.array(
+                minimum_position(np.abs(d - self.distance_from_centroid), 
+                                 synapse[n2z, n2y, n2x], 
+                                 synapses)).flatten()
+            xn2, yn2, zn2 = n2x[n2_idx], n2y[n2_idx], n2z[n2_idx]
+            n2_center_dict = \
+                dict(x=xn2.tolist(), y=yn2.tolist(), z=zn2.tolist())
         else:
             neuron_1 = neuron_2 = synapses = np.zeros(0, int)
             score_1 = score_2 = np.zeros(0)
-            synapse_center_dict = dict(x=[], y=[], z=[])
+            synapse_center_dict = n1_center_dict = n2_center_dict = \
+                dict(x=[], y=[], z=[])
         volume = dict(x=neuron_target.volume.x,
                       y=neuron_target.volume.y,
                       z=neuron_target.volume.z,
@@ -283,7 +330,9 @@ class ConnectSynapsesRunMixin:
                       neuron_1=neuron_1.tolist(),
                       neuron_2=neuron_2.tolist(),
                       synapse=synapses.tolist(),
-                      synapse_centers=synapse_center_dict)
+                      synapse_centers=synapse_center_dict,
+                      neuron_1_centers=n1_center_dict,
+                      neuron_2_centers=n2_center_dict)
         if transmitter_target != None:
             result["transmitter_score_1"] = score_1.tolist()
             result["transmitter_score_2"] = score_2.tolist()
@@ -346,6 +395,12 @@ class AggregateSynapseConnectionsRunMixin:
         synapse_center_x = []
         synapse_center_y = []
         synapse_center_z = []
+        neuron_1_center_x = []
+        neuron_1_center_y = []
+        neuron_1_center_z = []
+        neuron_2_center_x = []
+        neuron_2_center_y = []
+        neuron_2_center_z = []
         volumes = []
         volume_idx = []
         for idx, synapse_tgt in enumerate(synapse_tgts):
@@ -363,16 +418,33 @@ class AggregateSynapseConnectionsRunMixin:
             sx = np.array(synapse_dict["synapse_centers"]["x"])+volume.x
             sy = np.array(synapse_dict["synapse_centers"]["y"])+volume.y
             sz = np.array(synapse_dict["synapse_centers"]["z"])+volume.z
+            n1x = np.array(synapse_dict["neuron_1_centers"]["x"])+volume.x
+            n1y = np.array(synapse_dict["neuron_1_centers"]["y"])+volume.y
+            n1z = np.array(synapse_dict["neuron_1_centers"]["z"])+volume.z
+            n2x = np.array(synapse_dict["neuron_2_centers"]["x"])+volume.x
+            n2y = np.array(synapse_dict["neuron_2_centers"]["y"])+volume.y
+            n2z = np.array(synapse_dict["neuron_2_centers"]["z"])+volume.z
             neuron_1.append(n1)
             neuron_2.append(n2)
             synapse_center_x.append(sx)
             synapse_center_y.append(sy)
             synapse_center_z.append(sz)
+            neuron_1_center_x.append(n1x)
+            neuron_1_center_y.append(n1y)
+            neuron_1_center_z.append(n1z)
+            neuron_2_center_x.append(n2x)
+            neuron_2_center_y.append(n2y)
+            neuron_2_center_z.append(n2z)
             volume_idx.append([idx] * len(n1))
         volume_idx, neuron_1, neuron_2, \
-            synapse_center_x, synapse_center_y, synapse_center_z = \
-            map(np.hstack, [volume_idx, neuron_1, neuron_2, synapse_center_x, 
-                            synapse_center_y, synapse_center_z])
+            synapse_center_x, synapse_center_y, synapse_center_z, \
+            neuron_1_center_x, neuron_1_center_y, neuron_1_center_z, \
+            neuron_2_center_x, neuron_2_center_y, neuron_2_center_z = \
+            map(np.hstack, [
+                volume_idx, neuron_1, neuron_2, 
+                synapse_center_x, synapse_center_y, synapse_center_z,
+                neuron_1_center_x, neuron_1_center_y, neuron_1_center_z,
+                neuron_2_center_x, neuron_2_center_y, neuron_2_center_z])
         #
         # We pick the synapse farthest from the edge when eliminating.
         # The following code computes the distance to the edge
@@ -416,25 +488,41 @@ class AggregateSynapseConnectionsRunMixin:
             to_remove = np.unique(np.hstack(
                  [pairs[first_is_best, 1], pairs[~ first_is_best, 0]]))
             neuron_1, neuron_2, \
-                synapse_center_x, synapse_center_y, synapse_center_z = \
+                synapse_center_x, synapse_center_y, synapse_center_z, \
+                neuron_1_center_x, neuron_1_center_y, neuron_1_center_z, \
+                neuron_2_center_x, neuron_2_center_y, neuron_2_center_z = \
                 [np.delete(_, to_remove) for _ in 
                  neuron_1, neuron_2, 
-                 synapse_center_x, synapse_center_y, synapse_center_z]
+                 synapse_center_x, synapse_center_y, synapse_center_z,
+                 neuron_1_center_x, neuron_1_center_y, neuron_1_center_z,
+                 neuron_2_center_x, neuron_2_center_y, neuron_2_center_z]
         #
         # Make the dictionaries.
         #
-        neuron_1, neuron_2, synapse_center_x, synapse_center_y, \
-            synapse_center_z = [
+        neuron_1, neuron_2, \
+            synapse_center_x, synapse_center_y, synapse_center_z, \
+            neuron_1_center_x, neuron_1_center_y, neuron_1_center_z, \
+            neuron_2_center_x, neuron_2_center_y, neuron_2_center_z = [
                 _.tolist() for _ in
-                neuron_1, neuron_2, synapse_center_x, synapse_center_y,
-                synapse_center_z]
+                neuron_1, neuron_2, 
+                synapse_center_x, synapse_center_y, synapse_center_z,
+                neuron_1_center_x, neuron_1_center_y, neuron_1_center_z,
+                neuron_2_center_x, neuron_2_center_y, neuron_2_center_z]
         result = dict(
             neuron_1 = neuron_1,
             neuron_2 = neuron_2,
             synapse_center=dict(
                 x=synapse_center_x,
                 y=synapse_center_y,
-                z=synapse_center_z))
+                z=synapse_center_z),
+            neuron_1_center=dict(
+                x=neuron_1_center_x,
+                y=neuron_1_center_y,
+                z=neuron_1_center_z),
+            neuron_2_center=dict(
+                x=neuron_2_center_x,
+                y=neuron_2_center_y,
+                z=neuron_2_center_z)        )
         with self.output().open("w") as fd:
             json.dump(result, fd)
 
