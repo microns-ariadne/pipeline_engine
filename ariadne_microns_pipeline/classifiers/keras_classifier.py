@@ -158,7 +158,7 @@ class KerasClassifier(AbstractPixelClassifier):
         logger.report_event("Acquired GPU %d" % device)
         cls.has_bound_cuda=True
     
-    def __load_model__(self):
+    def _load_model(self):
         if self.model_loaded:
             return
         key = tuple([(path, os.stat(path).st_mtime)
@@ -580,7 +580,7 @@ class KerasClassifier(AbstractPixelClassifier):
         '''Run a thread to process predictions'''
         try:
             self.__bind_cuda()
-            self.__load_model__()
+            self._load_model()
             if not hasattr(self, "function"):
                 t0 = time.time()
                 self.function = cPickle.loads(self.function_pickle)
