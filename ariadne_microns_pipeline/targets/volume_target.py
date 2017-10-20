@@ -172,7 +172,7 @@ class SrcVolumeTarget(luigi.LocalTarget):
         self.storage_plan_path = state
         done_file = SrcVolumeTarget.storage_plan_path_to_done_file(
             self.storage_plan_path)
-        super(VolumeTarget, self).__init__(done_file)
+        super(SrcVolumeTarget, self).__init__(done_file)
     
     @staticmethod
     def storage_plan_path_to_done_file(storage_plan_path):
