@@ -932,7 +932,7 @@ class PipelineTaskMixin:
     def generate_butterfly_tasks(self):
         '''Get volumes padded for classifier'''
         self.butterfly_tasks = np.zeros(
-            (self.ncl_z[MIDX], self.ncl_y[MIDX], self.ncl_x[MIDX]), object)
+            (self.n_bz, self.n_by, self.n_bx), object)
         for zi in range(self.n_bz):
             z0 = self.bzs[zi]
             z1 = self.bze[zi]
