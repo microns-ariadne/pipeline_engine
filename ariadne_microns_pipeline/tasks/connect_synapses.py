@@ -264,7 +264,7 @@ class ConnectSynapsesRunMixin:
             edge_z, edge_y, edge_x = np.where(
                 (synapse != 0) & 
                 (grey_dilation(neuron, size=3) != grey_erosion(neuron, size=3)))
-            maxsynapses = np.max(synapses)+1
+            maxsynapses = np.max(synapse_labels)+1
             areas = np.bincount(synapse[edge_z, edge_y, edge_x], 
                                 minlength=maxsynapses)
             xs, ys, zs = [
@@ -285,6 +285,7 @@ class ConnectSynapsesRunMixin:
             #
             # Compute the point in n1 that is closest to the synapse center
             #
+            
             n1_per_synapse = np.zeros(maxsynapses, np.uint32)
             n1_per_synapse[synapses] = neuron_1
             idx_per_synapse = np.zeros(maxsynapses, np.uint32)
