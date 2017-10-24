@@ -832,15 +832,17 @@ class PipelineTaskMixin:
         #
         # Compute exact block sizes for the classifier w/o overlap
         #
-        for idx, block_width, block_height, block_depth in (
+        for idx, block_width, block_height, block_depth, name in (
             (MIDX, 
              self.classifier_block_width, 
              self.classifier_block_height,
-             self.classifier_block_depth),
+             self.classifier_block_depth,
+             MEMBRANE_DATASET),
             (SIDX,
              self.synapse_classifier_block_width,
              self.synapse_classifier_block_height,
-             self.synapse_classifier_block_depth)):
+             self.synapse_classifier_block_depth,
+             SYNAPSE_DATASET)):
             self.ncl_x.append(
                 int((self.useable_width-1) / block_width) + 1)
             self.ncl_y.append(
@@ -856,6 +858,24 @@ class PipelineTaskMixin:
             self.cl_zs.append(
                 self.z0 + block_depth * np.arange(self.ncl_z[idx]))
             self.cl_ze.append(self.cl_zs[idx] + block_depth)
+            #
+            # Fix up the last block so that it ends at the volume boundary
+            #
+            self.cl_xe[-1] = self.x1
+            self.cl_xs[-1] = self.x1 - block_width
+            self.cl_ye[-1] = self.y1
+            self.cl_ys[-1] = self.y1 - block_height
+            self.cl_ze[-1] = self.z1
+            self.cl_zs[-1] = self.z1 - block_depth
+            rh_logger.logger.report_event(
+                "---------- %s classifier blocks ----------" % name)
+            for dim, s, e in (("X", self.cl_xs, self.cl_xe),
+                              ("Y", self.cl_ys, self.cl_ye),
+                              ("Z", self.cl_zs, self.cl_ze)):
+                b = " ".join(
+                        ["%d:%d" % (ss, ee)  for ss, ee in zip(s, e)])
+                rh_logger.logger.report_event(
+                    "    %s: %s" %  (dim, b))
         #
         # Compute block sizes for Butterfly
         #
@@ -877,6 +897,15 @@ class PipelineTaskMixin:
         tmp = np.linspace(self.bz0, self.bz1, self.n_bz+1).astype(int)
         self.bzs = tmp[:-1]
         self.bze = tmp[1:]
+        rh_logger.logger.report_event(
+            "---------- butterfly blocks ----------")
+        for dim, s, e in (("X", self.bxs, self.bxe),
+                          ("Y", self.bys, self.bye),
+                          ("Z", self.bzs, self.bze)):
+            b = " ".join(
+                    ["%d:%d" % (ss, ee)  for ss, ee in zip(s, e)])
+            rh_logger.logger.report_event(
+                "    %s: %s" %  (dim, b))
         #
         # Compute # of blocks for segmentation and beyond. We need at least
         # the Neuroproof padding between n-1 blocks.
@@ -896,6 +925,15 @@ class PipelineTaskMixin:
         self.zs = np.linspace(self.z0, self.z1 - self.np_z_pad, self.n_z, 
                               endpoint=False).astype(int)
         self.ze = np.minimum(self.zs + self.block_depth, self.z1)
+        rh_logger.logger.report_event(
+            "---------- segmentation blocks ----------")
+        for dim, s, e in (("X", self.xs, self.xe),
+                          ("Y", self.ys, self.ye),
+                          ("Z", self.zs, self.ze)):
+            b = " ".join(
+                    ["%d:%d" % (ss, ee)  for ss, ee in zip(s, e)])
+            rh_logger.logger.report_event(
+                "    %s: %s" %  (dim, b))
         #
         # The first and last valid blocks start and end at the extents.
         # The intermediate blocks start and end midway between the overlap
