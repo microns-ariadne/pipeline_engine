@@ -861,19 +861,19 @@ class PipelineTaskMixin:
             #
             # Fix up the last block so that it ends at the volume boundary
             #
-            self.cl_xe[-1] = self.x1
-            self.cl_xs[-1] = self.x1 - block_width
-            self.cl_ye[-1] = self.y1
-            self.cl_ys[-1] = self.y1 - block_height
-            self.cl_ze[-1] = self.z1
-            self.cl_zs[-1] = self.z1 - block_depth
+            self.cl_xe[idx][-1] = self.x1
+            self.cl_xs[idx][-1] = self.x1 - block_width
+            self.cl_ye[idx][-1] = self.y1
+            self.cl_ys[idx][-1] = self.y1 - block_height
+            self.cl_ze[idx][-1] = self.z1
+            self.cl_zs[idx][-1] = self.z1 - block_depth
             rh_logger.logger.report_event(
                 "---------- %s classifier blocks ----------" % name)
             for dim, s, e in (("X", self.cl_xs, self.cl_xe),
                               ("Y", self.cl_ys, self.cl_ye),
                               ("Z", self.cl_zs, self.cl_ze)):
                 b = " ".join(
-                        ["%d:%d" % (ss, ee)  for ss, ee in zip(s, e)])
+                        ["%d:%d" % (ss, ee)  for ss, ee in zip(s[idx], e[idx])])
                 rh_logger.logger.report_event(
                     "    %s: %s" %  (dim, b))
         #
