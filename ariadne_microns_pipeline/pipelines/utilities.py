@@ -30,6 +30,9 @@ class PipelineRunReportMixin:
     
     def run(self):
         '''Compile the task history'''
+        if not hasattr(rh_logger.logger, "logger"):
+            rh_logger.logger.start_process("Luigi", "Starting logging")
+        
         if hasattr(self, "ariadne_run"):
             self.ariadne_run()
         matplotlib.use("Pdf")
