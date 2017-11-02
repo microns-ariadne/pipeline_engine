@@ -121,7 +121,7 @@ class KerasClassifier(AbstractPixelClassifier):
             return
         if "MICRONS_IPC_WORKER_GPU" in os.environ:
             device = int(os.environ["MICRONS_IPC_WORKER_GPU"])
-            os.environ["THEANO_FLAGS"]="device=gpu%d" % device
+            os.environ["THEANO_FLAGS"]="device=cuda%d" % device
             return
         import keras
         if KerasClassifier.__keras_backend() != 'theano':
@@ -136,10 +136,9 @@ class KerasClassifier(AbstractPixelClassifier):
         # A typical line of output:
         #      GPU 0: GeForce GTX TITAN X ...
         #
-        import theano.sandbox.cuda
         if "MICRONS_IPC_WORKER_GPU" in os.environ:
             device = int(os.environ["MICRONS_IPC_WORKER_GPU"])
-            theano.sandbox.cuda.use("gpu%d" % device, force=True)
+            os.environ["THEANO_FLAGS"]="device=cuda%d" % device
         else:
             nvidia_smi_output = subprocess.check_output(["nvidia-smi", "-L"])
             for line in nvidia_smi_output.split("\n"):
@@ -148,7 +147,8 @@ class KerasClassifier(AbstractPixelClassifier):
                     continue
                 device = int(match.group(1))
                 try:
-                    theano.sandbox.cuda.use("gpu%d" % device, force=True)
+                    os.environ["THEANO_FLAGS"]="device=cuda%d" % device
+                    import keras
                     break
                 except:
                     continue
