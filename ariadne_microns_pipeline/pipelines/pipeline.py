@@ -1256,8 +1256,14 @@ class PipelineTaskMixin:
 
     def get_neuroproof_channel_names(self):
         '''Return the dataset names of the inputs to Neuroproof'''
-        prob_dataset_name = MEMBRANE_DATASET
-        additional_dataset_names = self.additional_neuroproof_channels
+        if self.wants_affinity_segmentation and \
+           not self.wants_affinity_aggregation:
+            prob_dataset_name = Z_AFFINITY_DATASET
+            additional_dataset_names = (Y_AFFINITY_DATASET, X_AFFINITY_DATASET)
+            return prob_dataset_name, additional_dataset_names
+        else:
+            prob_dataset_name = MEMBRANE_DATASET
+            additional_dataset_names = self.additional_neuroproof_channels
         return prob_dataset_name, additional_dataset_names
     
     def generate_gt_cutouts(self):
