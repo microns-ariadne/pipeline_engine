@@ -118,10 +118,11 @@ class NeuroproofRunMixin:
         seg_result = pool.apply_async(
             write_seg_volume,
             args=(h5file, seg_volume, "segmentation"))
+        duplicate = None if len(additional_maps) > 0 else False
         prob_result = pool.apply_async(
             write_prob_volume,
             args=(prob_volume, additional_maps, probfile, "probabilities", 
-                  False))
+                  duplicate))
         pool.close()
         pool.join()
         seg_result.get()

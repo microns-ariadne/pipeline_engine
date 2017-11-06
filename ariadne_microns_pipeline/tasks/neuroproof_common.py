@@ -57,11 +57,12 @@ def write_prob_volume(prob_target, additional_map_targets, pred_path,
                       neuroproof_graph_learn. False for z, y, x, c volumes
                       for Neuroproof_stack.
     :param duplicate: if True, duplicate the first (membrane) channel
-    as the second channel. If False, invert it.
+    as the second channel. If False, invert it. If None, don't use one.
     '''
     prob_volume = prob_target.imread().astype(np.float32) / 255.
-    prob_volume = [prob_volume, 
-                   prob_volume if duplicate else 1-prob_volume]
+    if duplicate is not None:
+        prob_volume = [prob_volume, 
+                       prob_volume if duplicate else 1-prob_volume]
     for tgt in additional_map_targets:
         prob_volume.append(tgt.imread().astype(np.float32) / 255.)
     prob_volume = np.array(prob_volume)
