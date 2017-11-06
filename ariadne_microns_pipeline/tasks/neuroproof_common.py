@@ -41,7 +41,7 @@ def write_seg_volume(watershed_path, seg_target, dataset_name):
     :param dataset_name: the HDF5 dataset's key name
     '''
     with h5py.File(watershed_path, "w") as fd:
-        seg_volume = seg_target.imread().astype(np.int32)
+        seg_volume = seg_target.imread().astype(np.uint32)
         fd.create_dataset(dataset_name, data=seg_volume)
 
 def write_prob_volume(prob_target, additional_map_targets, pred_path, 
@@ -59,10 +59,9 @@ def write_prob_volume(prob_target, additional_map_targets, pred_path,
     :param duplicate: if True, duplicate the first (membrane) channel
     as the second channel. If False, invert it. If None, don't use one.
     '''
-    prob_volume = prob_target.imread().astype(np.float32) / 255.
+    prob_volume = [prob_target.imread().astype(np.float32) / 255.]
     if duplicate is not None:
-        prob_volume = [prob_volume, 
-                       prob_volume if duplicate else 1-prob_volume]
+        prob_volume.append(prob_volume if duplicate else 1-prob_volume)
     for tgt in additional_map_targets:
         prob_volume.append(tgt.imread().astype(np.float32) / 255.)
     prob_volume = np.array(prob_volume)

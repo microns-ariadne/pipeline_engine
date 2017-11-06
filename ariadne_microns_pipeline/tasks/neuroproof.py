@@ -106,10 +106,10 @@ class NeuroproofRunMixin:
         # Write the segmentation and membrane probabilities to one
         # big temporary hdf5 file
         #
-        inputs = self.input()
-        prob_volume = inputs.next()
-        seg_volume = inputs.next()
-        additional_maps = list(inputs)
+        prob_volume = DestVolumeReader(self.prob_loading_plan_path)
+        seg_volume = DestVolumeReader(self.input_seg_loading_plan_path)
+        additional_maps = \
+            [DestVolumeReader(_) for _ in self.additional_loading_plan_paths]
         h5file = tempfile.mktemp(".h5")
         probfile = tempfile.mktemp(".h5")
         rh_logger.logger.report_event("Neuroproof watershed: %s" % h5file)
@@ -122,7 +122,7 @@ class NeuroproofRunMixin:
         prob_result = pool.apply_async(
             write_prob_volume,
             args=(prob_volume, additional_maps, probfile, "probabilities", 
-                  duplicate))
+                  False, duplicate))
         pool.close()
         pool.join()
         seg_result.get()
@@ -344,7 +344,11 @@ class NeuroproofRunMixin:
         
         arguments = [self.neuroproof,
                      "-watershed", self.input_seg_loading_plan_path,
-                     "-prediction", self.prob_loading_plan_path,
+                     "-prediction", self.prob_loading_plan_path]
+        for path in self.additional_loading_plan_paths:
+            arguments.append("-prediction")
+            arguments.append(path)
+        arguments += [
                      "-classifier", self.classifier_filename,
                      "-output", self.storage_plan,
                      "-threshold", str(self.threshold),
