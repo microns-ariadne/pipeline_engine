@@ -26,7 +26,7 @@ class NeuroproofTaskMixin(DatasetMixin):
     prob_loading_plan_path = luigi.Parameter(
         description="Location of the membrane probability dataset. "
         "Note: the probabilities can't be sharded.")
-    additional_loading_plan_paths = luigi.Parameter(
+    additional_loading_plan_paths = luigi.ListParameter(
         default=[],
         description="Locations of additional probability maps "
         "to aid Neuroproof")
