@@ -268,6 +268,8 @@ class ConnectSynapsesRunMixin:
                 synapse_score = \
                     (tscore_1 + rscore_2) * (1 - flippers_mult) + \
                     (tscore_2 + rscore_1) * flippers_mult
+            else:
+                synapse_score = np.zeros(len(neuron_1))
             #
             # Recompute the centroids of the synapses based on where they
             # intersect the edge of neuron_1. This is closer to what people
