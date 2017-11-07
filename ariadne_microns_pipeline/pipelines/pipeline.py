@@ -642,7 +642,7 @@ class PipelineTaskMixin:
         
         parameters: a dictionary of the pipeline's parameters
         '''
-        d = dict(self.additional_metadata)
+        d = dict(self.additional_metadata.items())
         params = {}
         for key in self.get_param_names():
             v = getattr(self, key, None)
