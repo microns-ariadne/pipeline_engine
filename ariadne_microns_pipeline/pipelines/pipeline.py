@@ -2982,6 +2982,11 @@ class PipelineTaskMixin:
                           dataset=self.dataset,
                           channel=self.channel)
             for storage_plan_path in self.datasets:
+                if not os.path.exists(storage_plan_path):
+                    # This happens when a storage plan has been made
+                    # for an unneeded dependency, e.g. synapses when
+                    # the synapse-statistics file wasn't specified
+                    continue
                 storage_plan = json.load(open(storage_plan_path))
                 dataset_name = storage_plan["dataset_name"] 
                 if dataset_name not in result:
