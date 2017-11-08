@@ -41,7 +41,8 @@ class KerasClassifier(AbstractPixelClassifier):
                  split_positive_negative=False,
                  normalize_offset=None,
                  normalize_saturation_level=None,
-                 transpose=(None, None, 0, 1, 2)):
+                 transpose=(None, None, 0, 1, 2),
+                 batch_count=1):
         '''Initialize from a model and weights
         
         :param model_path: path to JSON model file suitable for 
@@ -83,6 +84,7 @@ class KerasClassifier(AbstractPixelClassifier):
         (0, None, 1, 2) and 5D tensors of (None, 0, None, 1, 2), so the 
         "transpose" parameter is here to give the caller total flexibility
         when constructing the tensor.
+        :param batch_count: # of batches per GPU classifier prediction.
         '''
         self.xypad_size = xypad_size
         self.zpad_size = zpad_size
@@ -102,6 +104,7 @@ class KerasClassifier(AbstractPixelClassifier):
         self.normalize_offset = normalize_offset
         self.normalize_saturation_level = normalize_saturation_level
         self.transpose = transpose
+        self.batch_count = batch_count
 
     @staticmethod
     def __keras_backend():
@@ -232,7 +235,8 @@ class KerasClassifier(AbstractPixelClassifier):
                     split_positive_negative = self.split_positive_negative,
                     normalize_offset=self.normalize_offset,
                     normalize_saturation_level=self.normalize_saturation_level,
-                    transpose=self.transpose)
+                    transpose=self.transpose,
+                    batch_count=self.batch_count)
     
     def __setstate__(self, state):
         '''Restore the state from the pickle'''
@@ -292,6 +296,10 @@ class KerasClassifier(AbstractPixelClassifier):
         else:
             # Legacy - guesstimate the transposition using heuristics
             self.transpose = None
+        if "batch_count" in state:
+            self.batch_count = state["batch_count"]
+        else:
+            self.batch_count = 1
     
     def get_class_names(self):
         return self.classes
@@ -514,15 +522,15 @@ class KerasClassifier(AbstractPixelClassifier):
                         if block.shape[0] == 1:
                             if KerasClassifier.__keras_backend() == 'theano':
                                 block.shape = \
-                                    [1, 1, block.shape[-2], block.shape[-1]]
+                                    [1, block.shape[-2], block.shape[-1]]
                             else:
                                 block.shape = \
-                                    [1, block.shape[-2], block.shape[-1], 1]
+                                    [block.shape[-2], block.shape[-1], 1]
                         else:
                             if KerasClassifier.__keras_backend() == 'theano':
-                                block.shape = [1, 1] + list(block.shape)
+                                block.shape = [1] + list(block.shape)
                             else:
-                                block.shape = [1] + list(block.shape) + [1]
+                                block.shape = list(block.shape) + [1]
                     else:
                         #
                         # The format of the transpose is "None" for an
@@ -538,6 +546,8 @@ class KerasClassifier(AbstractPixelClassifier):
                                 reshape.append(block.shape[slot])
                         transpose = tuple(filter(lambda _:_ is not None,
                                                  self.transpose))
+                        if len(reshape) == 5:
+                            reshape = reshape[1:]
                         if transpose != tuple(sorted(transpose)):
                             block = block.transpose(*transpose)
                         block = block.reshape(*reshape)
@@ -588,14 +598,23 @@ class KerasClassifier(AbstractPixelClassifier):
                 self.function = cPickle.loads(self.function_pickle)
                 logger.report_metric("Function load time", time.time()-t0)
                 del self.function_pickle
+            batches = []
             while True:
                 block, x0b, x1b, y0b, y1b, z0b, z1b = self.pred_queue.get()
+                if block is not None:
+                    batches.append((block, x0b, x1b, y0b, y1b, z0b, z1b))
+                if len(batches) >= self.batch_count or\
+                   (block is None and len(batches) > 0):
+                    t0 = time.time()
+                    pred = self.function(np.array([_[0] for _ in batches]))[0]
+                    delta=(time.time() - t0) / len(batches)
+                    for i, (block, x0b, x1b, y0b, y1b, z0b, z1b) \
+                        in enumerate(batches):
+                        self.out_queue.put(
+                            (pred[i], delta, x0b, x1b, y0b, y1b, z0b, z1b))
+                    batches = []
                 if block is None:
                     break
-                t0 = time.time()
-                pred = self.function(block)[0]
-                delta=time.time() - t0
-                self.out_queue.put((pred, delta, x0b, x1b, y0b, y1b, z0b, z1b))
         except:
             self.exception = sys.exc_value
             logger.report_exception()
