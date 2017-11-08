@@ -169,6 +169,8 @@ class KerasClassifier(AbstractPixelClassifier):
             return
         import keras
         import keras.backend as K
+        if keras.__version__ >= '2.0.0':
+            K.set_image_dim_ordering('th')
         from keras.optimizers import SGD
         from .cropping2d import Cropping2D
         from .depth_to_space import DepthToSpace3D
