@@ -180,3 +180,21 @@ def to_hashable(x):
     #
     assert isinstance(hash(x), int)
     return x
+
+def to_json_serializable(x):
+    '''Convert to JSON-serializable object
+    
+    :param x: object to convert
+    
+    Returns object composed of lists, dictionaries and primitives
+    '''
+    if isinstance(x, (int, float, basestring)):
+        return x
+    if isinstance(x, (list, tuple)):
+        return tuple(map(to_json_serializable, x))
+    if isinstance(x, (FrozenOrderedDict, dict)):
+        return dict([(to_json_serializable(a), to_json_serializable(b))
+                     for a, b in x.items()])
+    if isinstance(x, np.ndarray):
+        return x.tolist()
+    raise ValueError("%s is not json-serializable") % x

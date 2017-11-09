@@ -16,7 +16,7 @@ from scipy.sparse import coo_matrix
 from scipy.sparse.csgraph import connected_components
 
 from .utilities import RequiresMixin, RunMixin, SingleThreadedMixin, \
-     DatasetMixin
+     DatasetMixin, to_json_serializable
 from ..targets import DestVolumeReader, SrcVolumeTarget
 from ..parameters import Volume
 from ..parameters import VolumeParameter
@@ -739,7 +739,8 @@ class AllConnectedComponentsRunMixin:
         d = {}
         d["count"] = n_components
         d["volumes"] = []
-        d["additional_locations"] = self.additional_loading_plans
+        d["additional_locations"] = to_json_serializable(
+            self.additional_loading_plans)
         for volume, m in mappings.items():
             gm = [ (int(a), int(b)) for a, b in zip(m[:, 0], labels[m[:, 1]])]
             d["volumes"].append((dict(volume), gm))
