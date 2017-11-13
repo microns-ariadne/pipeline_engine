@@ -395,10 +395,10 @@ class ZWatershedTaskMixin(DatasetMixin):
     
     def estimate_memory_usage(self):
         '''Return an estimate of bytes of memory required by this task'''
-        v1 = np.prod([1408, 1408, 40])
-        m1 = 10003584 * 1000
-        v2 = np.prod([512, 512, 40])
-        m2 = 1710532 * 1000
+        v1 = np.prod([1625, 1625, 204])
+        m1 = 19345268 * 1000
+        v2 = np.prod([1408, 1408, 145])
+        m2 = 9063256 * 1000
         volume = self.output().volume
         #
         # Model is Ax + B where x is volume in voxels
@@ -425,9 +425,9 @@ class ZWatershedRunMixin:
         volume = np.zeros((3,
                            xtgt.volume.depth,
                            xtgt.volume.height,
-                           xtgt.volume.width), np.float32)
+                           xtgt.volume.width), np.uint8)
         for i, tgt in enumerate((ztgt, ytgt, xtgt)):
-            volume[i] = tgt.imread().astype(np.float32) / 255
+            volume[i] = tgt.imread()
         result = zwatershed.zwatershed(volume, [self.threshold])[0]
         self.output().imwrite(result)
 
