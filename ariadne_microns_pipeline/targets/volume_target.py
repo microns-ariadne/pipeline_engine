@@ -485,8 +485,12 @@ class DestVolumeReader(object):
         for tif_path, subvolume in d["blocks"]:
             yield tif_path, Volume(**subvolume)
     
-    def imread(self):
-        '''Read the volume'''
+    def imread(self, result=None):
+        '''Read the volume
+        
+        :param result: if desired, a proper numpy array ref can be fed in here
+        and imread will write to it, otherwise, the memory is allocated.
+        '''
         t0 = time.time()
         with open(self.loading_plan_path, "r") as fd:
             d = json.load(fd)
@@ -503,7 +507,6 @@ class DestVolumeReader(object):
                 dataset_name,
                 x0, x1, y0, y1, z0, z1))
 
-        result = None
         for tif_path, subvolume in d["blocks"]:
             svolume = Volume(**subvolume)
             if svolume.x >= x1 or\
@@ -520,7 +523,8 @@ class DestVolumeReader(object):
                 
             with tifffile.TiffFile(tif_path) as fd:
                 block = fd.asarray()
-                if svolume.x == x0 and \
+                if result is None and \
+                   svolume.x == x0 and \
                    svolume.x1 == x1 and \
                    svolume.y == y0 and \
                    svolume.y1 == y1 and \
