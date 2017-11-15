@@ -13,9 +13,7 @@ To install the pipeline engine's Python dependency:
     > pip install numpy
     > pip install cython
     > git clone https://github.com/microns-ariadne/pipeline_engine
-    > git checkout use_luigi
     > cd pipeline_engine
-    > git checkout use_luigi
     > pip install --process-dependency-links --trusted-host github.com .
 
 In addition, you will have to compile Neuroproof and install either the Keras
@@ -28,7 +26,6 @@ to add you to the project. Then do the following:
 
     > git clone https://github.com/microns_ariadne/pipeline_engine
     > cd pipeline_engine
-    > git checkout use_luigi
     > conda env create -f conda-install.yaml
     > source activate ariadne_microns_pipeline
     > pip install --process-dependency-links --editable .
@@ -39,31 +36,9 @@ see directions for configuring Theano below
 
 ### Building stand alone version of Neuroproof
 
-The Python Luigi framework installs via standardized mechanisms, e.g.
-'pip install .' from the root directory. Some of the tasks run binaries
-as subprocesses. These are built with the makefile in the root directory.
-This makefile builds a number of dependencies with the CILKplus compiler
-and it builds the compiler itself.
-
-You should create a tools directory to hold these dependencies. The following
-libraries should be installed on your system along with their include files:
-
-libbz2
-libc6-dev-i386
-libfftw
-libhdf5
-libjpeg
-libpng
-libtiff
-libz
-
-Tools required to compile:
-
-cmake
-flex
-bison
-gcc
-make
+The pipeline can be used with several versions of Neuroproof. The 
+pipeline is deployed using the FAST version which can be found here:
+https://github.com/LeeKamentsky/Neuroproof_minimal/tree/lee-multichannel
 
 ### Keras installation
 
