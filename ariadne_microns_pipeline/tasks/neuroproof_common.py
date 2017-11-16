@@ -61,7 +61,7 @@ def write_prob_volume(prob_target, additional_map_targets, pred_path,
     '''
     prob_volume = [prob_target.imread().astype(np.float32) / 255.]
     if duplicate is not None:
-        prob_volume.append(prob_volume if duplicate else 1-prob_volume)
+        prob_volume.append(prob_volume[0] if duplicate else 1-prob_volume[0])
     for tgt in additional_map_targets:
         prob_volume.append(tgt.imread().astype(np.float32) / 255.)
     prob_volume = np.array(prob_volume)
