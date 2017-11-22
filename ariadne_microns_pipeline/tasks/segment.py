@@ -1,5 +1,7 @@
+import logging
 import luigi
 import numpy as np
+import rh_logger
 from scipy.ndimage import gaussian_filter, label
 from scipy.sparse.csgraph import connected_components
 from scipy.sparse import coo_matrix
@@ -414,6 +416,14 @@ class ZWatershedRunMixin:
     threshold=luigi.IntParameter(
         default=40000,
         description="The targeted size threshold for a segment")
+    low = luigi.IntParameter(
+        default=1,
+        description="The low cutoff for the z-watershed - all values "
+        "below are \"don't connect\".")
+    high = luigi.IntParameter(
+        default=254,
+        description="The high cutoff for the z-watershed. All values "
+        "above are \"always connect\".")
     
     def ariadne_run(self):
         import zwatershed
@@ -428,7 +438,8 @@ class ZWatershedRunMixin:
                            xtgt.volume.width), np.uint8)
         for i, tgt in enumerate((ztgt, ytgt, xtgt)):
             tgt.imread(volume[i])
-        result = zwatershed.zwatershed(volume, [self.threshold])[0]
+        result = zwatershed.zwatershed(volume, [self.threshold], 
+                                       LOW=low, HIGH=high)[0]
         self.output().imwrite(result)
 
 class ZWatershedTask(ZWatershedTaskMixin,
@@ -441,4 +452,82 @@ class ZWatershedTask(ZWatershedTaskMixin,
     
     '''
     
+    task_namespace="ariadne_microns_pipeline"
+
+class WaterZTaskMixin(DatasetMixin):
+    
+    volume=VolumeParameter(
+         description="The volume to be segmented")
+    x_prob_loading_plan_path=luigi.Parameter(
+        description="Location of the x probability map")
+    y_prob_loading_plan_path=luigi.Parameter(
+        description="Location of the y probability map")
+    z_prob_loading_plan_path=luigi.Parameter(
+        description="Location of the z probability map")
+
+    def input(self):
+        for loading_plan in self.x_prob_loading_plan_path,\
+            self.y_prob_loading_plan_path, self.z_prob_loading_plan_path:
+            for tgt in DestVolumeReader(loading_plan).get_source_targets():
+                yield tgt
+    
+    def estimate_memory_usage(self):
+        '''Return an estimate of bytes of memory required by this task'''
+        v1 = np.prod([1625, 1625, 204])
+        m1 = 19165868 * 1000
+        v2 = np.prod([1408, 1408, 145])
+        m2 = 10019532 * 1000
+        volume = self.output().volume
+        #
+        # Model is Ax + B where x is volume in voxels
+        #
+        B = (v1 * m2 - v2 * m1) / (v1 - v2)
+        A = (float(m1) - B) / v1
+        v = np.prod([volume.width, volume.height, volume.depth])
+        return int(A * v + B)
+
+class WaterZRunMixin:
+    threshold = luigi.FloatParameter(
+        default=100.,
+        description="The agglomeration threshold")
+    low_threshold = luigi.IntParameter(
+        default=1,
+        description="Never join edges below this threshold")
+    high_threshold = luigi.IntParameter(
+        default=254,
+        description="Always join edges above this threshold")
+    
+    def ariadne_run(self):
+        import waterz
+        xtgt, ytgt, ztgt = [
+            DestVolumeReader(loading_plan) for loading_plan in
+            self.x_prob_loading_plan_path, self.y_prob_loading_plan_path,
+            self.z_prob_loading_plan_path]
+        volume = np.zeros((3,
+                           xtgt.volume.depth,
+                           xtgt.volume.height,
+                           xtgt.volume.width), np.uint8)
+        for i, tgt in enumerate((ztgt, ytgt, xtgt)):
+            tgt.imread(volume[i])
+        volume = volume.astype(np.float32) / 255.
+        result = waterz.agglomerate(
+            volume, [self.threshold],
+            aff_threshold_low=float(self.low_threshold) / 255.,
+            aff_threshold_high=float(self.high_threshold) / 255.).next()
+        self.output().imwrite(result)
+
+class WaterZTask(WaterZTaskMixin,
+                 WaterZRunMixin,
+                 RequiresMixin,
+                 RunMixin,
+                 SingleThreadedMixin,
+                 luigi.Task):
+    '''The WaterZ task segments a volume using x, y and z affinity maps
+
+    This task performs segmentation and agglomeration using the
+    Python package, "waterz". The repo for the package is here:
+    
+    https://github.com/funkey/waterz
+    '''
+
     task_namespace="ariadne_microns_pipeline"
