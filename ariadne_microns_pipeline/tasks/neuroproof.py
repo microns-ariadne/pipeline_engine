@@ -352,7 +352,7 @@ class NeuroproofRunMixin:
                      "-classifier", self.classifier_filename,
                      "-output", self.storage_plan,
                      "-threshold", str(self.threshold),
-                     "-algorithm", "1"
+                     "-algorithm", "1",
                      "-nomito",
                      "-min_region_sz", str(self.watershed_threshold)]
         rh_logger.logger.report_event(
