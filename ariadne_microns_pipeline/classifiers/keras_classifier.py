@@ -42,7 +42,8 @@ class KerasClassifier(AbstractPixelClassifier):
                  normalize_offset=None,
                  normalize_saturation_level=None,
                  transpose=(None, None, 0, 1, 2),
-                 batch_count=1):
+                 batch_count=1,
+                 value_range=None):
         '''Initialize from a model and weights
         
         :param model_path: path to JSON model file suitable for 
@@ -85,6 +86,8 @@ class KerasClassifier(AbstractPixelClassifier):
         "transpose" parameter is here to give the caller total flexibility
         when constructing the tensor.
         :param batch_count: # of batches per GPU classifier prediction.
+        :param value_range: if given, it should be a two-tuple of the range of
+                            values to map into the range, 1-254
         '''
         self.xypad_size = xypad_size
         self.zpad_size = zpad_size
@@ -105,6 +108,7 @@ class KerasClassifier(AbstractPixelClassifier):
         self.normalize_saturation_level = normalize_saturation_level
         self.transpose = transpose
         self.batch_count = batch_count
+        self.value_range = value_range
 
     @staticmethod
     def __keras_backend():
@@ -236,7 +240,8 @@ class KerasClassifier(AbstractPixelClassifier):
                     normalize_offset=self.normalize_offset,
                     normalize_saturation_level=self.normalize_saturation_level,
                     transpose=self.transpose,
-                    batch_count=self.batch_count)
+                    batch_count=self.batch_count,
+                    value_range=self.value_range)
     
     def __setstate__(self, state):
         '''Restore the state from the pickle'''
@@ -300,6 +305,10 @@ class KerasClassifier(AbstractPixelClassifier):
             self.batch_count = state["batch_count"]
         else:
             self.batch_count = 1
+        if "value_range" in state:
+            self.value_range = state["value_range"]
+        else:
+            self.value_range = None
     
     def get_class_names(self):
         return self.classes
@@ -673,9 +682,19 @@ class KerasClassifier(AbstractPixelClassifier):
                 if self.invert:
                     logger.report_event("Inverting output")
                     pred = 1 - pred
-                    
+
+                if self.value_range is not None:
+                    low, high = self.value_range
+                    tmp = np.zeros_like(pred)
+                    tmp[pred >= high] = 255
+                    mask = (pred > low) & (pred < high)
+                    tmp[mask] = 254 * (pred[mask] - low) / (high - low) + 1
+                    pred = tmp
+                    del tmp
+                else:
+                    pred = pred * 255
                 self.out_image[:, z0b:z1b, y0b:y1b, x0b:x1b] = \
-                    (pred * 255).astype(np.uint8)
+                    np.clip(pred, 0, 255).astype(np.uint8)
         except:
             self.exception = sys.exc_value
             logger.report_exception()
