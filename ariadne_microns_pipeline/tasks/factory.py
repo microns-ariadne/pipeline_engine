@@ -34,7 +34,7 @@ from .neuroproof_stitch import NeuroproofStitchTask
 from .nplearn import NeuroproofLearnTask, StrategyEnum
 from .segment import \
      SegmentTask, SegmentCC2DTask, SegmentCC3DTask, UnsegmentTask, \
-     ZWatershedTask
+     ZWatershedTask, WaterZTask
 from .segmentation_statistics import \
      SegmentationStatisticsTask, SegmentationReportTask
 from .skeletonize import SkeletonizeTask
@@ -1461,7 +1461,10 @@ class AMTaskFactory(object):
         x_prob_dataset_name,
         y_prob_dataset_name,
         z_prob_dataset_name,
-        output_dataset_name):
+        output_dataset_name,
+        threshold=40000,
+        low=1,
+        high=254):
         '''Generate a Z-watershed task to segment a volume using affinities
         
         :param volume: the volume to be segmented
@@ -1482,4 +1485,49 @@ class AMTaskFactory(object):
             x_prob_loading_plan_path=xprob_loading_plan,
             y_prob_loading_plan_path=yprob_loading_plan,
             z_prob_loading_plan_path=zprob_loading_plan,
-            storage_plan=storage_plan)))))
+            storage_plan=storage_plan,
+            threshold=threshold,
+            low=low,
+            high=high)))))
+
+    def gen_water_z_task(
+        self,
+        volume,
+        x_prob_dataset_name,
+        y_prob_dataset_name,
+        z_prob_dataset_name,
+        output_dataset_name,
+        threshold=100.0,
+        low_threshold=1,
+        high_threshold=254):
+        '''Generate a water-z task to segment a volume using affinities
+        
+        water-z is the Z-watershed library with agglomeration.
+        
+        :param volume: the volume to be segmented
+        :param x_prob_dataset_name: the name of the probability map dataset of
+        affinities between voxels in the X direction.
+        :param y_prob_dataset_name: the name of the probability map dataset of
+        affinities between voxels in the Y direction.
+        :param z_prob_dataset_name: the name of the probability map dataset of
+        affinities between voxels in the Z direction.
+        :param output_dataset_name: the name of the output dataset
+        :param threshold: the threshold for the scoring function
+        :param low_threshold: the low bounds for the Z-watershed (never
+        join below this threshold)
+        :param high_threshold: the high bounds for the Z-watershed (always
+        join above this threshold)
+        '''
+        xprob_loading_plan, xlp = self.loading_plan(volume, x_prob_dataset_name)
+        yprob_loading_plan, ylp = self.loading_plan(volume, y_prob_dataset_name)
+        zprob_loading_plan, zlp = self.loading_plan(volume, z_prob_dataset_name)
+        storage_plan, sp = self.storage_plan(volume, output_dataset_name)
+        return xlp ( ylp ( zlp ( sp ( WaterZTask(
+            volume=volume,
+            x_prob_loading_plan_path=xprob_loading_plan,
+            y_prob_loading_plan_path=yprob_loading_plan,
+            z_prob_loading_plan_path=zprob_loading_plan,
+            storage_plan=storage_plan,
+            threshold=threshold,
+            low_threshold=low_threshold,
+            high_threshold=high_threshold)))))

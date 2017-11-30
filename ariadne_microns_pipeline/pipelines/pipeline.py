@@ -339,6 +339,23 @@ class PipelineTaskMixin:
     z_watershed_threshold = luigi.IntParameter(
         default=40000,
         description="Target size for segments produced by the z-watershed")
+    z_watershed_low_threshold = luigi.IntParameter(
+        default=1,
+        description="The low cutoff for the z-watershed. Scale is 0-255")
+    z_watershed_high_threshold = luigi.IntParameter(
+        default=254,
+        description="The high cutoff for the z-watershed. Scale is 0-255")
+    wants_waterz = luigi.BoolParameter(
+        description="Use water-z instead of zwatershed + neuroproof")
+    waterz_threshold = luigi.FloatParameter(
+        default=100.,
+        description="The threshold for the waterz scoring function")
+    waterz_low_threshold = luigi.IntParameter(
+        default=1,
+        description="The low cutoff for the z-watershed. Scale is 0-255")
+    waterz_high_threshold = luigi.IntParameter(
+        default=254,
+        description="The high cutoff for the z-watershed. Scale is 0-255")
     wants_transmitter_receptor_synapse_maps = luigi.BoolParameter(
         description="Use a synapse transmitter and receptor probability map "
                     "instead of a map of synapse voxel probabilities.")
@@ -1210,12 +1227,39 @@ class PipelineTaskMixin:
                          x_prob_dataset_name=X_AFFINITY_DATASET,
                          y_prob_dataset_name=Y_AFFINITY_DATASET,
                          z_prob_dataset_name=Z_AFFINITY_DATASET,
-                         output_dataset_name=SEG_DATASET)
+                         output_dataset_name=SEG_DATASET,
+                         threshold=self.z_watershed_threshold,
+                         low=self.z_watershed_low_threshold,
+                         high=self.z_watershed_high_threshold)
                     zwtask.priority = PRIORITY_Z_WATERSHED
                     zwtask.threshold = self.z_watershed_threshold
                     self.watershed_tasks[zi, yi, xi] = zwtask
                     self.datasets[zwtask.output().path] = zwtask
                     self.tasks.append(zwtask)
+    def generate_waterz_tasks(self):
+        '''Generate tasks to go from affinity prediction to segmentation
+        
+        '''
+        #
+        # The waterz does agglomeration, so Neuroproof can be bypassed
+        #
+        self.np_tasks = np.zeros((self.n_z, self.n_y, self.n_x), object)
+        for zi, yi, xi in itertools.product(
+            range(self.n_z), range(self.n_y), range(self.n_x)):
+            volume = self.get_block_volume(xi, yi, zi)
+            wztask = self.factory.gen_water_z_task(
+                volume=volume,
+                x_prob_dataset_name=X_AFFINITY_DATASET,
+                y_prob_dataset_name=Y_AFFINITY_DATASET,
+                z_prob_dataset_name=Z_AFFINITY_DATASET,
+                output_dataset_name=NP_DATASET,
+                threshold=self.waterz_threshold,
+                low_threshold=self.waterz_low_threshold,
+                high_threshold=self.waterz_high_threshold)
+            wztask.priority = PRIORITY_NEUROPROOF
+            self.datasets[wztask.output().path] = wztask
+            self.tasks.append(wztask)
+            self.np_tasks[zi, yi, xi] = wztask
     
     def generate_neuroproof_tasks(self):
         '''Generate neuroproof tasks for all blocks
@@ -2816,13 +2860,16 @@ class PipelineTaskMixin:
                 self.generate_watershed_tasks()
                 if self.wants_resegmentation:
                     self.generate_resegmentation_tasks()
-            else:
+            elif not self.wants_waterz:
                 #
                 # For affinity maps, run the z-watershed to produce
                 # the oversegmentation
                 #
                 rh_logger.logger.report_event("Making z-watershed tasks")
                 self.generate_z_watershed_tasks()
+            else:
+                rh_logger.logger.report_event("Making waterz tasks")
+                self.generate_waterz_tasks()
             if self.wants_neuroproof_learn:
                 #
                 # Neuroproof Learn needs to have the segmentation relabeled
@@ -2838,8 +2885,10 @@ class PipelineTaskMixin:
                 #
                 # Step 7: run Neuroproof on the blocks and border blocks
                 #
-                rh_logger.logger.report_event("Making Neuroproof tasks")
-                self.generate_neuroproof_tasks()
+                if (not self.wants_affinity_segmentation) or \
+                   (not self.wants_waterz):
+                    rh_logger.logger.report_event("Making Neuroproof tasks")
+                    self.generate_neuroproof_tasks()
                 #
                 # Step 8: Segment the synapses
                 #

@@ -438,8 +438,9 @@ class ZWatershedRunMixin:
                            xtgt.volume.width), np.uint8)
         for i, tgt in enumerate((ztgt, ytgt, xtgt)):
             tgt.imread(volume[i])
-        result = zwatershed.zwatershed(volume, [self.threshold], 
-                                       LOW=low, HIGH=high)[0]
+        result = zwatershed.zwatershed(
+            volume, [self.threshold], 
+            LOW=self.low, HIGH=self.high)[0]
         self.output().imwrite(result)
 
 class ZWatershedTask(ZWatershedTaskMixin,
@@ -476,6 +477,7 @@ class WaterZTaskMixin(DatasetMixin):
         v1 = np.prod([1625, 1625, 204])
         m1 = 19165868 * 1000
         v2 = np.prod([1408, 1408, 145])
+        # m2 = 24593296 * 1000
         m2 = 10019532 * 1000
         volume = self.output().volume
         #
