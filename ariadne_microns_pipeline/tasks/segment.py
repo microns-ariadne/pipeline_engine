@@ -398,7 +398,7 @@ class ZWatershedTaskMixin(DatasetMixin):
     def estimate_memory_usage(self):
         '''Return an estimate of bytes of memory required by this task'''
         v1 = np.prod([1625, 1625, 204])
-        m1 = 14617472 * 1000
+        m1 = 15607184 * 1000
         v2 = np.prod([1408, 1408, 145])
         m2 = 6537644 * 1000
         volume = self.output().volume
