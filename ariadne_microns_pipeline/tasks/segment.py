@@ -445,7 +445,7 @@ class ZWatershedRunMixin:
             volume, [self.threshold], 
             LOW=self.low, HIGH=self.high)[0]
         if self.min_size > 0:
-            histogram = np.bincount(result.flatten())
+            histogram = np.bincount(result.flatten().astype(np.uint32))
             result[histogram[result] < self.min_size] = 0
         self.output().imwrite(result)
 
