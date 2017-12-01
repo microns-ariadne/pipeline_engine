@@ -345,6 +345,9 @@ class PipelineTaskMixin:
     z_watershed_high_threshold = luigi.IntParameter(
         default=254,
         description="The high cutoff for the z-watershed. Scale is 0-255")
+    z_watershed_min_size=luigi.IntParameter(
+        default=0,
+        description="Objects with fewer than this many voxels are removed")
     wants_waterz = luigi.BoolParameter(
         description="Use water-z instead of zwatershed + neuroproof")
     waterz_threshold = luigi.FloatParameter(
@@ -1230,7 +1233,8 @@ class PipelineTaskMixin:
                          output_dataset_name=SEG_DATASET,
                          threshold=self.z_watershed_threshold,
                          low=self.z_watershed_low_threshold,
-                         high=self.z_watershed_high_threshold)
+                         high=self.z_watershed_high_threshold,
+                         min_size=self.z_watershed_min_size)
                     zwtask.priority = PRIORITY_Z_WATERSHED
                     zwtask.threshold = self.z_watershed_threshold
                     self.watershed_tasks[zi, yi, xi] = zwtask

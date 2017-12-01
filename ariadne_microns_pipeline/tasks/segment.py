@@ -424,6 +424,9 @@ class ZWatershedRunMixin:
         default=254,
         description="The high cutoff for the z-watershed. All values "
         "above are \"always connect\".")
+    min_size=luigi.IntParameter(
+        default=0,
+        description="Filter out all objects with fewer voxels than this")
     
     def ariadne_run(self):
         import zwatershed
@@ -441,6 +444,9 @@ class ZWatershedRunMixin:
         result = zwatershed.zwatershed(
             volume, [self.threshold], 
             LOW=self.low, HIGH=self.high)[0]
+        if self.min_size > 0:
+            histogram = np.bincount(result.flatten())
+            result[histogram[result] < self.min_size] = 0
         self.output().imwrite(result)
 
 class ZWatershedTask(ZWatershedTaskMixin,

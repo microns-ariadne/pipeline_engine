@@ -1464,7 +1464,8 @@ class AMTaskFactory(object):
         output_dataset_name,
         threshold=40000,
         low=1,
-        high=254):
+        high=254,
+        min_size=0):
         '''Generate a Z-watershed task to segment a volume using affinities
         
         :param volume: the volume to be segmented
@@ -1488,7 +1489,8 @@ class AMTaskFactory(object):
             storage_plan=storage_plan,
             threshold=threshold,
             low=low,
-            high=high)))))
+            high=high,
+            min_size=min_size)))))
 
     def gen_water_z_task(
         self,
