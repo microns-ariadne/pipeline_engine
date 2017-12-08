@@ -174,7 +174,12 @@ class SynapseScorePipelineTask(luigi.Task):
         "to include any value other than zero.")
     synapse_report_path = luigi.Parameter(
         description="Location for the synapse report .json file")
-    
+
+    classifier_environment = luigi.Parameter(
+        default="default",
+        description="The name of the IPC worker environment that handles "
+                    "this classifier (e.g. \"keras-2.0\".")
+
     def output(self):
         return luigi.LocalTarget(self.synapse_report_path)
     
@@ -373,7 +378,8 @@ class SynapseScorePipelineTask(luigi.Task):
             img_volume=self.img_volume,
             output_volume=self.volume,
             dataset_name=IMG_DATASET,
-            classifier_path = self.pixel_classifier_path)
+            classifier_path=self.pixel_classifier_path,
+            environment_id=self.classifier_environment)
         self.tasks.append(self.classifier_task)
         for channel in datasets.values():
             shim_task = ClassifyShimTask.make_shim(
