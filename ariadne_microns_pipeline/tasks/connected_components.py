@@ -750,7 +750,7 @@ class AllConnectedComponentsRunMixin:
         d["joins"] = []
         for (k1, k2), path in joins.items():
             d["joins"].append((dict(k1), dict(k2), path))
-        d["metadata"] = self.metadata
+        d["metadata"] = to_json_serializable(self.metadata)
         with self.output().open("w") as fd:
             json.dump(d, fd)
 
