@@ -379,8 +379,8 @@ class KerasClassifier(AbstractPixelClassifier):
             image.shape[2] - 2 * self.get_x_pad()),
                                   np.uint8)
         self.exception = None
-        self.pred_queue = Queue.Queue()
-        self.out_queue = Queue.Queue()
+        self.pred_queue = Queue.Queue(10)
+        self.out_queue = Queue.Queue(10)
         preprocess_thread = threading.Thread(
             target=self.preprocessor,
             args=(image,))

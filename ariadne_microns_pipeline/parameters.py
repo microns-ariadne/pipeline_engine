@@ -108,6 +108,9 @@ class Volume(object):
                    self.z == other.z and self.width == other.width  and \
                    self.height == other.height and self.depth == other.depth
         return False
+    def __hash__(self):
+        return hash((self.x, self.y, self.z, 
+                     self.width, self.height, self.depth))
 
 class VolumeParameter(luigi.Parameter):
     '''Describes a volume.

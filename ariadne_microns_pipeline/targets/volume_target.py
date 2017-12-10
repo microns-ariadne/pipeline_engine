@@ -236,6 +236,32 @@ class SrcVolumeTarget(luigi.LocalTarget):
             d = json.load(fd)
         return getattr(np, d["datatype"])
     
+    def write_loading_plan(self, loading_plan_path):
+        '''Write a loading plan that loads this storage plan
+        
+        :param loading_plan_path: the path to the loading plan to write
+        '''
+        with open(self.storage_plan_path) as fd:
+            sp = json.load(fd)
+        #
+        # The order of arguments in the blocks is reversed in loading plans
+        #
+        blocks = [(tif_path, v) for v, tif_path in sp["blocks"]]
+        #
+        # The dictionary form of the loading plan
+        #
+        lp = dict(dataset_name = sp["dataset_name"],
+                  datatype=sp["datatype"],
+                  dataset_done_files=[self.path],
+                  dimensions=sp["dimensions"],
+                  x=sp["x"],
+                  y=sp["y"],
+                  z=sp["z"],
+                  blocks=blocks,
+                  loading_plan_id=EMPTY_LOADING_PLAN_ID)
+        with open(loading_plan_path, "w") as fd:
+            json.dump(lp, fd)
+        
     def create_directories(self):
         '''Create the subdirectories to host the .tif files'''
         with open(self.storage_plan_path, "r") as fd:
