@@ -181,7 +181,7 @@ class MergePredictionsPipeline(luigi.Task):
                     v["y"], v["y"] + v["height"],
                     v["z"], v["z"] + v["depth"])
                 tif_path = os.path.join(os.path.dirname(tif_path), tif_file)
-                lpd["blocks"].append((v, tif_path))
+                lpd["blocks"].append((tif_path, v))
             json.dump(lpd, open(lp_path, "w"))
             self.output_channel_loading_plans[volume] = lp_path
         
