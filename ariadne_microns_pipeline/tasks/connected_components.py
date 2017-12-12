@@ -90,6 +90,29 @@ class AdditionalLocationType(enum.Enum):
     '''A probability map channel for Neuroproof'''
     CHANNEL = 4
 
+def add_connection_volume_metadata(d, lp1, lp2):
+    '''Add metadata from source volumes to connected components dictionary
+    
+    Add the labels, areas and loading plan location for each of the
+    pair of volumes to the connected components dictionary
+    
+    :param d: the connected components dictionary
+    :param lp1: the path to the first loading plan
+    :param lp2: the path to the second loading plan
+    '''
+    sps1 = DestVolumeReader(lp1).get_source_targets()
+    assert len(sps1) == 1
+    sps2 = DestVolumeReader(lp2).get_source_targets()
+    assert len(sps2) == 1
+    sp1, sp2 = sps1[0], sps2[0]
+    
+    for i, src_tgt, location in (
+        ("1", sp1, lp1), ("2", sp2, lp2)):
+        src_json = json.load(open(src_tgt.path))
+        d[i]["labels"] = src_json["labels"]
+        d[i]["areas"] = src_json["areas"]
+        d[i]["location"] = location
+   
 class ConnectedComponentsTaskMixin:
 
     volume1 = VolumeParameter(
@@ -221,15 +244,10 @@ class ConnectedComponentsRunMixin:
         #
         # Get the statistics from the source target.
         #
-        for i, src_tgt, location in zip(
-            ["1", "2"], 
-            self.input(),
-            [self.segmentation_loading_plan1_path,
-             self.segmentation_loading_plan2_path]):
-            src_json = json.load(open(src_tgt.path))
-            d[i]["labels"] = src_json["labels"]
-            d[i]["areas"] = src_json["areas"]
-            d[i]["location"] = location
+        add_connection_volume_metadata(
+            d,
+            self.segmentation_loading_plan1_path,
+            self.segmentation_loading_plan2_path)
         with self.output().open("w") as fd:
             json.dump(d, fd)
 
@@ -567,6 +585,50 @@ class ConnectedComponentsTask(ConnectedComponentsTaskMixin,
     
     task_namespace = 'ariadne_microns_pipeline'
 
+class FakeConnectedComponentsTask(
+    RequiresMixin, RunMixin, SingleThreadedMixin, luigi.Task):
+    '''Create a connectivity file between two segmentations w/global ids
+    
+    Given two segmentations with global IDs, fake a connected components
+    join that links the two of them.
+    '''
+    task_namespace="ariadne_microns_pipeline"
+    
+    segmentation_loading_plan1_path = luigi.Parameter(
+        description="The file path for the entire segmentation #1")
+    segmentation_loading_plan2_path = luigi.Parameter(
+        description="The file path for the entire segmentation #2")
+    output_location = luigi.Parameter(
+        description=
+        "The location for the JSON file containing the concordances")
+    
+    def input(self):
+        for lp in self.segmentation_loading_plan1_path, \
+                  self.segmentation_loading_plan2_path:
+            for sp in DestVolumeReader(lp).get_source_targets():
+                yield(sp)
+    
+    def output(self):
+        return luigi.LocalTarget(self.output_location)
+    
+    def ariadne_run(self):
+        lp1_path = self.segmentation_loading_plan1_path
+        lp2_path = self.segmentation_loading_plan2_path
+        lp1 = DestVolumeReader(lp1_path)
+        lp2 = DestVolumeReader(lp2_path)
+        d = {}
+        add_connection_volume_metadata(d, lp1_path, lp2_path)
+        #
+        # Connect any labels that match in each.
+        #
+        connections = set(d["1"]["labels"])
+        connections = list(connections.intersection(d["2"]["labels"]))
+        counts = [0] * len(connections)
+        d["connections"] = connections
+        d["counts"] = counts
+        with self.output().open("w") as fd:
+            json.dump(d, fd)
+        
 class JoinConnectedComponentsTask(RequiresMixin,
                                   RunMixin,
                                   SingleThreadedMixin,
@@ -776,7 +838,7 @@ class AllConnectedComponentsTask(AllConnectedComponentsTaskMixin,
     '''
     
     task_namespace="ariadne_microns_pipeline"
-    
+
 class FakeAllConnectedComponentsTaskMixin:
     
     volume = VolumeParameter(

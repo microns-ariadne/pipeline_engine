@@ -7,7 +7,7 @@ import rh_logger
 import sys
 import time
 
-from ..parameters import VolumeParameter
+from ..parameters import VolumeParameter, Volume
 from ..volumedb import VolumeDB
 from ..targets.volume_target import SrcVolumeTarget
 
@@ -173,6 +173,11 @@ def to_hashable(x):
     # and a consistent insertion order
     #
     if isinstance(x, dict):
+        #
+        # Special case - volumes
+        #
+        if all([_ in x for _ in ("x", "y", "z", "width", "height", "depth")]):
+            return Volume(**x)
         return FrozenOrderedDict(
             [(k, to_hashable(x[k])) for k in sorted(x.keys())])
     #

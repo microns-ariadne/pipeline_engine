@@ -296,7 +296,7 @@ class SrcVolumeTarget(luigi.LocalTarget):
             with self.open("w") as fd:
                 json.dump(d, fd)        
     
-    def imwrite(self, data):
+    def imwrite(self, data, metadata={}):
         '''Write the data blocks to disk + the done file
         
         The .done file is a json-encoded dictionary with the following keys
@@ -354,6 +354,7 @@ class SrcVolumeTarget(luigi.LocalTarget):
                         metadata=metadata)
         rh_logger.logger.report_metric("Dataset store time (sec)",
                                        time.time() - t0)
+        d.update(metadata) 
         with self.open("w") as fd:
             json.dump(d, fd)
     
