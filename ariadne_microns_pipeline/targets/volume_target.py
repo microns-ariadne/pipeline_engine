@@ -341,7 +341,7 @@ class SrcVolumeTarget(luigi.LocalTarget):
             if not os.path.isdir(tif_dir):
                 os.makedirs(tif_dir)
             with tifffile.TiffWriter(tif_path, bigtiff=True) as fd:
-                metadata = dict(x0=sx0, x1=sx1, y0=sy0, y1=sy1, z0=sz0, z1=sz1,
+                block_metadata = dict(x0=sx0, x1=sx1, y0=sy0, y1=sy1, z0=sz0, z1=sz1,
                                 dataset_name = dataset_name,
                                 dataset_id = dataset_id)
                 block = data[sz0 - z0: sz1 - z0,
@@ -351,7 +351,7 @@ class SrcVolumeTarget(luigi.LocalTarget):
                         photometric='minisblack',
                         compress=self.compression,
                         description=dataset_name,
-                        metadata=metadata)
+                        metadata=block_metadata)
         rh_logger.logger.report_metric("Dataset store time (sec)",
                                        time.time() - t0)
         d.update(metadata) 

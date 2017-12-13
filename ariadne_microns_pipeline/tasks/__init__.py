@@ -29,6 +29,7 @@ from .match_synapses import MatchSynapsesTask
 from .neuroproof import NeuroproofTask
 from .nplearn import NeuroproofLearnTask
 from .rebase_synapses import RebaseSynapsesTask
+from .repair import RepairSegmentationTask
 from .segment import SegmentTask, SegmentCC2DTask, UnsegmentTask
 from .skeletonize import SkeletonizeTask
 from .stitch_segmentation import StitchSegmentationTask
@@ -41,7 +42,7 @@ all = [AllConnectedComponentsTask, BossShardingTask, ClassifyTask,
        DownloadFromButterflyTask, AMTaskFactory,
        FindSeedsTask, Dimensionality, SeedsMethodEnum,
        MaskBorderTask, MatchNeuronsTask, MatchSynapsesTask,
-       NeuroproofTask, NeuroproofLearnTask, 
+       NeuroproofTask, NeuroproofLearnTask,
        SegmentTask, SegmentCC2DTask, UnsegmentTask,
        VolumeRelabelingTask, StoragePlanRelabelingTask,
        SkeletonizeTask, StitchSegmentationTask, SynapseStatisticsTask]

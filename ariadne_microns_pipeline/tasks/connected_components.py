@@ -696,7 +696,7 @@ class AllConnectedComponentsTaskMixin:
         "ConnectedComponentsTask")
     output_location = luigi.Parameter(
         description="The filename of the global assignment")
-    max_connections = luigi.Parameter(
+    max_connections = luigi.IntParameter(
         default=0,
         description="Reject a component if it makes more than this many "
                     "connections outside of its volume.")
