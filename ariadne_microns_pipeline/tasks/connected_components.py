@@ -109,6 +109,8 @@ def add_connection_volume_metadata(d, lp1, lp2):
     for i, src_tgt, location in (
         ("1", sp1, lp1), ("2", sp2, lp2)):
         src_json = json.load(open(src_tgt.path))
+        if i not in d:
+            d[i] = {}
         d[i]["labels"] = src_json["labels"]
         d[i]["areas"] = src_json["areas"]
         d[i]["location"] = location
