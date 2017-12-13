@@ -1,6 +1,7 @@
 '''Repair a segmentation'''
 
 import h5py
+import json
 import luigi
 import numpy as np
 from scipy.ndimage import zoom
@@ -49,10 +50,8 @@ class RepairSegmentationTask(DatasetMixin, RunMixin, luigi.Task):
         default=2,
         description="The amount of upsampling to apply to the repair "
         "segmentation in the X direction")
-    local_mapping=luigi.ListParameter(
-        description="A list of the local segment IDs in the volume")
-    global_mapping=luigi.ListParameter(
-        description="A list of the global segment IDs matching the local ones")
+    mapping_file=luigi.Parameter(
+        description="A JSON file with the local and global mappings")
     segments_to_repair=luigi.ListParameter(
         description="The global IDs of segments that should be repaired")
     repair_segments_to_exclude=luigi.ListParameter(
@@ -63,6 +62,18 @@ class RepairSegmentationTask(DatasetMixin, RunMixin, luigi.Task):
         lp = DestVolumeReader(self.segmentation_loading_plan_path)
         for sp in lp.get_source_targets():
             yield sp
+    
+    @property
+    def global_mapping(self):
+        if not hasattr(self, "mappings"):
+            self.mappings = json.load(open(self.mapping_file))
+        return self.mappings["global"]
+    
+    @property
+    def local_mapping(self):
+        if not hasattr(self, "mappings"):
+            self.mappings = json.load(open(self.mapping_file))
+        return self.mappings["local"]
     
     def ariadne_run(self):
         lp = DestVolumeReader(self.segmentation_loading_plan_path)

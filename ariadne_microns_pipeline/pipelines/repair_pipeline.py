@@ -92,6 +92,7 @@ class RepairPipeline(luigi.Task):
     
     def compute_requirements(self):
         self.idx = 1
+        self.known_dirs = set()
         self.cg = ConnectivityGraph.load(open(self.src_connectivity_graph))
         self.jcg = json.load(open(self.src_connectivity_graph))
         rh_logger.logger.report_event("Writing loading plans")
@@ -104,7 +105,7 @@ class RepairPipeline(luigi.Task):
         self.create_repair_tasks()
         rh_logger.logger.report_event("Creating fake connected components tasks")
         self.create_cc_tasks()
-        
+    
     def to_dir(self, volume):
         '''Create a path to an appropriate directory for this volume'''
         path = os.path.join(
@@ -112,8 +113,9 @@ class RepairPipeline(luigi.Task):
             str(volume.x),
             str(volume.y),
             str(volume.z))
-        if not os.path.isdir(path):
+        if (path not in self.known_dirs) and not os.path.isdir(path):
             os.makedirs(path)
+        self.known_dirs.add(path)
         return path
 
     def copy_loading_plan(self, lp, volume):
@@ -185,6 +187,10 @@ class RepairPipeline(luigi.Task):
         for volume, lp in self.src_loading_plans.items():
             sp = self.storage_plans[volume]
             mapping = self.cg.volumes[to_hashable(volume)]
+            mapping_file = os.path.join(self.to_dir(volume), "mappings.json")
+            d = { "local":mapping[:, 0].tolist(),
+                  "global":mapping[:, 1].tolist() }
+            json.dump(d, open(mapping_file, "w"))
             task = RepairSegmentationTask(
                 storage_plan=sp,
                 segmentation_loading_plan_path=lp,
@@ -198,8 +204,7 @@ class RepairPipeline(luigi.Task):
                 x_upsampling=self.x_upsampling,
                 y_upsampling=self.y_upsampling,
                 z_upsampling=self.z_upsampling,
-                local_mapping=mapping[:, 0].tolist(),
-                global_mapping=mapping[:, 1].tolist(),
+                mapping_file=mapping_file,
                 segments_to_repair=self.segments_to_repair,
                 repair_segments_to_exclude=self.repair_segments_to_exclude)
             self.repair_tasks[volume] = task
@@ -240,3 +245,95 @@ class RepairPipeline(luigi.Task):
     def run(self):
         with self.output().open("w") as fd:
             fd.write("Repair finished successfully")
+
+from .pipeline import \
+     SYNAPSE_DATASET, SYNAPSE_RECEPTOR_DATASET, SYNAPSE_TRANSMITTER_DATASET
+from ..tasks.connect_synapses \
+     import ConnectSynapsesTask, AggregateSynapseConnectionsTask
+import glob
+
+class SynaspeRepairPipeline(luigi.Task):
+    '''Rebase the synapses to a new segmentation
+    
+    After repairing, the segmentation is completely different. Fix the
+    synapses by running ConnectSynapsesTask on the blocks again.
+    '''
+    src_connectivity_graph=luigi.Parameter(
+        description="Connectivity graph for the original segmentation")
+    dest_connectivity_graph=luigi.Parameter(
+        description="Connectivity graph for the new segmentation")
+    destination=luigi.Parameter(
+        description="Root directory for the synapse connectivity files")
+    synapse_connections_file=luigi.Parameter(
+        description="The destination for the global synapse connections file")
+    done_file=luigi.Parameter(
+        default=DEFAULT_LOCATION,
+        description="Location of the touchfile indicating pipeline is done")
+    xy_dilation = luigi.IntParameter(
+        default=3,
+        description="Amount to dilate each synapse in the x/y direction")
+    z_dilation = luigi.IntParameter(
+        default=0,
+        description="Amount to dilate each synapse in the z direction")
+    min_contact = luigi.IntParameter(
+        default=25,
+        description="Minimum acceptable overlap between neurite and synapse "
+                    "border.")
+    wants_edge_contact = luigi.BoolParameter(
+        description="If true, only count pixels along the edge of the "
+        "synapse, otherwise consider overlap between the whole synapse "
+        "and neurons")
+    x_nm = luigi.FloatParameter(
+        default=4.0,
+        description="size of a voxel in the x direction")
+    y_nm = luigi.FloatParameter(
+        default=4.0,
+        description="size of a voxel in the y direction")
+    z_nm = luigi.FloatParameter(
+        default=30.0,
+        description="size of a voxel in the z direction")
+    distance_from_centroid = luigi.FloatParameter(
+        default=70.0,
+        description="Ideal distance from centroid marker of markers for "
+                    "neuron positiions")
+    
+    def output(self):
+        if self.done_file == DEFAULT_LOCATION:
+            done_file = os.path.join(self.destination, "repair.done")
+        else:
+            done_file = self.done_file
+        return luigi.LocalTarget(done_file)
+    
+    def requires(self):
+        if not hasattr(self, "requirements"):
+            try:
+                rh_logger.logger.start_process(
+                    "Repair pipeline", "starting", [])
+            except:
+                pass
+            self.compute_requirements()
+        return self.requirements
+    
+    def compute_requirements(self):
+        self.src_cg = ConnectivityGraph.load(open(self.src_connectivity_graph))
+        self.dest_cg = ConnectivityGraph.load(
+            open(self.dest_connectivity_graph))
+        rh_logger.logger("Finding synapse loading plans")
+        self.find_loading_plans()
+        
+    def find_loading_plans(self):
+        self.synapse_loading_plans = {}
+        self.transmitter_loading_plans = {}
+        self.receptor_loading_plans = {}
+        for dvolume, location in self.src_cg.locations.items():
+            volume = Volume(**dvolume)
+            loading_plans = glob.glob(
+                os.path.join(os.path.dirname(location, "[str]*.loading.plan")))
+            for lp in loading_plans:
+                if lp.startswith(SYNAPSE_DATASET):
+                    self.synapse_loading_plans[volume] = lp
+                elif lp.startswith(SYNAPSE_TRANSMITTER_DATASET):
+                    self.transmitter_loading_plans[volume] = lp
+                elif lp.startswith(SYNAPSE_RECEPTOR_DATASET):
+                    self.receptor_loading_plans[volume] = lp
+            
