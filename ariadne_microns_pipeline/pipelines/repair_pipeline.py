@@ -83,7 +83,7 @@ class RepairPipeline(luigi.Task):
     def requires(self):
         if not hasattr(self, "requirements"):
             try:
-                rh_logger.logger.start_logging(
+                rh_logger.logger.start_process(
                     "Repair pipeline", "starting", [])
             except:
                 pass
