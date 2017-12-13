@@ -7,7 +7,7 @@ from ..tasks.repair import RepairSegmentationTask
 from ..tasks.utilities import to_hashable
 from ..tasks.connected_components import \
      ConnectivityGraph, FakeConnectedComponentsTask, AllConnectedComponentsTask
-from ..parameters import Volume, DEFAULT_LOCATION
+from ..parameters import Volume, DEFAULT_LOCATION, EMPTY_LOCATION
 from ..targets.volume_target import SrcVolumeTarget
 
 class RepairPipeline(luigi.Task):
