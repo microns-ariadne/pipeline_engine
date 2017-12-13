@@ -34,6 +34,12 @@ class RepairPipeline(luigi.Task):
     repair_file_dataset_name = luigi.Parameter(
         default="stack",
         description="The name of the dataset within the hdf5 file")
+    blood_vessel_file = luigi.Parameter(
+        default = EMPTY_LOCATION,
+        description="The file of areas to mask out (blood vessels)")
+    blood_vessel_dataset_name = luigi.Parameter(
+        default="stack",
+        description="The name of the dataset within the blood vessel file")
     x_offset = luigi.IntParameter(
         default=0,
         description="Offset of the repair and blood vessel volumes in the "
@@ -184,6 +190,8 @@ class RepairPipeline(luigi.Task):
                 segmentation_loading_plan_path=lp,
                 repair_file=self.repair_file,
                 repair_file_dataset_name=self.repair_file_dataset_name,
+                blood_vessel_file=self.blood_vessel_file,
+                blood_vessel_dataset_name=self.blood_vessel_dataset_name,
                 x_offset=self.x_offset,
                 y_offset=self.y_offset,
                 z_offset=self.z_offset,
