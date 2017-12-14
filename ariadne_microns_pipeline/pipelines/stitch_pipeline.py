@@ -542,13 +542,14 @@ class StitchPipelineTask(luigi.Task):
         #
         # Make the ultra-stupendous AllConnectedComponentsTask
         #
-        metadata = {}
+        metadata = dict(parameters={})
         metadata["1"] = cg1["metadata"]
         metadata["2"] = cg2["metadata"]
         # merge identical metadata from left & right
-        for key, value in cg1["metadata"].items():
-            if key in cg2["metadata"] and cg2["metadata"][key] == value:
-                metadata[key] == value
+        for key, value in cg1["metadata"]["parameters"].items():
+            if key in cg2["metadata"]["parameters"] and\
+               cg2["metadata"]["parameters"][key] == value:
+                metadata["parameters"][key] == value
         
         all_join_files = [_[2] for _ in joins_done]
         all_join_files += [task.output().path for task in joins_to_do]

@@ -163,7 +163,7 @@ class BossPipelineTaskMixin:
         # from the np_x_pad from the pipeline - it's the amount to trim
         # from each block which is from the np_x_pad midpoint
         #
-        params = cg["metadata"]["parameters"]
+        params = cg["metadata"].get("parameters", {})
         x_pad = params.get("np_x_pad", self.x_pad * 2) / 2
         y_pad = params.get("np_y_pad", self.y_pad * 2) / 2
         z_pad = params.get("np_z_pad", self.z_pad * 2) / 2
