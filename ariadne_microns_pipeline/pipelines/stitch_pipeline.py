@@ -3,6 +3,7 @@ import luigi
 import numpy as np
 import os
 import rh_config
+import rh_logger
 
 from .pipeline import NP_DATASET, CHIMERA_INPUT_DATASET, CHIMERA_OUTPUT_DATASET
 from .pipeline import MEMBRANE_DATASET
@@ -602,6 +603,11 @@ class StitchPipelineTask(luigi.Task):
 
     def requires(self):
         if not hasattr(self, "all_connected_components_task"):
+            try:
+                rh_logger.logger.start_process(
+                    "Stitch pipeline", "starting", [])
+            except:
+                pass
             self.compute_requirements()
         yield self.all_connected_components_task
 
