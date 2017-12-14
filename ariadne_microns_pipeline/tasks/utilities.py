@@ -2,6 +2,7 @@
 
 import luigi
 import multiprocessing
+import numpy as np
 import os
 import rh_logger
 import sys
@@ -202,4 +203,6 @@ def to_json_serializable(x):
                      for a, b in x.items()])
     if isinstance(x, np.ndarray):
         return x.tolist()
+    if isinstance(x, Volume):
+        return x.to_dictionary()
     raise ValueError("%s is not json-serializable") % x

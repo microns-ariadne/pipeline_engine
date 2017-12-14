@@ -619,12 +619,21 @@ class FakeConnectedComponentsTask(
         lp1 = DestVolumeReader(lp1_path)
         lp2 = DestVolumeReader(lp2_path)
         d = {}
+        for volume, name in ((lp1.volume, "1"),
+                             (lp2.volume, "2")):
+            d[name] = dict(x=volume.x,
+                           y=volume.y,
+                           z=volume.z,
+                           width=volume.width,
+                           height=volume.height,
+                           depth=volume.depth)
         add_connection_volume_metadata(d, lp1_path, lp2_path)
         #
         # Connect any labels that match in each.
         #
         connections = set(d["1"]["labels"])
-        connections = list(connections.intersection(d["2"]["labels"]))
+        connections = [ 
+            (_, _) for _ in connections.intersection(d["2"]["labels"])]
         counts = [0] * len(connections)
         d["connections"] = connections
         d["counts"] = counts
@@ -760,7 +769,9 @@ class AllConnectedComponentsRunMixin:
                     # Connect self to self.
                     #
                     connections.append(np.column_stack([global_labels]*2))
-                    
+
+            if len(c) == 0:
+                continue
             rm1 = np.zeros(np.max(l1)+1, int)
             m1 = mappings[k1]
             rm1[m1[:, 0]] = m1[:, 1]
@@ -770,11 +781,10 @@ class AllConnectedComponentsRunMixin:
             #
             # Connect backward and forward
             #
-            if len(c) > 0:
-                connections.append(
-                    np.column_stack([rm1[c[:, 0]], rm2[c[:, 1]]]))
-                connections.append(
-                    np.column_stack([rm2[c[:, 1]], rm1[c[:, 0]]]))
+            connections.append(
+                np.column_stack([rm1[c[:, 0]], rm2[c[:, 1]]]))
+            connections.append(
+                np.column_stack([rm2[c[:, 1]], rm1[c[:, 0]]]))
         connections = np.vstack(connections)
         #
         # Filter for too many connections
@@ -806,14 +816,18 @@ class AllConnectedComponentsRunMixin:
         d["additional_locations"] = to_json_serializable(
             self.additional_loading_plans)
         for volume, m in mappings.items():
-            gm = [ (int(a), int(b)) for a, b in zip(m[:, 0], labels[m[:, 1]])]
-            d["volumes"].append((dict(volume), gm))
+            if len(m) == 0:
+                gm = []
+            else:
+                gm = [ (int(a), int(b)) for a, b in zip(m[:, 0], labels[m[:, 1]])]
+            d["volumes"].append((to_json_serializable(volume), gm))
         d["locations"] = []
         for volume, loc in locations.items():
-            d["locations"].append((dict(volume), loc))
+            d["locations"].append((to_json_serializable(volume), loc))
         d["joins"] = []
         for (k1, k2), path in joins.items():
-            d["joins"].append((dict(k1), dict(k2), path))
+            d["joins"].append((to_json_serializable(k1), 
+                               to_json_serializable(k2), path))
         d["metadata"] = to_json_serializable(self.metadata)
         with self.output().open("w") as fd:
             json.dump(d, fd)
@@ -1061,9 +1075,12 @@ class ConnectivityGraph(object):
         '''
         key = to_hashable(volume.to_dictionary())
         mappings = self.volumes[key]
-        t = np.zeros(max(mappings[:, 0].max(), segmentation.max())+1,
-                     segmentation.dtype)
-        t[mappings[:, 0]] = mappings[:, 1]
+        if len(mappings) == 0:
+            t = np.zeros(segmentation.max()+1, segmentation.dtype)
+        else:
+            t = np.zeros(max(mappings[:, 0].max(), segmentation.max())+1,
+                         segmentation.dtype)
+            t[mappings[:, 0]] = mappings[:, 1]
         return t[segmentation]
     
     def get_tgt(self, volume):
