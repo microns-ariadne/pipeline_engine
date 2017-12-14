@@ -153,7 +153,8 @@ class StitchPipelineTask(luigi.Task):
         Check that the volumes overlap properly
         '''
         for key in "np_x_pad", "np_y_pad", "np_z_pad":
-            assert cg1.metadata[key] == cg2.metadata[key], \
+            assert cg1["metadata"]["parameters"][key] == \
+                   cg2["metadata"]["parameters"][key], \
                    "%s differs: 1=%s, 2=%s" % (
                        key, cg1.metadata[key], cg2.metadata[key])
         
