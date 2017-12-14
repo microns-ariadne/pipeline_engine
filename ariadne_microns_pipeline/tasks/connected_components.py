@@ -1006,11 +1006,14 @@ class StoragePlanRelabelingTask(
     RunMixin,
     luigi.Task):
     '''Relabel and rewrite a segmentation storage plan'''
+    
     connectivity_graph_path = luigi.Parameter(
         description="Path to the connectivity graph describing the volume "
         "to be uploaded to the Boss")
     src_loading_plan_path = luigi.Parameter(
         description="A loading plan that's named in the connectivity graph")
+    
+    task_namespace="ariadne_microns_pipeline"
     
     def input(self):
         loading_plan = DestVolumeReader(self.src_loading_plan_path)
