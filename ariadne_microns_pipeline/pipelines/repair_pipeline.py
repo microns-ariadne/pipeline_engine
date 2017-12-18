@@ -336,10 +336,15 @@ class SynapseRepairPipeline(luigi.Task):
                     "Repair pipeline", "starting", [])
             except:
                 pass
-            self.compute_requirements()
+            try:
+                self.compute_requirements()
+            except:
+                rh_logger.logger.report_exception()
+                raise
         return self.requirements
     
     def compute_requirements(self):
+        self.known_dirs = set()
         self.src_cg = ConnectivityGraph.load(open(self.src_connectivity_graph))
         rh_logger.logger.report_event("Loaded %s" % self.src_connectivity_graph)
         self.dest_cg = ConnectivityGraph.load(
