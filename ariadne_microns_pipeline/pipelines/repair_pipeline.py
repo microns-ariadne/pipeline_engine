@@ -252,12 +252,14 @@ from ..tasks.connect_synapses \
      import ConnectSynapsesTask, AggregateSynapseConnectionsTask
 import glob
 
-class SynaspeRepairPipeline(luigi.Task):
+class SynapseRepairPipeline(luigi.Task):
     '''Rebase the synapses to a new segmentation
     
     After repairing, the segmentation is completely different. Fix the
     synapses by running ConnectSynapsesTask on the blocks again.
     '''
+    task_namespace="ariadne_microns_pipeline"
+    
     src_connectivity_graph=luigi.Parameter(
         description="Connectivity graph for the original segmentation")
     dest_connectivity_graph=luigi.Parameter(
@@ -296,6 +298,17 @@ class SynaspeRepairPipeline(luigi.Task):
         default=70.0,
         description="Ideal distance from centroid marker of markers for "
                     "neuron positiions")
+    min_distance_nm = luigi.FloatParameter(
+        default=200.0,
+        description="Minimum allowable distance between a synapse in one "
+        "volume and a synapse in another (otherwise merge them)")
+    min_distance_identical_nm = luigi.FloatParameter(
+        default=50.0,
+        description="If two synapses are within this distance, they are "
+        "treated as the same synapse, but in different blocks. They are "
+        "eliminated on the basis of their position within the block instead "
+        "of on their likelihood of being a synapse")
+
     
     def output(self):
         if self.done_file == DEFAULT_LOCATION:
@@ -303,7 +316,19 @@ class SynaspeRepairPipeline(luigi.Task):
         else:
             done_file = self.done_file
         return luigi.LocalTarget(done_file)
-    
+
+    def to_dir(self, volume):
+        '''Create a path to an appropriate directory for this volume'''
+        path = os.path.join(
+            self.destination,
+            str(volume.x),
+            str(volume.y),
+            str(volume.z))
+        if (path not in self.known_dirs) and not os.path.isdir(path):
+            os.makedirs(path)
+        self.known_dirs.add(path)
+        return path
+   
     def requires(self):
         if not hasattr(self, "requirements"):
             try:
@@ -316,24 +341,67 @@ class SynaspeRepairPipeline(luigi.Task):
     
     def compute_requirements(self):
         self.src_cg = ConnectivityGraph.load(open(self.src_connectivity_graph))
+        rh_logger.logger.report_event("Loaded %s" % self.src_connectivity_graph)
         self.dest_cg = ConnectivityGraph.load(
             open(self.dest_connectivity_graph))
-        rh_logger.logger("Finding synapse loading plans")
+        rh_logger.logger.report_event("Finding synapse loading plans")
         self.find_loading_plans()
+        rh_logger.logger.report_event("Making tasks")
+        self.make_tasks()
+        rh_logger.logger.report_event("Finished with task setup")
         
     def find_loading_plans(self):
         self.synapse_loading_plans = {}
         self.transmitter_loading_plans = {}
         self.receptor_loading_plans = {}
-        for dvolume, location in self.src_cg.locations.items():
-            volume = Volume(**dvolume)
+        for volume, location in self.src_cg.locations.items():
             loading_plans = glob.glob(
-                os.path.join(os.path.dirname(location, "[str]*.loading.plan")))
+                os.path.join(os.path.dirname(location), "[str]*.loading.plan"))
             for lp in loading_plans:
-                if lp.startswith(SYNAPSE_DATASET):
+                lpfile = os.path.split(lp)[1]
+                if lpfile.startswith(SYNAPSE_DATASET):
                     self.synapse_loading_plans[volume] = lp
-                elif lp.startswith(SYNAPSE_TRANSMITTER_DATASET):
+                elif lpfile.startswith(SYNAPSE_TRANSMITTER_DATASET):
                     self.transmitter_loading_plans[volume] = lp
-                elif lp.startswith(SYNAPSE_RECEPTOR_DATASET):
+                elif lpfile.startswith(SYNAPSE_RECEPTOR_DATASET):
                     self.receptor_loading_plans[volume] = lp
-            
+    
+    def make_tasks(self):
+        self.cs_tasks = []
+        self.cs_locs = []
+        for volume, location in self.src_cg.locations.items():
+            dest = os.path.join(self.to_dir(volume), "synapse-connections.json")
+            self.cs_locs.append(dest)
+            task = ConnectSynapsesTask(
+                neuron_seg_load_plan_path=location,
+                synapse_seg_load_plan_path=self.synapse_loading_plans[volume],
+                transmitter_probability_map_load_plan_path=
+                    self.transmitter_loading_plans[volume],
+                receptor_probability_map_load_plan_path=
+                    self.receptor_loading_plans[volume],
+                output_location=dest,
+                xy_dilation=self.xy_dilation,
+                z_dilation=self.z_dilation,
+                min_contact=self.min_contact,
+                wants_edge_contact=self.wants_edge_contact,
+                x_nm=self.x_nm,
+                y_nm=self.y_nm,
+                z_nm=self.z_nm,
+                distance_from_centroid=self.distance_from_centroid)
+            self.cs_tasks.append(task)
+        
+        aggtask = AggregateSynapseConnectionsTask(
+            synapse_connection_locations=self.cs_locs,
+            connectivity_graph_location=self.dest_connectivity_graph,
+            output_location=self.synapse_connections_file,
+            xy_nm=self.x_nm,
+            z_nm=self.z_nm,
+            min_distance_nm=self.min_distance_nm,
+            min_distnace_identical_nm=self.min_distance_identical_nm)
+        for task in self.cs_tasks:
+            aggtask.set_requirement(task)
+        self.requirements = [aggtask]
+        
+    def run(self):
+        with self.output().open("w") as fd:
+            fd.write("Repair finished successfully")
