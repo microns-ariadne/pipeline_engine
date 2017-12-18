@@ -402,7 +402,7 @@ class SynapseRepairPipeline(luigi.Task):
             xy_nm=self.x_nm,
             z_nm=self.z_nm,
             min_distance_nm=self.min_distance_nm,
-            min_distnace_identical_nm=self.min_distance_identical_nm)
+            min_distance_identical_nm=self.min_distance_identical_nm)
         for task in self.cs_tasks:
             aggtask.set_requirement(task)
         self.requirements = [aggtask]
