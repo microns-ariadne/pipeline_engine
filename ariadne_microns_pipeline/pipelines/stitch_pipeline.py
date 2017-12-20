@@ -152,6 +152,9 @@ class StitchPipelineTask(luigi.Task):
         Check that their paddings are the same.
         Check that the volumes overlap properly
         '''
+        if ("parameters" not in cg1) or ("parameters" not in cg2):
+            return
+
         for key in "np_x_pad", "np_y_pad", "np_z_pad":
             assert cg1["metadata"]["parameters"][key] == \
                    cg2["metadata"]["parameters"][key], \
@@ -163,6 +166,7 @@ class StitchPipelineTask(luigi.Task):
         
         The AllConnectedComponentsTasks must have been run at this point.
         '''
+        rh_logger.logger.report_event("Loading connectivity graphs")
         self.direction2 = self.direction1.opposite()
         cg1 = json.load(open(self.component_graph_1, "r"))
         if len(self.exclude1) > 0:
@@ -195,6 +199,7 @@ class StitchPipelineTask(luigi.Task):
         # For abutting, use the ABUTTING location type, otherwise use the
         # OVERLAPPING type for matching. 
         #
+        rh_logger.logger.report_event("Calculating joins")
         if self.joining_method == JoiningMethod.ABUT:
             tgt_location_type = AdditionalLocationType.ABUTTING
         else:
@@ -275,6 +280,7 @@ class StitchPipelineTask(luigi.Task):
         #
         # Find matching volumes between datasets
         #
+        rh_logger.logger.report_event("Making connected components tasks")
         d1 = self.direction1
         d2 = self.direction2
         ald1 = al1_by_direction[d1]
@@ -534,6 +540,7 @@ class StitchPipelineTask(luigi.Task):
         #
         # Filter the additional locations
         #
+        rh_logger.logger.report_event("Making AllConnectedComponentsTask")
         additional_locations = filter(
             lambda _:AdditionalLocationDirection[_["direction"]] != d1,
             cg1["additional_locations"]) + filter(
@@ -542,15 +549,19 @@ class StitchPipelineTask(luigi.Task):
         #
         # Make the ultra-stupendous AllConnectedComponentsTask
         #
-        metadata = dict(parameters={})
-        metadata["1"] = cg1["metadata"]
-        metadata["2"] = cg2["metadata"]
-        # merge identical metadata from left & right
-        for key, value in cg1["metadata"]["parameters"].items():
-            if key in cg2["metadata"]["parameters"] and\
-               cg2["metadata"]["parameters"][key] == value:
-                metadata["parameters"][key] == value
+        rh_logger.logger.report_event("   compiling metadata")
+        if "metadata" in cg1 and "metadata" in cg2:
+            metadata = dict(parameters={})
+            metadata["1"] = cg1["metadata"]
+            metadata["2"] = cg2["metadata"]
+            # merge identical metadata from left & right
+
+            for key, value in cg1["metadata"].get("parameters", {}).items():
+                if key in cg2["metadata"].get("parameters", {}) and\
+                    cg2["metadata"]["parameters"][key] == value:
+                    metadata["parameters"][key] = value
         
+        rh_logger.logger.report_event("    making task")
         all_join_files = [_[2] for _ in joins_done]
         all_join_files += [task.output().path for task in joins_to_do]
         self.all_connected_components_task = \
@@ -561,6 +572,7 @@ class StitchPipelineTask(luigi.Task):
         self.all_connected_components_task.metadata = metadata
         for task in joins_to_do:
             self.all_connected_components_task.set_requirement(task)
+        rh_logger.logger.report_event("Finished computing requirements")
     
     def abuts(self, a, b):
         '''Return the abutting direction if volume A abuts volume B, else None
@@ -610,7 +622,11 @@ class StitchPipelineTask(luigi.Task):
                     "Stitch pipeline", "starting", [])
             except:
                 pass
-            self.compute_requirements()
+            try:
+                self.compute_requirements()
+            except:
+                rh_logger.logger.report_exception()
+                raise
         yield self.all_connected_components_task
 
     def run(self):
