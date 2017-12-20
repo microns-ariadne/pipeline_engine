@@ -374,7 +374,7 @@ class SynapseRepairPipeline(luigi.Task):
     def make_tasks(self):
         self.cs_tasks = []
         self.cs_locs = []
-        for volume, location in self.src_cg.locations.items():
+        for volume, location in self.dest_cg.locations.items():
             dest = os.path.join(self.to_dir(volume), "synapse-connections.json")
             self.cs_locs.append(dest)
             task = ConnectSynapsesTask(
