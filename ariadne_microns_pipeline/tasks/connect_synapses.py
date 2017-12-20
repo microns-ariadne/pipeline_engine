@@ -184,6 +184,7 @@ class ConnectSynapsesRunMixin:
             matrix = coo_matrix(
                 (np.ones(len(nvoxels), int), (svoxels, nvoxels)))
             matrix.sum_duplicates()
+            maxsynapses = matrix.shape[1] + 1
             synapse_labels, neuron_labels = matrix.nonzero()
             counts = matrix.tocsr()[synapse_labels, neuron_labels].getA1()
             #
@@ -278,7 +279,6 @@ class ConnectSynapsesRunMixin:
             edge_z, edge_y, edge_x = np.where(
                 (synapse != 0) & 
                 (grey_dilation(neuron, size=3) != grey_erosion(neuron, size=3)))
-            maxsynapses = np.max(synapse_labels)+1
             areas = np.bincount(synapse[edge_z, edge_y, edge_x], 
                                 minlength=maxsynapses)
             xs, ys, zs = [
