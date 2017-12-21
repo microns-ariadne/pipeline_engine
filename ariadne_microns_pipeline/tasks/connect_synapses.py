@@ -634,12 +634,12 @@ class SynapseRelabelingTask(DatasetMixin,
                            np.uint32)
         dest_tgt = self.output()
         dest_volume = dest_tgt.volume
-        assert dest_volume.x >= src_volume.x
-        assert dest_volume.x1 <= src_volume.x1
-        assert dest_volume.y >= src_volume.y
-        assert dest_volume.y1 <= src_volume.y1
-        assert dest_volume.z >= src_volume.z
-        assert dest_volume.z1 <= src_volume.z1
+        assert dest_volume.x >= volume.x
+        assert dest_volume.x1 <= volume.x1
+        assert dest_volume.y >= volume.y
+        assert dest_volume.y1 <= volume.y1
+        assert dest_volume.z >= volume.z
+        assert dest_volume.z1 <= volume.z1
         
         self.output().imwrite(
             seg[dest_volume.z - volume.z:dest_volume.z1 - volume.z,
