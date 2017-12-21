@@ -12,7 +12,7 @@ import rh_logger
 import sqlite3
 
 from .pipeline import NP_DATASET, SYN_SEG_DATASET, FINAL_SEGMENTATION
-from .pipeline import FINAL_SYNAPSE_SEGMENTATION, SYNAPSE_DATASET
+from .pipeline import FINAL_SYNAPSE_SEGMENTATION, SYN_SEG_DATASET
 from ..parameters import VolumeParameter, Volume, EMPTY_LOCATION
 from ..tasks import CopyFileTask, AMTaskFactory
 from ..tasks.utilities import RunMixin, RequiresMixin, DatasetMixin
@@ -124,9 +124,17 @@ class BossPipelineTaskMixin:
     
     def requires(self):
         if not hasattr(self, "requirements"):
+            try:
+                rh_logger.logger.start_process("Boss pipeline", "starting", [])
+            except:
+                pass
             self.compute_extents()
-            self.requirements = self.compute_requirements()
-        return self.requirements
+            try:
+                self.requirements = self.compute_requirements()
+                return list(self.requirements)
+            except:
+                rh_logger.logger.report_exception()
+                raise
     
     def compute_extents(self):
         '''Compute the number and size of blocks'''
@@ -145,10 +153,6 @@ class BossPipelineTaskMixin:
     
     def compute_requirements(self):
         '''Return the tasks needed to make the shards'''
-        try:
-            rh_logger.logger.start_process("Boss pipeline", "starting", [])
-        except:
-            pass
         if not os.path.isdir(self.done_file_folder):
             os.makedirs(self.done_file_folder)
         if self.synapse_connections_path != EMPTY_LOCATION:
@@ -249,7 +253,7 @@ class BossPipelineTaskMixin:
                 directory = os.path.dirname(location)
                 paths = glob.glob(
                     os.path.join(directory, 
-                                 "%s_*.loading.plan" % SYNAPSE_DATASET))
+                                 "%s_*.loading.plan" % SYN_SEG_DATASET))
                 if len(paths) == 0:
                     raise ValueError("Missing matching loading plan for %s" %
                                      location)

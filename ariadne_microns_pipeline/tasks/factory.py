@@ -1293,7 +1293,7 @@ class AMTaskFactory(object):
             loading_plan = DestVolumeReader(src_loading_plan)
             dataset_name = loading_plan.dataset_name
         new_storage_plan, sp = self.storage_plan(volume, dataset_name)
-        task = sp(StoragePlanRelabelingTask(
+        task = sp(SynapseRelabelingTask(
             synapse_connections_path=synapse_connections_path,
             storage_plan=new_storage_plan,
             loading_plan=loading_plan))
