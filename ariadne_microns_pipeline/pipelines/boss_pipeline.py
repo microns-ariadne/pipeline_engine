@@ -12,12 +12,14 @@ import rh_logger
 import sqlite3
 
 from .pipeline import NP_DATASET, SYN_SEG_DATASET, FINAL_SEGMENTATION
+from .pipeline import FINAL_SYNAPSE_SEGMENTATION, SYNAPSE_DATASET
 from ..parameters import VolumeParameter, Volume, EMPTY_LOCATION
 from ..tasks import CopyFileTask, AMTaskFactory
 from ..tasks.utilities import RunMixin, RequiresMixin, DatasetMixin
 from ..tasks import DeleteStoragePlan
 from ..volumedb import VolumeDB, Persistence
 from ..targets.volume_target import write_loading_plan, write_storage_plan
+from ..utilities import load_cached_json
 
 PRIORITY_RELABELING_TASK = 1
 PRIORITY_SHARDING_TASK = 2
@@ -71,6 +73,10 @@ class BossPipelineTaskMixin:
     tile_datatype = luigi.Parameter(
         default="uint64",
         description="Datatype for segmentation voxels")
+    synapse_connections_path = luigi.Parameter(
+        default=EMPTY_LOCATION,
+        description="A synapse-connections.json file to be used to assign "
+        "IDs to synapse segmentation")
     
     ############################
     #
@@ -145,6 +151,9 @@ class BossPipelineTaskMixin:
             pass
         if not os.path.isdir(self.done_file_folder):
             os.makedirs(self.done_file_folder)
+        if self.synapse_connections_path != EMPTY_LOCATION:
+            self.synapse_connections = \
+                load_cached_json(self.synapse_connections_path)
         #
         # Set up the task factory and volume DB
         #
@@ -236,6 +245,23 @@ class BossPipelineTaskMixin:
                     location,
                     dataset_name=FINAL_SEGMENTATION)
                 task.set_requirement(cc_task)
+            elif self.dataset_name == FINAL_SYNAPSE_SEGMENTATION:
+                directory = os.path.dirname(location)
+                paths = glob.glob(
+                    os.path.join(directory, 
+                                 "%s_*.loading.plan" % SYNAPSE_DATASET))
+                if len(paths) == 0:
+                    raise ValueError("Missing matching loading plan for %s" %
+                                     location)
+                elif len(paths) > 1:
+                    raise ValueError(
+                        "Ambiguous loading plan: \"%s\"" % 
+                        ('","'.join(paths)))
+                task = factory.gen_synapse_relabeling_task(
+                    self.synapse_connections_path, 
+                    volume, 
+                    paths[0],
+                    dataset_name=FINAL_SYNAPSE_SEGMENTATION)
             elif self.dataset_name != NP_DATASET:
                 #
                 # Map from the storage plan name to a loading plan

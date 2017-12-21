@@ -12,7 +12,9 @@ import time
 
 from ..parameters import VolumeParameter, EMPTY_LOCATION, Volume
 from ..targets import DestVolumeReader
+from ..utilities import load_cached_json
 from .utilities import RequiresMixin, RunMixin, SingleThreadedMixin
+from .utilities import DatasetMixin
 from .connected_components import ConnectivityGraph
 
 class ConnectSynapsesTaskMixin:
@@ -580,3 +582,55 @@ class AggregateSynapseConnectionsTask(
                center of mass per synapse
     '''
     task_namespace="ariadne_microns_pipeline"
+
+class SynapseRelabelingTask(DatasetMixin,
+                            RequiresMixin,
+                            RunMixin,
+                            SingleThreadedMixin,
+                            luigi.Task):
+    '''The SynapseRelabelingTask relabels a synapse segmentation
+    
+    The task uses the synapse-connectivity file to associate synapses
+    with their segmentation.
+    '''
+    task_namespace="ariadne_microns_pipeline"
+    
+    synapse_connections_path = luigi.Parameter(
+        description="Location of the synapse-connections.json file")
+    loading_plan = luigi.Parameter(
+        description="Source of the synapse segmentation")
+    
+    def input(self):
+        loading_plan = DestVolumeReader(self.loading_plan_path)
+        for tgt in loading_plan.get_source_targets():
+            yield tgt
+
+    def ariadne_run(self):
+        src_lp = DestVolumeReader(self.loading_plan)
+        sc = load_cached_json(self.synapse_connections_path)
+        #
+        # Filter connections by their location in the volume
+        #
+        indexes = []
+        volume = src_lp.volume
+        scx, scy, scz = [sc["synapse_center"][_] for _ in "xyz"]
+        for idx in range(len(sc["neuron_1"])):
+            if volume.contains(scx[idx], scy[idx], scz[idx]):
+                indexes.append(idx)
+        if len(indexes) > 0:
+            indexes = np.array(indexes)
+            scx = (np.array(scx)[indexes] - volume.x).astype(np.uint32)
+            scy = (np.array(scy)[indexes] - volume.y).astype(np.uint32)
+            scz = (np.array(scz)[indexes] - volume.z).astype(np.uint32)
+            
+            seg = src_lp.imread()
+            local_indexes = seg[scz, scy, scx]
+            tbl = np.zeros(np.max(seg)+1, np.uint32)
+            tbl[local_indexes] = indexes+1
+            tbl[0] = 0
+            seg = tbl[seg]
+        else:
+            seg = np.zeros((volume.depth, volume.height, volume.width), 
+                           np.uint32)
+        self.output().imwrite(seg)
+                            

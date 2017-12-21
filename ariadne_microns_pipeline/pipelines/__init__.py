@@ -5,6 +5,5 @@ from .stitch_pipeline import StitchPipelineTask
 from merge_predictions_pipeline import MergePredictionsPipeline
 from repair_pipeline import RepairPipeline
 
-
 all=[BossPipelineTask, ClassifyPipelineTask, PipelineTask, StitchPipelineTask,
      MergePredictionsPipeline, RepairPipeline]

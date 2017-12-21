@@ -101,6 +101,9 @@ SKEL_DIR_NAME = "skeleton"
 '''The name of the final stitched segmentation'''
 FINAL_SEGMENTATION = "final-segmentation"
 
+'''The name of the final synapse segmentation'''
+FINAL_SYNAPSE_SEGMENTATION = "final-synapse-segmentation"
+
 '''The pattern for border datasets
 
 parent - name of parent dataset, e.g. "membrane"

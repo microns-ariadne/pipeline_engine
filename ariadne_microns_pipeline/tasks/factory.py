@@ -15,7 +15,7 @@ from .connected_components import FakeAllConnectedComponentsTask
 from .connected_components import VolumeRelabelingTask
 from .connected_components import StoragePlanRelabelingTask
 from .connected_components import JoinConnectedComponentsTask
-from .connect_synapses import ConnectSynapsesTask
+from .connect_synapses import ConnectSynapsesTask, SynapseRelabelingTask
 from .connect_synapses import AggregateSynapseConnectionsTask
 from .copytasks import BossShardingTask, CopyStoragePlanTask,\
      CopyLoadingPlanTask, ChimericSegmentationTask, AggregateLoadingPlansTask
@@ -1270,6 +1270,33 @@ class AMTaskFactory(object):
             connectivity_graph_path=connectivity_graph_path,
             storage_plan=new_storage_plan,
             src_loading_plan_path=src_loading_plan))
+        return task
+    
+    def gen_synapse_relabeling_task(
+        self, synapse_connections_path, volume, loading_plan, 
+        dataset_name=None):
+        '''Generate a synapse relabeling task
+        
+        This task takes a loading plan for a synapse segmentation and
+        relabels it based on the locations of synapses in the synapse
+        connectivity file.
+        
+        :param synapse_connections_path: the path to the
+        synapse-connections.json file that has the locations of every
+        synapse in the experiment.
+        :param volume: the volume encompassing the synapse segmentation
+        :param loading_plan: the name of the loading plan file for the
+        synapse segmentation
+        :param dataset_name: the name of the output dataset
+        '''
+        if dataset_name is None:
+            loading_plan = DestVolumeReader(src_loading_plan)
+            dataset_name = loading_plan.dataset_name
+        new_storage_plan, sp = self.storage_plan(volume, dataset_name)
+        task = sp(StoragePlanRelabelingTask(
+            synapse_connections_path=synapse_connections_path,
+            storage_plan=new_storage_plan,
+            loading_plan=loading_plan))
         return task
     
     def gen_chimeric_segmentation_task(
