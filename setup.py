@@ -58,7 +58,7 @@ setup(
         'https://github.com/Rhoana/rh_config/archive/1.0.0.tar.gz#egg=rh_config-1.0.0',
         'https://github.com/Rhoana/rh_logger/archive/2.0.0.tar.gz#egg=rh_logger-2.0.0',
         'https://github.com/Rhoana/fast64counter/archive/v1.0.0.tar.gz#egg=rh-fast64counter-1.0.0',
-        'git+ssh://git@github.com/microns-ariadne/microns_skeletonization.git#egg=microns_skeletonization-0.1.0'
+        'git+ssh://git@github.com/VCG/microns_skeletonization.git#egg=microns_skeletonization-0.1.0'
         ],
     entry_points={
         "console_scripts": [
