@@ -795,28 +795,30 @@ class VolumeDB(object):
             #
             # Find the shard points
             #
-            for ddo in ddos_by_dataset_id[dataset_obj.dataset_id]:
-                loading_plan = self.all_loading_plans[ddo.loading_plan_id]
-                volume = self.all_volumes_by_volume_id[loading_plan.volume_id] \
-                             .volume()
-                x0a = volume.x
-                x1a = volume.x1
-                y0a = volume.y
-                y1a = volume.y1
-                z0a = volume.z
-                z1a = volume.z1
-                if x0a > x0:
-                    x.add(x0a)
-                if x1a < x1:
-                    x.add(x1a)
-                if y0a > y0:
-                    y.add(y0a)
-                if y1a < y1:
-                    y.add(y1a)
-                if z0a > z0:
-                    z.add(z0a)
-                if z1a < z1:
-                    z.add(z1a)
+            if dataset_obj.dataset_id in ddos_by_dataset_id:
+                for ddo in ddos_by_dataset_id[dataset_obj.dataset_id]:
+                    loading_plan = self.all_loading_plans[ddo.loading_plan_id]
+                    volume = \
+                        self.all_volumes_by_volume_id[loading_plan.volume_id] \
+                            .volume()
+                    x0a = volume.x
+                    x1a = volume.x1
+                    y0a = volume.y
+                    y1a = volume.y1
+                    z0a = volume.z
+                    z1a = volume.z1
+                    if x0a > x0:
+                        x.add(x0a)
+                    if x1a < x1:
+                        x.add(x1a)
+                    if y0a > y0:
+                        y.add(y0a)
+                    if y1a < y1:
+                        y.add(y1a)
+                    if z0a > z0:
+                        z.add(z0a)
+                    if z1a < z1:
+                        z.add(z1a)
             x, y, z = sorted(x), sorted(y), sorted(z)
             #
             # Create all of the sharded volumes
