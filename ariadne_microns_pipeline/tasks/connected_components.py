@@ -204,6 +204,10 @@ class ConnectedComponentsRunMixin:
         default=[],
         description="A list of object IDs in the second block that should be "
         "prevented from merging to anything across block boundaries")
+    exclude_pairs = luigi.ListParameter(
+        default=[],
+        description="A list of two-tuples of pairs in the first and second "
+        "block that should be excluded")
     
     def ariadne_run(self):
         '''Look within the overlap volume to find the concordances
@@ -233,6 +237,9 @@ class ConnectedComponentsRunMixin:
         if len(self.exclude2) > 0:
             connections = \
                 filter(lambda _:_[1] not in self.exclude2, connections)
+        exclude_pairs = set(map(tuple, self.exclude_pairs))
+        connections = filter(lambda _:tuple(_) not in exclude_pairs,
+                             connections)
         d = dict(connections=connections, counts=counts)
         for volume, name in ((self.volume1, "1"),
                              (self.volume2, "2"),

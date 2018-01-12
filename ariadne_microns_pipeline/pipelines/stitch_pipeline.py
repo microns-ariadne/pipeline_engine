@@ -58,6 +58,9 @@ class StitchPipelineTask(luigi.Task):
         default=[],
         description="The segment IDs to exclude from block # 2. These should be global "
         "IDs in the block's component graph")
+    excluded_pairs_file = luigi.Parameter(
+        default=EMPTY_LOCATION,
+        description="A json file of pairs of global IDs that may not be merged")
     #
     # Parameters for the pairwise multimatch
     #
@@ -146,6 +149,48 @@ class StitchPipelineTask(luigi.Task):
                 result.append(connections[idxs[0], 0])
         return result
     
+    def translate_excluded_pairs(self, excluded_pairs, v1, cg1, v2, cg2):
+        '''Translate global excluded pairs to block-local
+        
+        :param excluded_pairs: a n x 2 array of global ids of pairs that
+        should not be merged
+        :param v1: the first volume
+        :param cg1: the connectivity graph for the first volume
+        :param v2: the second volume
+        '''
+        mappings1 = cg1.volumes[v1]
+        mappings2 = cg2.volumes[v2]
+        result = []
+        d1 = {}
+        g1bad = set()
+        d2 = {}
+        g2bad = set()
+        for g1, g2 in excluded_pairs:
+            if g1 in g1bad or g2 in g2bad:
+                continue
+            if g1 not in d1:
+                idxs = np.where(mappings1[:, 1] == g1)[0]
+                if len(idxs) == 0:
+                    g1bad.add(g1)
+                    continue
+                else:
+                    l1 = mappings1[idxs[0], 0]
+                    d1[g1] = l1
+            else:
+                l1 = d1[g1]
+            if g2 not in d2:
+                idxs = np.where(mappings2[:, 1] == g2)[0]
+                if len(idxs) == 0:
+                    g2bad.add(g2)
+                    continue
+                else:
+                    l2 = mappings2[idxs[0], 0]
+                    d2[g2] = l2
+            else:
+                l2 = d2[g2]
+            result.append((l1, l2))
+        return result
+    
     def validate(self, cg1, cg2):
         '''Make sure that cg1 and cg2 are compatible
         
@@ -169,18 +214,23 @@ class StitchPipelineTask(luigi.Task):
         rh_logger.logger.report_event("Loading connectivity graphs")
         self.direction2 = self.direction1.opposite()
         cg1 = json.load(open(self.component_graph_1, "r"))
-        if len(self.exclude1) > 0:
+        if len(self.exclude1) > 0 or self.excluded_pairs_file != EMPTY_LOCATION:
             connectivity_graph1 = \
                 ConnectivityGraph.load(open(self.component_graph_1))
         else:
             connectivity_graph1 = None
         cg2 = json.load(open(self.component_graph_2, "r"))
-        if len(self.exclude2) > 0:
+        if len(self.exclude2) > 0 or self.excluded_pairs_file != EMPTY_LOCATION:
             connectivity_graph2 = \
                 ConnectivityGraph.load(open(self.component_graph_2))
         else:
             connectivity_graph2 = None
         self.validate(cg1, cg2)
+        if self.excluded_pairs_file == EMPTY_LOCATION:
+            self.excluded_pairs = np.zeros((0, 2), np.uint32)
+        else:
+            self.excluded_pairs = np.array(
+                json.load(open(self.excluded_pairs_file)), np.uint32)
         #
         # These are the block joins done by the individual pipelines. They
         # are re-fed into AllConnectedComponents for the next round.
@@ -309,6 +359,9 @@ class StitchPipelineTask(luigi.Task):
                     self.exclude1, v1, connectivity_graph1)
                 exclude2 = self.find_local_exclusions(
                     self.exclude2, v2, connectivity_graph2)
+                exclude_pairs = self.translate_excluded_pairs(
+                    self.excluded_pairs, v1, connectivity_graph1,
+                    v2, connectivity_graph2)
                 if self.joining_method != JoiningMethod.ABUT:
                     task = ConnectedComponentsTask(
                         volume1=v1,
@@ -323,6 +376,7 @@ class StitchPipelineTask(luigi.Task):
                         segmentation_loading_plan2_path,
                         exclude1=exclude1,
                         exclude2=exclude2,
+                        exclude_pairs=exclude_pairs,
                         min_overlap_percent=self.min_overlap_percent,
                         operation=self.operation,
                         joining_method=self.joining_method,
