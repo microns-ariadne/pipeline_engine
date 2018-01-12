@@ -780,10 +780,10 @@ class AllConnectedComponentsRunMixin:
             if len(c) == 0:
                 continue
             m1 = mappings[k1]
-            rm1 = np.zeros(max(np.max(l1)+1, np.max(m1[:, 0])) , int)
+            rm1 = np.zeros(max(np.max(l1), np.max(m1[:, 0]))+1 , int)
             rm1[m1[:, 0]] = m1[:, 1]
             m2 = mappings[k2]
-            rm2 = np.zeros(max(np.max(l2)+1, np.max(m2[:, 0])) , int)
+            rm2 = np.zeros(max(np.max(l2), np.max(m2[:, 0]))+1 , int)
             rm2[m2[:, 0]] = m2[:, 1]
             #
             # Connect backward and forward
