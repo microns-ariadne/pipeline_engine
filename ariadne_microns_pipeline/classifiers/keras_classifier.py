@@ -617,7 +617,7 @@ class KerasClassifier(AbstractPixelClassifier):
                     t0 = time.time()
                     pred = self.function(np.array([_[0] for _ in batches]))[0]
                     delta=(time.time() - t0) / len(batches)
-                    for i, (block, x0b, x1b, y0b, y1b, z0b, z1b) \
+                    for i, (_, x0b, x1b, y0b, y1b, z0b, z1b) \
                         in enumerate(batches):
                         self.out_queue.put(
                             (pred[i], delta, x0b, x1b, y0b, y1b, z0b, z1b))
